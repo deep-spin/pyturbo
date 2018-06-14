@@ -11,13 +11,15 @@ class Alphabet(dict):
             for name in label_names:
                 self.add(name)
 
-    def add(self, name):
+    def insert(self, name):
         '''Add new label.'''
-        label_id = len(self.names)
-        assert name not in self
-        self[name] = label_id
-        self.names.append(name)
-        return label_id
+        if name in self:
+            return self[name]
+        else:
+            label_id = len(self.names)
+            self[name] = label_id
+            self.names.append(name)
+            return label_id
 
     def get_label_name(self, label_id):
         '''Get label name from id.'''

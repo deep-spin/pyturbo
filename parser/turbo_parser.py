@@ -3,13 +3,16 @@ from parser.dependency_options import DependencyOptions
 from parser.dependency_reader import DependencyReader
 from parser.dependency_writer import DependencyWriter
 from parser.dependency_decoder import DependencyDecoder
+from parser.dependency_dictionary import DependencyDictionary
+from parser.token_dictionary import TokenDictionary
 import logging
 
 class TurboParser(StructuredClassifier):
     '''Dependency parser.'''
     def __init__(self, options):
         StructuredClassifier.__init__(self, options)
-        self.dictionary = None
+        self.token_dictionary = TokenDictionary(self)
+        self.dictionary = DependencyDictionary(self)
         self.reader = DependencyReader()
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
