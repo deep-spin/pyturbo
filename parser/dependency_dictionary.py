@@ -7,8 +7,8 @@ class DependencyDictionary(Dictionary):
     def __init__(self, classifier=None):
         Dictionary.__init__(self)
         self.classifier = classifier
-        self.label_alphabet = Alphabet()
-        self.existing_labels = None
+        self.relation_alphabet = Alphabet()
+        self.existing_relations = None
         self.maximum_left_distances = None
         self.maximum_right_distances = None
 
@@ -24,14 +24,14 @@ class DependencyDictionary(Dictionary):
     def stop_growth(self):
         self.classifier.token_dictionary.stop_growth()
 
-    def create_label_dictionary(self, reader):
+    def create_relation_dictionary(self, reader):
         raise NotImplementedError
 
-    def get_label_name(self, label):
-        return self.label_alphabet.get_label_name(label)
+    def get_relation_name(self, relation):
+        return self.relation_alphabet.get_relation_name(relation)
 
-    def get_existing_labels(self, modifier_tag, head_tag):
-        return self.existing_labels[modifier_tag][head_tag]
+    def get_existing_relations(self, modifier_tag, head_tag):
+        return self.existing_relations[modifier_tag][head_tag]
 
     def get_maximum_left_distance(self, modifier_tag, head_tag):
         return self.maximum_left_distances[modifier_tag][head_tag]

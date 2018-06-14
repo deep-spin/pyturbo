@@ -17,7 +17,8 @@ class TurboParser(StructuredClassifier):
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.parameters = None
-
+        self.token_dictionary.initialize(self.reader)
+        self.dictionary.create_relation_dictionary(self.reader)
 
 def main():
     '''Main function for the dependency parser.'''
@@ -27,7 +28,8 @@ def main():
         ArgumentParser(prog='Turbo parser.',
                        description='Trains/test a dependency parser.')
     options = DependencyOptions(parser)
-    options.parse_args(parser)
+    args = vars(parser.parse_args())
+    options.parse_args(args)
 
     if options.train:
         logging.info('Training parser...')

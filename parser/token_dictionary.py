@@ -1,6 +1,6 @@
 from classifier.alphabet import Alphabet
 from classifier.dictionary import Dictionary
-import numpy as np
+import logging
 
 class TokenDictionary(Dictionary):
     '''A dictionary for storing token information.'''
@@ -125,21 +125,21 @@ class TokenDictionary(Dictionary):
                 if not self.classifier.options.form_case_sensitive:
                     form = form_lower
                 id = self.form_alphabet.insert(form)
-                if id > len(form_counts):
+                if id >= len(form_counts):
                     form_counts.append(1)
                 else:
                     form_counts[id] += 1
 
                 # Add lower-case form to alphabet.
                 id = self.form_lower_alphabet.insert(form_lower)
-                if id > len(form_lower_counts):
+                if id >= len(form_lower_counts):
                     form_lower_counts.append(1)
                 else:
                     form_lower_counts[id] += 1
 
                 # Add lemma to alphabet.
                 id = self.lemma_alphabet.insert(instance.get_lemma(i))
-                if id > len(lemma_counts):
+                if id >= len(lemma_counts):
                     lemma_counts.append(1)
                 else:
                     lemma_counts[id] += 1
@@ -153,7 +153,7 @@ class TokenDictionary(Dictionary):
 
                 # Add tags to alphabet.
                 id = self.tag_alphabet.insert(instance.get_tag(i))
-                if id > len(tag_counts):
+                if id >= len(tag_counts):
                     tag_counts.append(1)
                 else:
                     tag_counts[id] += 1
@@ -162,7 +162,7 @@ class TokenDictionary(Dictionary):
                 for j in range(instance.get_num_morph_tags(i)):
                     id = self.morph_tag_alphabet.insert(
                         instance.get_morph_tag(i, j))
-                    if id > len(morph_tag_counts):
+                    if id >= len(morph_tag_counts):
                         morph_tag_counts.append(1)
                     else:
                         morph_tag_counts[id] += 1
@@ -180,18 +180,18 @@ class TokenDictionary(Dictionary):
                 [form_counts, form_lower_counts, lemma_counts, tag_counts,
                  morph_tag_counts],
                 [self.classifier.options.form_cutoff,
-                 self.classifier.options.form_lower_cutoff,
+                 self.classifier.options.form_cutoff,
                  self.classifier.options.lemma_cutoff,
                  self.classifier.options.tag_cutoff,
                  self.classifier.options.morph_tag_cutoff],
-                [self.max_forms, self.max_forms_lower, self.max_lemmas,
+                [self.max_forms, self.max_forms, self.max_lemmas,
                  self.max_tags, self.max_morph_tags]):
-            names = alphabet.names
+            names = alphabet.names.copy()
             while True:
                 alphabet.clear()
                 for name in self.special_symbols.names:
                     alphabet.insert(name)
-                for name, count in zip(name, counts):
+                for name, count in zip(names, counts):
                     if count > cutoff:
                         alphabet.insert(name)
                 if len(alphabet) < max_length:

@@ -45,9 +45,8 @@ class Options(object):
                             default=1e12,
                             help='Regularization parameter C.')
 
-    def parse_args(self, parser):
+    def parse_args(self, args):
         import sys
-        args = vars(parser.parse_args())
         print(args, file=sys.stderr)
         self.train = bool(args['train'])
         self.test = bool(args['test'])
