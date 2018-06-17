@@ -38,5 +38,5 @@ class DependencyInstance(Instance):
     def get_head(self, i):
         return self.output.heads[i]
 
-    def get_relations(self, i):
+    def get_relation(self, i):
         return self.output.relations[i]

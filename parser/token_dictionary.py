@@ -209,18 +209,3 @@ class TokenDictionary(Dictionary):
         logging.info('Number of suffixes: %d' % len(self.suffix_alphabet))
         logging.info('Number of tags: %d' % len(self.tag_alphabet))
         logging.info('Number of morph tags: %d' % len(self.morph_tag_alphabet))
-
-    def create_label_dictionary(self, reader):
-        raise NotImplementedError
-
-    def get_label_name(self, label):
-        return self.label_alphabet.get_label_name(label)
-
-    def get_existing_labels(self, modifier_tag, head_tag):
-        return self.existing_labels[modifier_tag][head_tag]
-
-    def get_maximum_left_distance(self, modifier_tag, head_tag):
-        return self.maximum_left_distances[modifier_tag][head_tag]
-
-    def get_maximum_right_distance(self, modifier_tag, head_tag):
-        return self.maximum_right_distances[modifier_tag][head_tag]
