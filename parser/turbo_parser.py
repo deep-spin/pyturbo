@@ -4,6 +4,7 @@ from parser.dependency_reader import DependencyReader
 from parser.dependency_writer import DependencyWriter
 from parser.dependency_decoder import DependencyDecoder
 from parser.dependency_dictionary import DependencyDictionary
+from parser.dependency_instance_numeric import DependencyInstanceNumeric
 from parser.token_dictionary import TokenDictionary
 from parser.dependency_parts import DependencyParts
 import logging
@@ -21,15 +22,23 @@ class TurboParser(StructuredClassifier):
         self.token_dictionary.initialize(self.reader)
         self.dictionary.create_relation_dictionary(self.reader)
 
+    def get_formatted_instance(self, instance):
+        return DependencyInstanceNumeric(instance, self.dictionary)
+
     def make_parts(self, instance):
         return self.make_parts_basic(instance, add_relation_parts=False)
 
     def make_parts_basic(self, instance, add_relation_parts=True):
+        make_gold = instance.output != None # Check this.
+        if make_gold:
+            gold_outputs = []
+
         parts = DependencyParts()
         if add_relation_parts and not self.options.prune_relations:
             allowed_relations = range(len(
                 self.dictionary.get_relation_alphabet()))
 
+        num_parts_initial = len(parts)
         for h in range(len(instance)):
             for m in range(1, len(instance)):
                 if h == m:
@@ -58,8 +67,8 @@ class TurboParser(StructuredClassifier):
                 if self.options.prune_relations:
                     modifier_tag = instance.get_tag(m)
                     head_tag = instance.get_tag(h)
-                    allowed_labels = []
-                    allowed_labels = self.dictionary.get_existing_relations(
+                    allowed_relations = []
+                    allowed_relations = self.dictionary.get_existing_relations(
                         modifier_tag, head_tag)
                     if not add_relation_parts and not allowed_relations:
                         continue
@@ -114,6 +123,11 @@ class TurboParser(StructuredClassifier):
         else:
             parts.set_offset_labeled_arc(num_parts_initial,
                                  len(parts) - num_parts_initial)
+
+    def enforce_well_formed_graph(self, instance, arcs):
+        raise NotImplementedError
+        return []
+
 
 def main():
     '''Main function for the dependency parser.'''
