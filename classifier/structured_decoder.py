@@ -1,3 +1,5 @@
+import numpy as np
+
 class StructuredDecoder(object):
     '''An abstract decoder for structured prediction.'''
     def __init__(self):

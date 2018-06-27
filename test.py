@@ -1,8 +1,9 @@
 import ad3.factor_graph as fg
+from ad3.extensions import PFactorTree
 import numpy as np
 
 graph = fg.PFactorGraph()
-tree_factor = fg.PFactorTree()
+tree_factor = PFactorTree()
 arc_indices = []
 variables = []
 for m in range(1, 5):

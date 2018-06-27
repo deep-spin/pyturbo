@@ -6,7 +6,10 @@ from parser.dependency_decoder import DependencyDecoder
 from parser.dependency_dictionary import DependencyDictionary
 from parser.dependency_instance_numeric import DependencyInstanceNumeric
 from parser.token_dictionary import TokenDictionary
-from parser.dependency_parts import DependencyParts
+from parser.dependency_parts import DependencyParts, \
+    DependencyPartArc, DependencyPartLabeledArc
+from parser.dependency_features import DependencyFeatures
+import numpy as np
 import logging
 
 class TurboParser(StructuredClassifier):
@@ -84,7 +87,7 @@ class TurboParser(StructuredClassifier):
                         allowed_relations = range(len(
                             self.dictionary.get_relation_alphabet()))
                     for l in allowed_relations:
-                        part = parts.create_part_labeled_arc(h, m, l)
+                        part = DependencyPartLabeledArc(h, m, l)
                         parts.append(part)
                         if make_gold:
                             if instance.get_head(m) == h and \
@@ -93,7 +96,7 @@ class TurboParser(StructuredClassifier):
                             else:
                                 gold_outputs.append(0.)
                 else:
-                    part = parts.create_part_arc(h, m)
+                    part = DependencyPartArc(h, m)
                     parts.append(part)
                     if make_gold:
                         if instance.get_head(m) == h:
@@ -111,22 +114,48 @@ class TurboParser(StructuredClassifier):
             arcs = parts[num_parts_initial:]
             inserted_arcs = self.enforce_well_formed_graph(instance, arcs)
             for h, m in inserted_arcs:
-                part = parts.create_part_arc(h, m)
+                part = DependencyPartArc(h, m)
                 parts.append(part)
                 if make_gold:
                     if instance.get_head(m) == h:
                         gold_outputs.append(1.)
                     else:
                         gold_outputs.append(0.)
-            parts.set_offset_arc(num_parts_initial,
-                                 len(parts) - num_parts_initial)
+            parts.set_offset(DependencyPartArc,
+                             num_parts_initial, len(parts) - num_parts_initial)
         else:
-            parts.set_offset_labeled_arc(num_parts_initial,
-                                 len(parts) - num_parts_initial)
+            parts.set_offset(DependencyPartLabeledArc,
+                             num_parts_initial, len(parts) - num_parts_initial)
+
+        if make_gold:
+            gold_outputs = np.array(gold_outputs)
+            return parts, gold_outputs
+        else:
+            return parts
 
     def enforce_well_formed_graph(self, instance, arcs):
-        raise NotImplementedError
+        #raise NotImplementedError
         return []
+
+    def make_selected_features(self, instance, parts, selected_parts):
+        features = DependencyFeatures(self, parts)
+        pruner = False
+
+        # Even in the case of labeled parsing, build features for unlabeled arcs
+        # only. They will later be conjoined with the labels.
+        offset, size = parts.get_offset(DependencyPartArc)
+        for r in range(offset, offset + size):
+            if not selected_parts[r]:
+                continue
+            arc = parts[r]
+            assert arc.head >= 0
+            if pruner:
+                features.add_arc_features_light(instance, r, arc.head,
+                                                arc.modifier)
+            else:
+                features.add_arc_features(instance, r, arc.head, arc.modifier)
+
+        return features
 
 
 def main():

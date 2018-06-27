@@ -270,7 +270,7 @@ class StructuredClassifier(object):
             # build latent-variable structured classifiers (e.g. for coreference
             # resolution).
             inner_loss = self.transform_gold(instance, parts, scores,
-                                             gold_outputs)
+                                             gold_output)
 
             # Do the decoding.
             start_decoding = time.time()
