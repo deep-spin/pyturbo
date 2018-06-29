@@ -3,6 +3,21 @@ from classifier.sparse_parameter_vectors import SparseParameterVector, \
     SparseLabeledParameterVector
 import logging
 
+class FeatureVector(object):
+    '''This class implements a feature vector, which is convenient to sum over
+    binary features, weight them, etc. It just uses the classes
+    SparseParameterVector and SparseLabeledParameterVector, which allow fast
+    insertions and lookups.'''
+    def __init__(self):
+        self.weights = SparseParameterVector()
+        self.labeled_weights = SparseLabeledParameterVector()
+
+    def get_squared_norm(self):
+        '''Get the squared norm of the parameter vector.'''
+        return self.weights.get_squared_norm() + \
+            self.labeled_weights.get_squared_norm()
+
+
 class Parameters(object):
     '''A class for holding and updating parameters in a linear model.'''
     def __init__(self, use_average=True):
@@ -63,9 +78,10 @@ class Parameters(object):
         vector.'''
         return self.labeled_weights.get(key, labels)
 
-    def squared_norm(self):
+    def get_squared_norm(self):
         '''Get the squared norm of the parameter vector.'''
-        return self.weights.squared_norm() + self.labeled_weights.squared_norm()
+        return self.weights.get_squared_norm() + \
+            self.labeled_weights.get_squared_norm()
 
     def compute_score(self, features):
         '''Compute the score corresponding to a set of "simple" features.
@@ -123,7 +139,7 @@ class Parameters(object):
         if self.use_average:
             logging.info('Averaging the weights...')
             self.averaged_weights.scale(1./float(num_iterations))
-            self.weights.add(self.averaged_weights)
+            self.weights.add_vector(self.averaged_weights)
             self.averaged_labeled_weights.scale(1./float(num_iterations))
-            self.labeled_weights.add(self.averaged_labeled_weights)
+            self.labeled_weights.add_vector(self.averaged_labeled_weights)
 

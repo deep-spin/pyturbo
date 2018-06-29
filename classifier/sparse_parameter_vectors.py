@@ -43,11 +43,11 @@ class SparseParameterVector(object):
     def get(self, key):
         '''Get the weight of this feature key.'''
         if key in self.values:
-            return self.get_value(key)
+            return self._get_value(key)
         else:
             return 0.
 
-    def squared_norm(self):
+    def get_squared_norm(self):
         '''Get the squared norm of the parameter vector.'''
         return self.squared_norm
 
@@ -72,8 +72,8 @@ class SparseParameterVector(object):
         '''Increment the weight of this feature key by an amount of "value".
         Return false if the feature is not instantiated and cannot be inserted.
         w'[id] = w[id] + val.'''
-        if self.find_or_insert(key):
-            self.set_value(self.get_value(key) + value)
+        if self._find_or_insert(key):
+            self._set_value(key, self._get_value(key) + value)
             return True
         else:
             return False
@@ -85,7 +85,7 @@ class SparseParameterVector(object):
         for key, value in zip(keys, values):
             self.add(self, key, value)
 
-    def add(self, parameters):
+    def add_vector(self, parameters):
         '''Adds two parameter vectors. This has the effect of incrementing the
         weights of several features.
         NOTE: Silently bypasses the ones that could not be inserted, if any.
@@ -95,10 +95,10 @@ class SparseParameterVector(object):
 
     def _set_value(self, key, value):
         '''Set the parameter value of a feature pointed by an iterator.'''
-        current_value = self.get_value(key)
+        current_value = self._get_value(key)
         self.squared_norm += value*value - current_value*current_value
         # Might lose precision here.
-        self.values[key] = value / scale_factor
+        self.values[key] = value / self.scale_factor
         # This prevents numerical issues:
         if self.squared_norm < 0.:
             self.squared_norm = 0.
@@ -113,7 +113,7 @@ class SparseParameterVector(object):
         corresponding iterator.'''
         if key in self.values:
             return True
-        elif self.growth_stopped():
+        elif self.locked:
             return False
         else:
             self.values[key] = 0.
@@ -264,7 +264,7 @@ class SparseLabeledParameterVector(object):
         else:
             return 0.
 
-    def squared_norm(self):
+    def get_squared_norm(self):
         '''Get the squared norm of the parameter vector.'''
         return self.squared_norm
 
@@ -302,7 +302,7 @@ class SparseLabeledParameterVector(object):
         for key, label, value in zip(keys, labels, values):
             self.add(self, key, label, value)
 
-    def add(self, parameters):
+    def add_vector(self, parameters):
         '''Adds two parameter vectors. This has the effect of incrementing the
         weights of several features.
         NOTE: Silently bypasses the ones that could not be inserted, if any.

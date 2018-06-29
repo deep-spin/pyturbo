@@ -21,7 +21,7 @@ class DependencyDecoder(StructuredDecoder):
         for r in range(offset_arcs, offset_arcs + num_arcs):
             arc_indices.append((parts[r].head, parts[r].modifier))
             arc = graph.create_binary_variable()
-            arc.set_log_potential(np.random.rand(1))
+            arc.set_log_potential(scores[r])
             variables.append(arc)
         graph.declare_factor(tree_factor, variables)
         tree_factor.initialize(length, arc_indices)
@@ -32,11 +32,11 @@ class DependencyDecoder(StructuredDecoder):
 
         value, posteriors, additional_posteriors, status = \
             graph.solve_lp_map_ad3()
-        print(status)
-        print(value)
-        predicted_arcs = \
-            [index for index, posterior in zip(arc_indices, posteriors)
-             if posterior > 0.1]
-        print(predicted_arcs)
+        #print(status)
+        #print(value)
+        #predicted_arcs = \
+        #    [index for index, posterior in zip(arc_indices, posteriors)
+        #     if posterior > 0.1]
+        #print(predicted_arcs)
         predicted_output = posteriors
         return predicted_output

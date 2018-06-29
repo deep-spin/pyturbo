@@ -4,7 +4,7 @@ import numpy as np
 #import sparse_vector as sv
 #import linear_model as lm
 import classifier.utils
-from classifier.parameters import Parameters
+from classifier.parameters import Parameters, FeatureVector
 #import sys
 import logging
 import time
@@ -125,13 +125,14 @@ class StructuredClassifier(object):
         In cost-augmented MIRA and structured SVMs, it is the cost-augmented
         prediction.
         In CRFs, it is the vector of posterior marginals for the parts.'''
-        difference = SparseVector()
+        difference = FeatureVector()
         for r in range(len(parts)):
             if predicted_output[r] == gold_output[r]:
                 continue
             part_features = features[r]
-            difference.add(part_features,
-                           predicted_output[r] - gold_output[r])
+            for key in part_features:
+                difference.weights.add(key,
+                                       predicted_output[r] - gold_output[r])
         return difference
 
     def remove_unsupported_features(self, instance, parts, features):
@@ -183,7 +184,7 @@ class StructuredClassifier(object):
             self.make_supported_parameters()
         for epoch in range(self.options.training_epochs):
             self.train_epoch(epoch, instances)
-        self.parameters.finalize(options.training_epochs * len(instances))
+        self.parameters.finalize(self.options.training_epochs * len(instances))
 
     def create_instances(self):
         '''Create batch of training instances.'''
@@ -318,7 +319,7 @@ class StructuredClassifier(object):
                 loss -= inner_loss
                 if loss < 0.0:
                     if loss < -1e-12:
-                        log.warning('Negative loss set to zero: %f' % loss)
+                        logging.warning('Negative loss set to zero: %f' % loss)
                     loss = 0.0
 
                 total_loss += loss
@@ -330,7 +331,7 @@ class StructuredClassifier(object):
                 difference = self.make_feature_difference(parts, features,
                                                           gold_output,
                                                           predicted_output)
-                squared_norm = difference.squared_norm()
+                squared_norm = difference.get_squared_norm()
                 threshold = 1e-9
                 if loss < threshold or squared_norm < threshold:
                     eta = 0.0
@@ -363,22 +364,22 @@ class StructuredClassifier(object):
             t += 1
 
         end = time.time()
-        logging.info('Time: %f' % end - start)
+        logging.info('Time: %f' % (end - start))
         logging.info('Time to score: %f' % time_scores)
         logging.info('Time to decode: %f' % time_decoding)
-        logging.info('Number of features: %f' % len(parameters))
+        logging.info('Number of features: %d' % len(self.parameters))
 
         if algorithm in ['perceptron']:
             logging.info('Number of mistakes: %d/%d (%f)' % num_mistakes,
                          num_total, float(num_mistakes) / float(num_total))
         else:
-            sq_norm = self.parameters.squared_norm()
+            sq_norm = self.parameters.get_squared_norm()
             regularization_value = 0.5 * lambda_coeff * \
                 float(len(instances)) * sq_norm
             logging.info('\t'.join(['Total Loss: %f' % total_loss,
                                     'Total Reg: %f' % regularization_value,
-                                    'Total Loss+Reg: %f' % total_loss +
-                                    regularization_value,
+                                    'Total Loss+Reg: %f' % \
+                                    (total_loss + regularization_value),
                                     'Squared norm: %f' % sq_norm]))
 
 
