@@ -670,10 +670,6 @@ class DependencyFeatures(object):
                                             flag_between_coord)
         features.append(key)
 
-        return
-        print(42)
-
-
         BPIDs = set()
         BWIDs = set()
         for i in range(left_position + 1, right_position):
