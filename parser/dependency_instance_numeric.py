@@ -125,3 +125,12 @@ class DependencyInstanceNumeric(DependencyInstance):
 
     def get_suffix(self, i):
         return self.input.suffixes[i]
+
+    def is_verb(self, i):
+        return self.input.is_verb[i]
+
+    def is_punc(self, i):
+        return self.input.is_punc[i]
+
+    def is_coord(self, i):
+        return self.input.is_coord[i]
