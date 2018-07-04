@@ -82,6 +82,28 @@ class StructuredClassifier(object):
         deriving class.'''
         raise NotImplementedError
 
+    def compute_neural_scores(self, instance):
+        # TODO: Implement this.
+        # Run the forward pass.
+        num_parts = len(parts)
+        scores = torch.zeros(num_parts)
+        for r in range(num_parts):
+            scores[r] = self.neural_model.compute_score(instance, r)
+        return scores
+
+    def make_neural_gradient_step(self, eta, t, gold_output, predicted_output,
+                                  scores):
+        # TODO: Implement this.
+        # Compute error.
+        error = (scores * torch.tensor(
+            predicted_output - gold_output, dtype=scores.dtype)).sum()
+
+        # Need to compute the loss function somewhere here.
+        # Backpropagate.
+        error.backward()
+        # Update the parameters.
+        optimizer.step()
+
     def compute_scores(self, instance, parts, features):
         '''Compute a score for every part in the instance using the current
         model and the part-specific features.

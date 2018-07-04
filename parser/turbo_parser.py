@@ -10,6 +10,7 @@ from parser.dependency_parts import DependencyParts, \
     DependencyPartArc, DependencyPartLabeledArc
 from parser.dependency_features import DependencyFeatures
 import numpy as np
+import pickle
 import logging
 
 class TurboParser(StructuredClassifier):
@@ -30,20 +31,20 @@ class TurboParser(StructuredClassifier):
         if not model_path:
             model_path = self.options.model_path
         with open(model_path, 'wb') as f:
-            cPickle.dump(self.options)
-            cPickle.dump(self.token_dictionary)
-            cPickle.dump(self.dictionary)
-            cPickle.dump(self.parameters)
+            pickle.dump(self.options, f)
+            pickle.dump(self.token_dictionary, f)
+            pickle.dump(self.dictionary, f)
+            pickle.dump(self.parameters, f)
 
     def load(self, model_path=None):
         '''Load the full configuration and model.'''
         if not model_path:
             model_path = self.options.model_path
         with open(model_path, 'rb') as f:
-            self.model_options = cPickle.load(f)
-            self.token_dictionary = cPickle.load(f)
-            self.dictionary = cPickle.load(f)
-            self.parameters = cPickle.load()
+            self.model_options = pickle.load(f)
+            self.token_dictionary = pickle.load(f)
+            self.dictionary = pickle.load(f)
+            self.parameters = pickle.load()
 
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
