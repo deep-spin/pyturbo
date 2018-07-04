@@ -182,10 +182,11 @@ class DependencyFeatures(object):
         self._add_word_pair_features(instance, DependencyFeatureTypes.ARC,
                                      head, modifier,
                                      self.input_features[r],
-                                     use_lemma_features=True,
-                                     use_morph_features=True)
+                                     use_lemma_features=False,
+                                     use_morph_features=False)
 
     def add_arc_features(self, instance, r, head, modifier):
+        # TODO: change this.
         return self.add_arc_features_light(instance, r, head, modifier)
 
     def _add_word_pair_features(self, instance, type, head, modifier,

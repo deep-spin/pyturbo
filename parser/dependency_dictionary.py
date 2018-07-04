@@ -35,7 +35,7 @@ class DependencyDictionary(Dictionary):
         reader.open(self.classifier.options.training_path)
         instance = reader.next()
         while instance is not None:
-            for i in range(len(instance)):
+            for i in range(1, len(instance)):
                 # Add dependency relaion to alphabet.
                 relation = instance.get_relation(i)
                 id = self.relation_alphabet.insert(relation)

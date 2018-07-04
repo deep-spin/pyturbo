@@ -25,11 +25,11 @@ class StructuredClassifier(object):
         #self.model = lm.LinearModel()
         #self.decoder = StructuredDecoder()
 
-    def save(self, model_path):
+    def save(self, model_path=None):
         '''Save the full configuration and model.'''
         raise NotImplementedError
 
-    def load(self, model_path):
+    def load(self, model_path=None):
         '''Load the full configuration and model.'''
         raise NotImplementedError
 

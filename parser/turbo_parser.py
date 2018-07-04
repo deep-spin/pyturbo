@@ -25,6 +25,26 @@ class TurboParser(StructuredClassifier):
         self.token_dictionary.initialize(self.reader)
         self.dictionary.create_relation_dictionary(self.reader)
 
+    def save(self, model_path=None):
+        '''Save the full configuration and model.'''
+        if not model_path:
+            model_path = self.options.model_path
+        with open(model_path, 'wb') as f:
+            cPickle.dump(self.options)
+            cPickle.dump(self.token_dictionary)
+            cPickle.dump(self.dictionary)
+            cPickle.dump(self.parameters)
+
+    def load(self, model_path=None):
+        '''Load the full configuration and model.'''
+        if not model_path:
+            model_path = self.options.model_path
+        with open(model_path, 'rb') as f:
+            self.model_options = cPickle.load(f)
+            self.token_dictionary = cPickle.load(f)
+            self.dictionary = cPickle.load(f)
+            self.parameters = cPickle.load()
+
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
 
@@ -180,7 +200,13 @@ def train_parser(options):
     logging.info('Training the parser...')
     dependency_parser = TurboParser(options)
     dependency_parser.train()
-    dependency_parser.save_model()
+    dependency_parser.save()
+
+def test_parser(options):
+    logging.info('Training the parser...')
+    dependency_parser = TurboParser(options)
+    dependency_parser.load()
+    dependency_parser.run()
 
 if __name__ == "__main__":
     main()
