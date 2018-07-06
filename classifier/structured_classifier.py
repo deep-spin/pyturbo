@@ -6,6 +6,7 @@ import numpy as np
 import classifier.utils
 from classifier.parameters import Parameters, FeatureVector
 #import sys
+from classifier.utils import nearly_eq_tol
 import logging
 import time
 
@@ -40,9 +41,8 @@ class StructuredClassifier(object):
         processing, etc.'''
         return instance
 
-    def label_instance(self, instance, parts, predicted_output):
-        '''Return a labeled instance by adding the predicted output
-        information.
+    def label_instance(self, instance, parts, output):
+        '''Return a labeled instance by adding the output information.
         Given a vector of parts of a desired output, builds the output
         information in the instance that corresponds to that output.
         Note: this function is task-specific and needs to be implemented by the
@@ -82,7 +82,7 @@ class StructuredClassifier(object):
         deriving class.'''
         raise NotImplementedError
 
-    def compute_neural_scores(self, instance):
+    def compute_neural_scores(self, instance, parts):
         # TODO: Implement this.
         # Run the forward pass.
         num_parts = len(parts)
@@ -303,8 +303,8 @@ class StructuredClassifier(object):
                                                        scores)
                 for r in range(len(parts)):
                     num_total += 1
-                    if not utils.nearly_eq_tol(gold_output[r],
-                                               predicted_output[r], 1e-6):
+                    if not nearly_eq_tol(gold_output[r],
+                                         predicted_output[r], 1e-6):
                         num_mistakes += 1
 
             elif algorithm in ['mira']:
@@ -413,8 +413,8 @@ class StructuredClassifier(object):
         if self.options.evaluate:
             self.begin_evaluation()
 
-        self.reader.open(options.test_file)
-        self.writer.open(options.output_file)
+        self.reader.open(self.options.test_path)
+        self.writer.open(self.options.output_path)
 
         instances = []
         instance = self.reader.next()
@@ -442,11 +442,11 @@ class StructuredClassifier(object):
         scores = self.compute_scores(instance, parts, features)
         predicted_output = self.decoder.decode(formatted_instance, parts,
                                                scores)
-        output_instance = instance.copy()
-        self.label_instance(parts, predicted_output, output_instance)
+        output_instance = type(instance)(input=instance.input, output=None)
+        self.label_instance(output_instance, parts, predicted_output)
         if self.options.evaluate:
             self.evaluate_instance(instance, output_instance, parts,
-                                   gold_outputs, predicted_outputs)
+                                   gold_output, predicted_output)
         return output_instance
 
     def begin_evaluation(self):
@@ -462,13 +462,13 @@ class StructuredClassifier(object):
     def evaluate_instance(self, instance, output_instance, parts, gold_output,
                           predicted_output):
         for r in range(len(parts)):
-            if not utils.nearly_eq_tol(gold_output[r],
-                                       predicted_output[r], 1e-6):
+            if not nearly_eq_tol(gold_output[r],
+                                 predicted_output[r], 1e-6):
                 self.num_mistakes += 1
             self.num_total_parts += 1
 
     def end_evaluation(self):
         logging.info('Accuracy (parts): %f' %
-                     float(self.num_total_parts - self.num_mistakes) /
-                     float(self.num_total_parts))
+                     (float(self.num_total_parts - self.num_mistakes) /
+                      float(self.num_total_parts)))
 

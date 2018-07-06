@@ -62,8 +62,8 @@ class SparseParameterVector(object):
         '''Set the weight of this feature key to "value". Return false if the
         feature is not instantiated and cannot be inserted.
         w'[id] = val.'''
-        if self.find_or_insert(key):
-            self.set_value(key, value)
+        if self._find_or_insert(key):
+            self._set_value(key, value)
             return True
         else:
             return False
@@ -90,8 +90,8 @@ class SparseParameterVector(object):
         weights of several features.
         NOTE: Silently bypasses the ones that could not be inserted, if any.
         w'[id] = w[id] + val.'''
-        for key, value in parameters.values.items():
-            self.add(key, value)
+        for key in parameters.values:
+            self.add(key, parameters._get_value(key))
 
     def _set_value(self, key, value):
         '''Set the parameter value of a feature pointed by an iterator.'''

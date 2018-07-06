@@ -14,7 +14,7 @@ class DependencyInstanceOutput(object):
 
 class DependencyInstance(Instance):
     '''An dependency parsing instance.'''
-    def __init__(self, input, output):
+    def __init__(self, input, output=None):
         Instance.__init__(self, input, output)
 
     def __len__(self):

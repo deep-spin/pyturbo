@@ -1,5 +1,6 @@
 from classifier.alphabet import Alphabet
 from classifier.dictionary import Dictionary
+import pickle
 import logging
 
 class TokenDictionary(Dictionary):
@@ -30,10 +31,42 @@ class TokenDictionary(Dictionary):
         self.max_morph_tags = 0xfff;
 
     def save(self, file):
-        raise NotImplementedError
+        pickle.dump(self.form_alphabet, file)
+        pickle.dump(self.form_lower_alphabet, file)
+        pickle.dump(self.lemma_alphabet, file)
+        pickle.dump(self.prefix_alphabet, file)
+        pickle.dump(self.suffix_alphabet, file)
+        pickle.dump(self.morph_tag_alphabet, file)
+        pickle.dump(self.tag_alphabet, file)
+        pickle.dump(self.shape_alphabet, file)
+        pickle.dump(self.special_symbols, file)
+        pickle.dump(self.token_unknown, file)
+        pickle.dump(self.token_start, file)
+        pickle.dump(self.token_stop, file)
+        pickle.dump(self.max_forms, file)
+        pickle.dump(self.max_lemmas, file)
+        pickle.dump(self.max_shapes, file)
+        pickle.dump(self.max_tags, file)
+        pickle.dump(self.max_morph_tags, file)
 
     def load(self, file):
-        raise NotImplementedError
+        self.form_alphabet = pickle.load(file)
+        self.form_lower_alphabet = pickle.load(file)
+        self.lemma_alphabet = pickle.load(file)
+        self.prefix_alphabet = pickle.load(file)
+        self.suffix_alphabet = pickle.load(file)
+        self.morph_tag_alphabet = pickle.load(file)
+        self.tag_alphabet = pickle.load(file)
+        self.shape_alphabet = pickle.load(file)
+        self.special_symbols = pickle.load(file)
+        self.token_unknown = pickle.load(file)
+        self.token_start = pickle.load(file)
+        self.token_stop = pickle.load(file)
+        self.max_forms = pickle.load(file)
+        self.max_lemmas = pickle.load(file)
+        self.max_shapes = pickle.load(file)
+        self.max_tags = pickle.load(file)
+        self.max_morph_tags = pickle.load(file)
 
     def allow_growth(self):
         self.form_alphabet.allow_growth()
@@ -65,28 +98,28 @@ class TokenDictionary(Dictionary):
         return len(self.tag_alphabet)
 
     def get_form_id(self, form):
-        return self.form_alphabet.get_label_id(form)
+        return self.form_alphabet.lookup(form)
 
     def get_form_lower_id(self, form_lower):
-        return self.form_lower_alphabet.get_label_id(form_lower)
+        return self.form_lower_alphabet.lookup(form_lower)
 
     def get_lemma_id(self, lemma):
-        return self.lemma_alphabet.get_label_id(lemma)
+        return self.lemma_alphabet.lookup(lemma)
 
     def get_prefix_id(self, prefix):
-        return self.prefix_alphabet.get_label_id(prefix)
+        return self.prefix_alphabet.lookup(prefix)
 
     def get_suffix_id(self, suffix):
-        return self.suffix_alphabet.get_label_id(suffix)
+        return self.suffix_alphabet.lookup(suffix)
 
     def get_tag_id(self, tag):
-        return self.tag_alphabet.get_label_id(tag)
+        return self.tag_alphabet.lookup(tag)
 
     def get_morph_tag_id(self, morph_tag):
-        return self.morph_tag_alphabet.get_label_id(morph_tag)
+        return self.morph_tag_alphabet.lookup(morph_tag)
 
     def get_shape_id(self, shape):
-        return self.shape_alphabet.get_label_id(shape)
+        return self.shape_alphabet.lookup(shape)
 
     def initialize(self, reader):
         logging.info('Creating token dictionary...')

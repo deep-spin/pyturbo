@@ -4,6 +4,7 @@ from parser.dependency_reader import DependencyReader
 from parser.dependency_writer import DependencyWriter
 from parser.dependency_decoder import DependencyDecoder
 from parser.dependency_dictionary import DependencyDictionary
+from parser.dependency_instance import DependencyInstanceOutput
 from parser.dependency_instance_numeric import DependencyInstanceNumeric
 from parser.token_dictionary import TokenDictionary
 from parser.dependency_parts import DependencyParts, \
@@ -23,8 +24,9 @@ class TurboParser(StructuredClassifier):
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.parameters = None
-        self.token_dictionary.initialize(self.reader)
-        self.dictionary.create_relation_dictionary(self.reader)
+        if self.options.train:
+            self.token_dictionary.initialize(self.reader)
+            self.dictionary.create_relation_dictionary(self.reader)
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -32,8 +34,8 @@ class TurboParser(StructuredClassifier):
             model_path = self.options.model_path
         with open(model_path, 'wb') as f:
             pickle.dump(self.options, f)
-            pickle.dump(self.token_dictionary, f)
-            pickle.dump(self.dictionary, f)
+            self.token_dictionary.save(f)
+            self.dictionary.save(f)
             pickle.dump(self.parameters, f)
 
     def load(self, model_path=None):
@@ -41,10 +43,19 @@ class TurboParser(StructuredClassifier):
         if not model_path:
             model_path = self.options.model_path
         with open(model_path, 'rb') as f:
-            self.model_options = pickle.load(f)
-            self.token_dictionary = pickle.load(f)
-            self.dictionary = pickle.load(f)
-            self.parameters = pickle.load()
+            model_options = pickle.load(f)
+            self.token_dictionary.load(f)
+            self.dictionary.load(f)
+            self.parameters = pickle.load(f)
+        self.options.model_type = model_options.model_type
+        self.options.unlabeled = model_options.unlabeled
+        self.options.projective = model_options.projective
+        self.options.prune_relations = model_options.prune_relations
+        self.options.prune_distances = model_options.prune_distances
+        self.options.prune_basic = model_options.prune_basic
+        self.options.pruner_posterior_threshold = \
+            model_options.pruner_posterior_threshold
+        self.options.pruner_max_heads = model_options.pruner_max_heads
 
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
@@ -178,6 +189,33 @@ class TurboParser(StructuredClassifier):
 
         return features
 
+    def label_instance(self, instance, parts, output):
+        heads = [-1 for i in range(len(instance))]
+        relations = ['NULL' for i in range(len(instance))]
+        instance.output = DependencyInstanceOutput(heads, relations)
+        threshold = .5
+        if self.options.unlabeled:
+            offset, size = parts.get_offset(DependencyPartArc)
+            for r in range(offset, offset + size):
+                arc = parts[r]
+                if output[r] >= threshold:
+                    instance.output.heads[arc.modifier] = arc.head
+        else:
+            offset, size = parts.get_offset(DependencyPartLabeledArc)
+            for r in range(offset, offset + size):
+                arc = parts[r]
+                if output[r] >= threshold:
+                    instance.output.heads[arc.modifier] = arc.head
+                    instance.output.relations[arc.modifier] = \
+                        self.dictionary.get_relation_name(arc.label)
+        for m in range(1, len(instance)):
+            if instance.get_head(m) < 0:
+                logging.info('Word without head.')
+                instance.output.heads[m] = 0
+                if not self.options.unlabeled:
+                    instance.output.relations[m] = \
+                        self.dictionary.get_relation_name(0)
+
 
 def main():
     '''Main function for the dependency parser.'''
@@ -204,7 +242,7 @@ def train_parser(options):
     dependency_parser.save()
 
 def test_parser(options):
-    logging.info('Training the parser...')
+    logging.info('Running the parser...')
     dependency_parser = TurboParser(options)
     dependency_parser.load()
     dependency_parser.run()

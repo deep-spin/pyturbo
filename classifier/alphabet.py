@@ -45,9 +45,9 @@ class Alphabet(dict):
         '''Get label name from id.'''
         return self.names[label_id]
 
-    def get_label_id(self, name):
-        '''Get label id from name.'''
-        return self[name]
+    #def get_label_id(self, name):
+    #    '''Get label id from name.'''
+    #    return self[name]
 
     def save(self, label_file):
         '''Save labels to a file.'''

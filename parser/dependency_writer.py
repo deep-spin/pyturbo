@@ -13,11 +13,12 @@ class DependencyWriter(Writer):
 
     def write(self, instance):
         for i in range(1, len(instance)):
-            self.file.write('\t'.join([instance.input.forms[i],
+            self.file.write('\t'.join([str(i),
+                                       instance.input.forms[i],
                                        instance.input.lemmas[i],
-                                       instance.input.tag[i],
-                                       instance.input.tag[i],
+                                       instance.input.tags[i],
+                                       instance.input.tags[i],
                                        '_',
                                        str(instance.output.heads[i]),
-                                       instance.input.relations[i]]) + '\n')
+                                       instance.output.relations[i]]) + '\n')
         self.file.write('\n')

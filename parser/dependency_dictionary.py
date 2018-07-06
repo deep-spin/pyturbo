@@ -1,6 +1,7 @@
 from classifier.alphabet import Alphabet
 from classifier.dictionary import Dictionary
 import numpy as np
+import pickle
 import logging
 
 class DependencyDictionary(Dictionary):
@@ -14,10 +15,16 @@ class DependencyDictionary(Dictionary):
         self.maximum_right_distances = None
 
     def save(self, file):
-        raise NotImplementedError
+        pickle.dump(self.relation_alphabet, file)
+        pickle.dump(self.existing_relations, file)
+        pickle.dump(self.maximum_left_distances, file)
+        pickle.dump(self.maximum_right_distances, file)
 
     def load(self, file):
-        raise NotImplementedError
+        self.relation_alphabet = pickle.load(file)
+        self.existing_relations = pickle.load(file)
+        self.maximum_left_distances = pickle.load(file)
+        self.maximum_right_distances = pickle.load(file)
 
     def allow_growth(self):
         self.classifier.token_dictionary.allow_growth()
