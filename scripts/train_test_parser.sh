@@ -4,7 +4,7 @@ python3 parser/turbo_parser.py \
         --train \
         --unlabeled \
         --training_path /home/afm/projects/TurboParser/data/pt-ud-normalized/pt-ud-normalized_train.conll \
-        --training_epochs 1 \
+        --training_epochs 10 \
         --model_path model.pkl
 
 python3 parser/turbo_parser.py \
