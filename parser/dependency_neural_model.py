@@ -25,10 +25,15 @@ class DependencyNeuralModel(nn.Module):
                                             word_embedding_size)
         self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
                                            tag_embedding_size)
-        self.distance_bins = np.array(
-            list(range(10)) + list(range(10, 40, 5)) + [40])
-        self.distance_embeddings = nn.Embedding(len(self.distance_bins) * 2,
-                                                distance_embedding_size)
+        if self.distance_embedding_size:
+            self.distance_bins = np.array(
+                list(range(10)) + list(range(10, 40, 5)) + [40])
+            self.distance_embeddings = nn.Embedding(len(self.distance_bins) * 2,
+                                                    distance_embedding_size)
+        else:
+            self.distance_bins = None
+            self.distance_embeddings = None
+
         input_size = word_embedding_size + tag_embedding_size
         self.rnn = nn.LSTM(
             input_size=input_size,
@@ -45,10 +50,13 @@ class DependencyNeuralModel(nn.Module):
             hidden_size * 2,
             hidden_size,
             bias=False))
-        self.distance_projection = nn.Linear(
-            distance_embedding_size,
-            hidden_size,
-            bias=True)
+        if self.distance_embedding_size:
+            self.distance_projection = nn.Linear(
+                distance_embedding_size,
+                hidden_size,
+                bias=True)
+        else:
+            self.distance_projection = None
         self.arc_scorer = nn.Linear(hidden_size, 1, bias=False)
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -77,18 +85,21 @@ class DependencyNeuralModel(nn.Module):
         offset, size = parts.get_offset(DependencyPartArc)
         for r in range(offset, offset + size):
             arc = parts[r]
-            if arc.modifier > arc.head:
-                dist = arc.modifier - arc.head
-                dist = np.nonzero(dist >= self.distance_bins)[0][-1]
+            if self.distance_embedding_size:
+                if arc.modifier > arc.head:
+                    dist = arc.modifier - arc.head
+                    dist = np.nonzero(dist >= self.distance_bins)[0][-1]
+                else:
+                    dist = arc.head - arc.modifier
+                    dist = np.nonzero(dist >= self.distance_bins)[0][-1]
+                    dist += len(self.distance_bins)
+                dist = torch.tensor(dist, dtype=torch.long)
+                dist_embed = self.distance_embeddings(dist).view(1, -1)
+                arc_state = self.tanh(heads[arc.head] + \
+                                      modifiers[arc.modifier] + \
+                                      self.distance_projection(dist_embed))
             else:
-                dist = arc.head - arc.modifier
-                dist = np.nonzero(dist >= self.distance_bins)[0][-1]
-                dist += len(self.distance_bins)
-            dist = torch.tensor(dist, dtype=torch.long)
-            #import pdb; pdb.set_trace()
-            dist_embed = self.distance_embeddings(dist).view(1, -1)
-            arc_state = self.tanh(heads[arc.head] + modifiers[arc.modifier] + \
-                                  self.distance_projection(dist_embed))
-            #import pdb; pdb.set_trace()
+                arc_state = self.tanh(heads[arc.head] + \
+                                      modifiers[arc.modifier])
             scores[r] = self.arc_scorer(arc_state)
         return scores
