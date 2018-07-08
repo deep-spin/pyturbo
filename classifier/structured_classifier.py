@@ -5,6 +5,7 @@ import numpy as np
 #import linear_model as lm
 import classifier.utils
 from classifier.parameters import Parameters, FeatureVector
+from classifier.neural_scorer import NeuralScorer
 #import sys
 from classifier.utils import nearly_eq_tol
 import logging
@@ -21,6 +22,10 @@ class StructuredClassifier(object):
         self.writer = None
         self.decoder = None
         self.parameters = None
+        if self.options.neural:
+            self.neural_scorer = NeuralScorer()
+        else:
+            self.neural_scorer = None
 
         # To delete:
         #self.model = lm.LinearModel()
@@ -113,10 +118,13 @@ class StructuredClassifier(object):
         NOTE: Override this method for task-specific score computation (e.g.
         to handle labeled features, etc.).
         TODO: handle labeled features here instead of having to override.'''
-        num_parts = len(parts)
-        scores = np.zeros(num_parts)
-        for r in range(num_parts):
-            scores[r] = self.parameters.compute_score(features[r])
+        if self.options.neural:
+            scores = self.neural_scorer.compute_scores(instance, parts)
+        else:
+            num_parts = len(parts)
+            scores = np.zeros(num_parts)
+            for r in range(num_parts):
+                scores[r] = self.parameters.compute_score(features[r])
         return scores
 
     def make_gradient_step(self, parts, features, eta, t, gold_output,
@@ -132,12 +140,16 @@ class StructuredClassifier(object):
         In CRFs, it is the vector of posterior marginals for the parts.
         TODO: use "FeatureVector *difference" as input (see function
         MakeFeatureDifference(...) instead of computing on the fly).'''
-        for r in range(len(parts)):
-            if predicted_output[r] == gold_output[r]:
-                continue
-            part_features = features[r]
-            self.parameters.make_gradient_step(
-                part_features, eta, t, predicted_output[r]-gold_output[r])
+        if self.options.neural:
+            self.neural_scorer.compute_gradients(gold_output, predicted_output)
+            self.neural_scorer.make_gradient_step()
+        else:
+            for r in range(len(parts)):
+                if predicted_output[r] == gold_output[r]:
+                    continue
+                part_features = features[r]
+                self.parameters.make_gradient_step(
+                    part_features, eta, t, predicted_output[r]-gold_output[r])
 
     def make_feature_difference(self, parts, features, gold_output,
                                 predicted_output):
@@ -276,7 +288,10 @@ class StructuredClassifier(object):
         for instance in instances:
             # Compute parts, features, and scores.
             parts, gold_output = self.make_parts(instance)
-            features = self.make_features(instance, parts)
+            if self.options.neural:
+                features = None
+            else:
+                features = self.make_features(instance, parts)
 
             # If using only supported features, must remove the unsupported
             # ones. This is necessary not to mess up the computation of the
@@ -350,10 +365,13 @@ class StructuredClassifier(object):
             if algorithm in ['perceptron']:
                 eta = 1.0
             elif algorithm in ['mira', 'svm_mira', 'crf_mira']:
-                difference = self.make_feature_difference(parts, features,
-                                                          gold_output,
-                                                          predicted_output)
-                squared_norm = difference.get_squared_norm()
+                if self.options.neural:
+                    squared_norm = 0.
+                else:
+                    difference = self.make_feature_difference(parts, features,
+                                                              gold_output,
+                                                              predicted_output)
+                    squared_norm = difference.get_squared_norm()
                 threshold = 1e-9
                 if loss < threshold or squared_norm < threshold:
                     eta = 0.0
@@ -439,7 +457,7 @@ class StructuredClassifier(object):
         formatted_instance = self.get_formatted_instance(instance)
         parts, gold_output = self.make_parts(formatted_instance)
         features = self.make_features(formatted_instance, parts)
-        scores = self.compute_scores(instance, parts, features)
+        scores = self.compute_scores(formatted_instance, parts, features)
         predicted_output = self.decoder.decode(formatted_instance, parts,
                                                scores)
         output_instance = type(instance)(input=instance.input, output=None)
