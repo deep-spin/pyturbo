@@ -23,6 +23,8 @@ class DependencyDecoder(StructuredDecoder):
             arc = graph.create_binary_variable()
             arc.set_log_potential(scores[r])
             variables.append(arc)
+        #if length == 32:
+        #    import pdb; pdb.set_trace()
         graph.declare_factor(tree_factor, variables)
         tree_factor.initialize(length, arc_indices)
         graph.set_eta_ad3(.05)

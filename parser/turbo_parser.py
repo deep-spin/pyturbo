@@ -1,4 +1,5 @@
 from classifier.structured_classifier import StructuredClassifier
+from classifier.neural_scorer import NeuralScorer
 from parser.dependency_options import DependencyOptions
 from parser.dependency_reader import DependencyReader
 from parser.dependency_writer import DependencyWriter
@@ -10,6 +11,7 @@ from parser.token_dictionary import TokenDictionary
 from parser.dependency_parts import DependencyParts, \
     DependencyPartArc, DependencyPartLabeledArc
 from parser.dependency_features import DependencyFeatures
+from parser.dependency_neural_model import DependencyNeuralModel
 import numpy as np
 import pickle
 import logging
@@ -27,6 +29,16 @@ class TurboParser(StructuredClassifier):
         if self.options.train:
             self.token_dictionary.initialize(self.reader)
             self.dictionary.create_relation_dictionary(self.reader)
+            if self.options.neural:
+                self.neural_scorer.initialize(
+                    DependencyNeuralModel(self.token_dictionary,
+                                          self.dictionary,
+                                          word_embedding_size=100,
+                                          tag_embedding_size=20,
+                                          distance_embedding_size=20,
+                                          hidden_size=50,
+                                          num_layers=1,
+                                          dropout=0.))
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -37,6 +49,14 @@ class TurboParser(StructuredClassifier):
             self.token_dictionary.save(f)
             self.dictionary.save(f)
             pickle.dump(self.parameters, f)
+            if self.options.neural:
+                pickle.dump(self.neural_scorer.model.word_embedding_size, f)
+                pickle.dump(self.neural_scorer.model.tag_embedding_size, f)
+                pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
+                pickle.dump(self.neural_scorer.model.hidden_size, f)
+                pickle.dump(self.neural_scorer.model.num_layers, f)
+                pickle.dump(self.neural_scorer.model.dropout, f)
+                self.neural_scorer.model.save(f)
 
     def load(self, model_path=None):
         '''Load the full configuration and model.'''
@@ -47,6 +67,26 @@ class TurboParser(StructuredClassifier):
             self.token_dictionary.load(f)
             self.dictionary.load(f)
             self.parameters = pickle.load(f)
+            if model_options.neural:
+                word_embedding_size = pickle.load(f)
+                tag_embedding_size = pickle.load(f)
+                distance_embedding_size = pickle.load(f)
+                hidden_size = pickle.load(f)
+                num_layers = pickle.load(f)
+                dropout = pickle.load(f)
+                neural_model = DependencyNeuralModel(
+                    self.token_dictionary,
+                    self.dictionary,
+                    word_embedding_size=word_embedding_size,
+                    tag_embedding_size=tag_embedding_size,
+                    distance_embedding_size=distance_embedding_size,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    dropout=dropout)
+                neural_model.load(f)
+                self.neural_scorer = NeuralScorer(neural_model)
+
+        self.options.neural = model_options.neural
         self.options.model_type = model_options.model_type
         self.options.unlabeled = model_options.unlabeled
         self.options.projective = model_options.projective
@@ -166,8 +206,48 @@ class TurboParser(StructuredClassifier):
             return parts
 
     def enforce_well_formed_graph(self, instance, arcs):
-        #raise NotImplementedError
-        return []
+        if self.options.projective:
+            return self.enforce_projective_graph(instance, arcs)
+        else:
+            return self.enforce_connected_graph(instance, arcs)
+
+    def enforce_connected_graph(self, instance, arcs):
+        '''Make sure the graph formed by the unlabeled arc parts is connected,
+        otherwise there is no feasible solution.
+        If necessary, root nodes are added and passed back through the last
+        argument.'''
+        inserted_arcs = []
+        # Create a list of children for each node.
+        children = [[] for i in range(len(instance))]
+        for r in range(len(arcs)):
+            assert type(arcs[r]) == DependencyPartArc
+            children[arcs[r].head].append(arcs[r].modifier)
+
+        # Check if the root is connected to every node.
+        visited = [False] * len(instance)
+        nodes_to_explore = [0]
+        while nodes_to_explore:
+            h = nodes_to_explore.pop(0)
+            visited[h] = True
+            for m in children[h]:
+                if visited[m]:
+                    continue
+                nodes_to_explore.append(m)
+            # If there are no more nodes to explore, check if all nodes
+            # were visited and, if not, add a new edge from the node to
+            # the first node that was not visited yet.
+            if not nodes_to_explore:
+                for m in range(1, len(instance)):
+                    if not visited[m]:
+                        logging.info('Inserted root node 0 -> %d.' % m)
+                        inserted_arcs.append((0, m))
+                        nodes_to_explore.append(m)
+                        break
+
+        return inserted_arcs
+
+    def enforce_projective_graph(self, instance, arcs):
+        raise NotImplementedError
 
     def make_selected_features(self, instance, parts, selected_parts):
         features = DependencyFeatures(self, parts)

@@ -19,6 +19,9 @@ class Options(object):
                             help='Path to the model.')
         parser.add_argument('--output_path', type=str, default=None,
                             help='Path to the output predictions.')
+        parser.add_argument('--neural', action='store_const',
+                            default=0, const=1,
+                            help='1 for using a neural classifier.')
         parser.add_argument('--training_algorithm', type=str,
                             default='svm_mira',
                             help="""Training algorithm. Options are 
@@ -55,6 +58,7 @@ class Options(object):
         self.test_path = args['test_path']
         self.model_path = args['model_path']
         self.output_path = args['output_path']
+        self.neural = bool(args['neural'])
         self.training_algorithm = args['training_algorithm']
         self.training_initial_learning_rate = args[
             'training_initial_learning_rate']
