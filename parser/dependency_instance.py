@@ -33,6 +33,9 @@ class DependencyInstance(Instance):
         return len(self.input.morph_tags[i])
 
     def get_morph_tag(self, i, j):
+        """
+        Return the j-th morphological attribute of the i-th word
+        """
         return self.input.morph_tags[i][j]
 
     def get_head(self, i):

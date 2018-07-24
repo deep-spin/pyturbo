@@ -77,7 +77,7 @@ class DependencyNeuralModel(nn.Module):
         tags = torch.tensor(tag_indices, dtype=torch.long)
         embeds = torch.cat([self.word_embeddings(words),
                             self.tag_embeddings(tags)],
-                            dim=1)
+                           dim=1)
         states, _ = self.rnn(embeds.view(len(instance), 1, -1))
         heads = self.head_projection(states)
         modifiers = self.modifier_projection(states)

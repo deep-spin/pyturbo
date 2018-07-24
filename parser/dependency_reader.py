@@ -22,7 +22,7 @@ class DependencyReader(Reader):
             if line[0] == '#':
                 continue
             fields = line.split('\t')
-            # Ignore multi-word tokens ((necessary for CONLLU files).
+            # Ignore multi-word tokens (necessary for CONLLU files).
             if '-' in fields[0]:
                 continue
             sentence_fields.append(fields)

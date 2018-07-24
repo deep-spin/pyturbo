@@ -101,10 +101,33 @@ class TurboParser(StructuredClassifier):
         return DependencyInstanceNumeric(instance, self.dictionary)
 
     def make_parts(self, instance):
+        """
+        Create the parts (arcs) into which the problem is factored.
+
+        :param instance: a DependencyInstance object
+        :return: if instances have the expected output, return a tuple
+            (parts, gold_output). If they don't, return only the parts.
+        """
         return self.make_parts_basic(instance, add_relation_parts=False)
 
     def make_parts_basic(self, instance, add_relation_parts=True):
-        make_gold = instance.output != None # Check this.
+        """
+        Create the parts (arcs) into which the problem is factored.
+
+        :param instance: a DependencyInstance object
+        :param add_relation_parts: whether to include label information
+        :return: if instances have the expected output, return a tuple
+            (parts, gold_output). If they don't, return only the parts.
+
+            parts is a DependencyParts object (list subclass) containing either
+            DependencyPartArc or DependencyPartLabeledArc instances, depending
+            on `add_relation_parts`.
+
+            gold_output is a numpy array with 1 signaling the presence of an
+            arc in a combination (head, modifier) or (head, modifier, label) and
+            0 otherwise. It is a one-dimensional array.
+        """
+        make_gold = instance.output is not None  # Check this.
         if make_gold:
             gold_outputs = []
 
@@ -118,7 +141,10 @@ class TurboParser(StructuredClassifier):
             for m in range(1, len(instance)):
                 if h == m:
                     continue
+
                 if add_relation_parts:
+                    # TODO (erick): what is this supposed to do?
+
                     # If no unlabeled arc is there, just skip it.
                     # This happens if that arc was pruned out.
                     if 0 > parts.find_arc(h, m):
@@ -142,7 +168,6 @@ class TurboParser(StructuredClassifier):
                 if self.options.prune_relations:
                     modifier_tag = instance.get_tag(m)
                     head_tag = instance.get_tag(h)
-                    allowed_relations = []
                     allowed_relations = self.dictionary.get_existing_relations(
                         modifier_tag, head_tag)
                     if not add_relation_parts and not allowed_relations:
@@ -250,6 +275,17 @@ class TurboParser(StructuredClassifier):
         raise NotImplementedError
 
     def make_selected_features(self, instance, parts, selected_parts):
+        """
+        Create a DependencyFeatures object to store features describing the
+        instance.
+
+        :param instance: a DependencyInstance object
+        :param parts: a list of dependency arcs
+        :param selected_parts: a list of booleans, indicating for which parts
+            features should be computed
+        :return: a DependencyFeatures object containing a feature list for each
+            arc
+        """
         features = DependencyFeatures(self, parts)
         pruner = False
 

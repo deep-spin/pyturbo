@@ -4,6 +4,7 @@ import numpy as np
 #import sparse_vector as sv
 #import linear_model as lm
 import classifier.utils
+import torch
 from classifier.parameters import Parameters, FeatureVector
 from classifier.neural_scorer import NeuralScorer
 #import sys
@@ -95,19 +96,6 @@ class StructuredClassifier(object):
         for r in range(num_parts):
             scores[r] = self.neural_model.compute_score(instance, r)
         return scores
-
-    def make_neural_gradient_step(self, eta, t, gold_output, predicted_output,
-                                  scores):
-        # TODO: Implement this.
-        # Compute error.
-        error = (scores * torch.tensor(
-            predicted_output - gold_output, dtype=scores.dtype)).sum()
-
-        # Need to compute the loss function somewhere here.
-        # Backpropagate.
-        error.backward()
-        # Update the parameters.
-        optimizer.step()
 
     def compute_scores(self, instance, parts, features):
         '''Compute a score for every part in the instance using the current
@@ -258,7 +246,11 @@ class StructuredClassifier(object):
         logging.info('Number of features: %d', len(self.parameters))
 
     def train_epoch(self, epoch, instances):
-        '''Run one epoch of an online algorithm.'''
+        '''Run one epoch of an online algorithm.
+
+        :param epoch: the number of the epoch, starting from 0
+        :param instances: a list of Instance objects
+        '''
         import time
         start = time.time()
         time_decoding = 0

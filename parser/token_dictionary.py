@@ -24,11 +24,11 @@ class TokenDictionary(Dictionary):
         self.token_stop = self.special_symbols.insert('_STOP_')
 
         # Maximum alphabet sizes.
-        self.max_forms = 0xffff;
-        self.max_lemmas = 0xffff;
-        self.max_shapes = 0xffff;
-        self.max_tags = 0xff;
-        self.max_morph_tags = 0xfff;
+        self.max_forms = 0xffff
+        self.max_lemmas = 0xffff
+        self.max_shapes = 0xffff
+        self.max_tags = 0xff
+        self.max_morph_tags = 0xfff
 
     def save(self, file):
         pickle.dump(self.form_alphabet, file)
