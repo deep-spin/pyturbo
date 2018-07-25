@@ -1,5 +1,8 @@
 '''Implementations of sparse parameter vectors to use in linear models.'''
 
+import logging
+
+
 class SparseParameterVector(object):
     '''A class for defining a sparse parameter vector in a linear model.'''
     def __init__(self):
@@ -14,12 +17,12 @@ class SparseParameterVector(object):
         # Threshold for renormalizing the parameter vector.
         self.scale_factor_threshold = 1e-9
 
-    def stop_growth():
+    def stop_growth(self):
         '''Lock the parameter vector. If the vector is locked, no new
         features can be inserted.'''
         self.locked = True
 
-    def allow_growth():
+    def allow_growth(self):
         '''Unlock the parameter vector. If the vector is locked, no new
         features can be inserted.'''
         self.locked = False
@@ -231,12 +234,12 @@ class SparseLabeledParameterVector(object):
         # After more than these number of labels, use a dense representation.
         self.max_sparse_labels = 5;
 
-    def stop_growth():
+    def stop_growth(self):
         '''Lock the parameter vector. If the vector is locked, no new
         features can be inserted.'''
         self.locked = True
 
-    def allow_growth():
+    def allow_growth(self):
         '''Unlock the parameter vector. If the vector is locked, no new
         features can be inserted.'''
         self.locked = False
