@@ -9,12 +9,14 @@ from parser.dependency_instance import DependencyInstanceOutput
 from parser.dependency_instance_numeric import DependencyInstanceNumeric
 from parser.token_dictionary import TokenDictionary
 from parser.dependency_parts import DependencyParts, \
-    DependencyPartArc, DependencyPartLabeledArc
+    DependencyPartArc, DependencyPartLabeledArc, DependencyPartGrandparent, \
+    DependencyPartConsecutiveSibling
 from parser.dependency_features import DependencyFeatures
 from parser.dependency_neural_model import DependencyNeuralModel
 import numpy as np
 import pickle
 import logging
+
 
 class TurboParser(StructuredClassifier):
     '''Dependency parser.'''
@@ -108,30 +110,187 @@ class TurboParser(StructuredClassifier):
         :return: if instances have the expected output, return a tuple
             (parts, gold_output). If they don't, return only the parts.
         """
-        return self.make_parts_basic(instance, add_relation_parts=False)
+        parts = DependencyParts()
+        partial_gold = []
 
-    def make_parts_basic(self, instance, add_relation_parts=True):
+        gold_output = self.make_parts_basic(instance, parts,
+                                            add_relation_parts=False)
+        partial_gold.append(gold_output)
+
+        gold_output = self.make_parts_consecutive_siblings(instance, parts)
+        partial_gold.append(gold_output)
+        gold_output = self.make_parts_grandparent(instance, parts)
+        partial_gold.append(gold_output)
+
+        if instance.output is not None:
+            gold_output = np.concatenate(partial_gold)
+            return parts, gold_output
+
+        return parts
+
+    def make_parts_consecutive_siblings(self, instance, parts):
         """
-        Create the parts (arcs) into which the problem is factored.
+        Create the parts relative to consecutive siblings.
+
+        Each part means that an arc h -> m and h -> s exist at the same time,
+        with both h > m and h > s or both h < m and h < s.
+
+        :param instance: DependencyInstance
+        :param parts: a DependencyParts object. It must already have been
+            pruned.
+        :type parts: DependencyParts
+        :return: if `instances` have the attribute output, return a numpy array
+            with the gold output. If it doesn't, return None.
+        """
+        make_gold = instance.output is not None
+        gold_output = [] if make_gold else None
+
+        initial_index = len(parts)
+        for h in range(len(instance)):
+
+            # siblings to the right of h
+            # when m = h, it signals that s is the first child
+            for m in range(h, len(instance)):
+
+                if h != m and 0 > parts.find_arc(h, m):
+                    # pruned out
+                    continue
+
+                gold_hm = m == h or _check_gold_arc(instance, h, m)
+                arc_between = False
+
+                # when s = length, it signals that m encodes the last child
+                for s in range(m + 1, len(instance) + 1):
+                    if s < len(instance) and 0 > parts.find_arc(h, s):
+                        # pruned out
+                        continue
+
+                    if make_gold:
+                        gold_hs = s == len(instance) or \
+                                    _check_gold_arc(instance, h, s)
+
+                        if gold_hm and gold_hs and not arc_between:
+                            value = 1
+                            arc_between = True
+                        else:
+                            value = 0
+                        gold_output.append(value)
+
+            # siblings to the left of h
+            for m in range(h, 0, -1):
+                if h != m and 0 > parts.find_arc(h, m):
+                    # pruned out
+                    continue
+
+                gold_hm = m == h or _check_gold_arc(instance, h, m)
+                arc_between = False
+
+                # when s = -1, it signals that m encoded the leftmost child
+                # we skip s = 0, because that would mean the root is a modifier
+                for s in range(m - 1, -2, -1):
+                    if s == 0 or (s != -1 and 0 > parts.find_arc(h, s)):
+                        # pruned out
+                        continue
+
+                    parts.append(DependencyPartConsecutiveSibling(h, m, s))
+                    if make_gold:
+                        gold_hs = s == -1 or _check_gold_arc(instance, h, s)
+
+                        if gold_hm and gold_hs and not arc_between:
+                            value = 1
+                            arc_between = True
+                        else:
+                            value = 0
+                        gold_output.append(value)
+
+        parts.set_offset(DependencyPartConsecutiveSibling, initial_index,
+                         len(parts) - initial_index)
+        if make_gold:
+            gold_output = np.array(gold_output)
+
+        return gold_output
+
+    def make_parts_grandparent(self, instance, parts):
+        """
+        Create the parts relative to grandparents.
+
+        Each part means that an arc h -> m and g -> h exist at the same time.
+
+        :param instance: DependencyInstance
+        :param parts: a DependencyParts object. It must already have been
+            pruned.
+        :type parts: DependencyParts
+        :return: if `instances` have the attribute output, return a numpy array
+            with the gold output. If it doesn't, return None.
+        """
+        make_gold = instance.output is not None
+        gold_output = [] if make_gold else None
+
+        initial_index = len(parts)
+
+        for g in range(len(instance)):
+            for h in range(1, len(instance)):
+                if g == h:
+                    continue
+
+                if 0 > parts.find_arc(g, h):
+                    # the arc g -> h has been pruned out
+                    continue
+
+                gold_gh = _check_gold_arc(instance, g, h)
+
+                for m in range(1, len(instance)):
+                    if g == m or h == m:
+                        continue
+
+                    if 0 > parts.find_arc(h, m):
+                        # pruned out
+                        continue
+
+                    arc = DependencyPartGrandparent(h, m, g)
+                    parts.append(arc)
+                    if make_gold:
+                        if gold_gh and instance.get_head(m) == h:
+                            gold_output.append(1)
+                        else:
+                            gold_output.append(0)
+
+        parts.set_offset(DependencyPartGrandparent,
+                         initial_index, len(parts) - initial_index)
+        if make_gold:
+            gold_output = np.array(gold_output)
+
+        return gold_output
+
+    def make_parts_global(self, instance):
+        """
+        Create the parts (arcs) involving global structures: siblings,
+        grandparents, etc.
 
         :param instance: a DependencyInstance object
-        :param add_relation_parts: whether to include label information
-        :return: if instances have the expected output, return a tuple
-            (parts, gold_output). If they don't, return only the parts.
-
-            parts is a DependencyParts object (list subclass) containing either
-            DependencyPartArc or DependencyPartLabeledArc instances, depending
-            on `add_relation_parts`.
-
-            gold_output is a numpy array with 1 signaling the presence of an
-            arc in a combination (head, modifier) or (head, modifier, label) and
-            0 otherwise. It is a one-dimensional array.
+        :return: if `instances` have the attribute output, return a numpy array
+            with the gold output. If it doesn't, return None.
         """
-        make_gold = instance.output is not None  # Check this.
-        if make_gold:
-            gold_outputs = []
 
-        parts = DependencyParts()
+    def make_parts_basic(self, instance, parts, add_relation_parts=True):
+        """
+        Create the first-order arcs into which the problem is factored.
+
+        The objects `parts` is modified in-place.
+
+        :param instance: a DependencyInstance object
+        :param parts: a DependencyParts object, modified in-place
+        :param add_relation_parts: whether to include label information
+        :return: if `instances` have the attribute `output`, return a numpy
+            array with 1 signaling the presence of an arc in a combination
+            (head, modifier) or (head, modifier, label) and 0 otherwise.
+            It is a one-dimensional array.
+
+            If `instances` doesn't have the attribute `output` return None.
+        """
+        make_gold = instance.output is not None
+        gold_outputs = [] if make_gold else None
+
         if add_relation_parts and not self.options.prune_relations:
             allowed_relations = range(len(
                 self.dictionary.get_relation_alphabet()))
@@ -143,8 +302,6 @@ class TurboParser(StructuredClassifier):
                     continue
 
                 if add_relation_parts:
-                    # TODO (erick): what is this supposed to do?
-
                     # If no unlabeled arc is there, just skip it.
                     # This happens if that arc was pruned out.
                     if 0 > parts.find_arc(h, m):
@@ -226,9 +383,8 @@ class TurboParser(StructuredClassifier):
 
         if make_gold:
             gold_outputs = np.array(gold_outputs)
-            return parts, gold_outputs
-        else:
-            return parts
+
+        return gold_outputs
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
@@ -333,6 +489,25 @@ class TurboParser(StructuredClassifier):
                         self.dictionary.get_relation_name(0)
 
 
+def _check_gold_arc(instance, head, modifier):
+    """
+    Auxiliar function to check whether there is an arc from head to
+    modifier in the gold output in instance.
+
+    If instance has no gold output, return False.
+
+    :param instance: a DependencyInstance
+    :param head: integer, index of the head
+    :param modifier: integer
+    :return: boolean
+    """
+    if instance.output is None:
+        return False
+    if instance.get_head(modifier) == head:
+        return True
+    return False
+
+
 def main():
     '''Main function for the dependency parser.'''
     # Parse arguments.
@@ -362,6 +537,7 @@ def test_parser(options):
     dependency_parser = TurboParser(options)
     dependency_parser.load()
     dependency_parser.run()
+
 
 if __name__ == "__main__":
     main()
