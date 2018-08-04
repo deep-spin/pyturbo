@@ -152,7 +152,7 @@ class TurboParser(StructuredClassifier):
             # when m = h, it signals that s is the first child
             for m in range(h, len(instance)):
 
-                if h != m and 0 > parts.find_arc(h, m):
+                if h != m and 0 > parts.find_arc_index(h, m):
                     # pruned out
                     continue
 
@@ -161,7 +161,7 @@ class TurboParser(StructuredClassifier):
 
                 # when s = length, it signals that m encodes the last child
                 for s in range(m + 1, len(instance) + 1):
-                    if s < len(instance) and 0 > parts.find_arc(h, s):
+                    if s < len(instance) and 0 > parts.find_arc_index(h, s):
                         # pruned out
                         continue
 
@@ -178,7 +178,7 @@ class TurboParser(StructuredClassifier):
 
             # siblings to the left of h
             for m in range(h, 0, -1):
-                if h != m and 0 > parts.find_arc(h, m):
+                if h != m and 0 > parts.find_arc_index(h, m):
                     # pruned out
                     continue
 
@@ -188,7 +188,7 @@ class TurboParser(StructuredClassifier):
                 # when s = -1, it signals that m encoded the leftmost child
                 # we skip s = 0, because that would mean the root is a modifier
                 for s in range(m - 1, -2, -1):
-                    if s == 0 or (s != -1 and 0 > parts.find_arc(h, s)):
+                    if s == 0 or (s != -1 and 0 > parts.find_arc_index(h, s)):
                         # pruned out
                         continue
 
@@ -233,7 +233,7 @@ class TurboParser(StructuredClassifier):
                 if g == h:
                     continue
 
-                if 0 > parts.find_arc(g, h):
+                if 0 > parts.find_arc_index(g, h):
                     # the arc g -> h has been pruned out
                     continue
 
@@ -243,7 +243,7 @@ class TurboParser(StructuredClassifier):
                     if g == m or h == m:
                         continue
 
-                    if 0 > parts.find_arc(h, m):
+                    if 0 > parts.find_arc_index(h, m):
                         # pruned out
                         continue
 
@@ -304,7 +304,7 @@ class TurboParser(StructuredClassifier):
                 if add_relation_parts:
                     # If no unlabeled arc is there, just skip it.
                     # This happens if that arc was pruned out.
-                    if 0 > parts.find_arc(h, m):
+                    if 0 > parts.find_arc_index(h, m):
                         continue
                 else:
                     if h and self.options.prune_distances:

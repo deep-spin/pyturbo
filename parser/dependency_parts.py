@@ -42,13 +42,21 @@ class DependencyParts(list):
 
             self.arc_index[part.head][part.modifier] = len(self) - 1
 
-    def get_offset(self, type):
-        return self.offsets[type]
+    def iterate_over_type(self, type_):
+        """
+        Iterates over the parts (arcs) of a particular type.
+        """
+        offset, size = self.get_offset(type_)
+        for i in range(offset, offset + size):
+            yield self[i]
 
-    def set_offset(self, type, offset, size):
-        self.offsets[type] = (offset, size)
+    def get_offset(self, type_):
+        return self.offsets[type_]
 
-    def find_arc(self, head, modifier):
+    def set_offset(self, type_, offset, size):
+        self.offsets[type_] = (offset, size)
+
+    def find_arc_index(self, head, modifier):
         """
         Return the position of the arc connecting `head` and `modifier`. If no
         such arc exists, return -1.
