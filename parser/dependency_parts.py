@@ -3,11 +3,13 @@ class DependencyPartArc(object):
         self.head = head
         self.modifier = modifier
 
+
 class DependencyPartLabeledArc(object):
     def __init__(self, head=-1, modifier=-1, label=-1):
         self.head = head
         self.modifier = modifier
         self.label = label
+
 
 class DependencyPartGrandparent(object):
     def __init__(self, head=-1, modifier=-1, grandparent=-1):
@@ -15,11 +17,13 @@ class DependencyPartGrandparent(object):
         self.modifier = modifier
         self.grandparent = grandparent
 
+
 class DependencyPartConsecutiveSibling(object):
     def __init__(self, head=-1, modifier=-1, sibling=-1):
         self.head = head
         self.modifier = modifier
         self.sibling = sibling
+
 
 class DependencyParts(list):
     def __init__(self):
