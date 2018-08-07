@@ -1,6 +1,6 @@
-ad3==2.2
-numpy==1.14.5
+ad3>=2.2
+numpy>=1.14.5
 Pillow==5.2.0
 six==1.11.0
-torch==0.4.0
+torch>=0.4.0
 torchvision==0.2.1
