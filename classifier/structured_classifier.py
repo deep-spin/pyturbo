@@ -414,7 +414,6 @@ class StructuredClassifier(object):
                                     (total_loss + regularization_value),
                                     'Squared norm: %f' % sq_norm]))
 
-
     def run(self):
         '''Run the structured classifier on test data.'''
         import time
