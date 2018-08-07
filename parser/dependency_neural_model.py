@@ -65,16 +65,34 @@ class DependencyNeuralModel(nn.Module):
                 bias=True)
         else:
             self.distance_projection = None
-        self.arc_scorer = nn.Linear(hidden_size, 1, bias=False)
+
+        self.arc_scorer = self._create_scorer()
+        self.sibling_scorer = self._create_scorer()
+
         # Clear out the gradients before the next batch.
         self.zero_grad()
+
+    def _create_scorer(self, input_size=None):
+        """
+        Create the weights for scoring a given tensor representation to a
+        single number.
+
+        :param input_size: expected input size. If None, self.hidden_units
+            is used.
+        :return: an nn.Linear object
+        """
+        if input_size is None:
+            input_size = self.hidden_size
+        scorer = nn.Linear(input_size, 1, bias=False)
+
+        return scorer
 
     def _create_projection(self):
         """
         Create the weights for projecting an input from the BiLSTM to a
         feedforward layer.
 
-        :return: an nn.Sequential object, mapping an input with 2*hidden_units
+        :return: an nn.Linear object, mapping an input with 2*hidden_units
             to hidden_units.
         """
         projection = nn.Linear(
@@ -155,11 +173,11 @@ class DependencyNeuralModel(nn.Module):
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
         siblings = sibling_tensors[sibling_indices]
-        arc_states = self.tanh(heads + modifiers + siblings)
-        sibling_scores = self.arc_scorer(arc_states)
+        sibling_states = self.tanh(heads + modifiers + siblings)
+        sibling_scores = self.sibling_scorer(sibling_states)
 
         offset, size = parts.get_offset(DependencyPartConsecutiveSibling)
-        scores[offset:offset + size] = sibling_scores
+        scores[offset:offset + size] = sibling_scores.view(-1)
 
     def forward(self, instance, parts):
         scores = torch.zeros(len(parts))
