@@ -119,8 +119,8 @@ class TurboParser(StructuredClassifier):
 
         gold_output = self.make_parts_consecutive_siblings(instance, parts)
         partial_gold.append(gold_output)
-        gold_output = self.make_parts_grandparent(instance, parts)
-        partial_gold.append(gold_output)
+        # gold_output = self.make_parts_grandparent(instance, parts)
+        # partial_gold.append(gold_output)
 
         if instance.output is not None:
             gold_output = np.concatenate(partial_gold)
@@ -165,6 +165,7 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
+                    parts.append(DependencyPartConsecutiveSibling(h, m, s))
                     if make_gold:
                         gold_hs = s == len(instance) or \
                                     _check_gold_arc(instance, h, s)
