@@ -117,6 +117,9 @@ class DependencyDecoder(StructuredDecoder):
             factor.set_additional_log_potentials(left_scores[h])
 
             # right hand side
+            if h == 0:
+                # root doesn't have children to the left hand side
+                continue
             local_variables = []
 
             for m in range(h + 1, n):
