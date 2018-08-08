@@ -178,6 +178,10 @@ class TurboParser(StructuredClassifier):
                         gold_output.append(value)
 
             # siblings to the left of h
+            if h == 0:
+                # root can't have any child to the left
+                continue
+
             for m in range(h, 0, -1):
                 if h != m and 0 > parts.find_arc_index(h, m):
                     # pruned out
@@ -186,16 +190,15 @@ class TurboParser(StructuredClassifier):
                 gold_hm = m == h or _check_gold_arc(instance, h, m)
                 arc_between = False
 
-                # when s = -1, it signals that m encoded the leftmost child
-                # we skip s = 0, because that would mean the root is a modifier
-                for s in range(m - 1, -2, -1):
-                    if s == 0 or (s != -1 and 0 > parts.find_arc_index(h, s)):
+                # when s = 0, it signals that m encoded the leftmost child
+                for s in range(m - 1, -1, -1):
+                    if s != 0 and 0 > parts.find_arc_index(h, s):
                         # pruned out
                         continue
 
                     parts.append(DependencyPartConsecutiveSibling(h, m, s))
                     if make_gold:
-                        gold_hs = s == -1 or _check_gold_arc(instance, h, s)
+                        gold_hs = s == 0 or _check_gold_arc(instance, h, s)
 
                         if gold_hm and gold_hs and not arc_between:
                             value = 1
