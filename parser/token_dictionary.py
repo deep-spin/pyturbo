@@ -30,6 +30,12 @@ class TokenDictionary(Dictionary):
         self.max_tags = 0xff
         self.max_morph_tags = 0xfff
 
+    def add_special_symbol(self, symbol):
+        """
+        Add special symbols to the dictionary.
+        """
+        self.special_symbols.insert(symbol)
+
     def save(self, file):
         pickle.dump(self.form_alphabet, file)
         pickle.dump(self.form_lower_alphabet, file)
@@ -232,7 +238,6 @@ class TokenDictionary(Dictionary):
                 cutoff += 1
                 logging.info('Incrementing %s cutoff to %d...' % (label, cutoff))
             alphabet.stop_growth()
-
 
         logging.info('Number of forms: %d' % len(self.form_alphabet))
         logging.info('Number of lower-case forms: %d' %

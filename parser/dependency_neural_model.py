@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 from parser.dependency_parts import DependencyPartArc, DependencyParts, \
     DependencyPartConsecutiveSibling, DependencyPartGrandparent
+from parser.turbo_parser import special_tokens
 import numpy as np
 import pickle
+
 
 class DependencyNeuralModel(nn.Module):
     def __init__(self,
@@ -22,10 +24,12 @@ class DependencyNeuralModel(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
-        self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
-                                            word_embedding_size)
-        self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
-                                           tag_embedding_size)
+
+        num_embeddings = token_dictionary.get_num_forms() + len(special_tokens)
+        self.word_embeddings = nn.Embedding(num_embeddings, word_embedding_size)
+
+        num_embeddings = token_dictionary.get_num_tags() + len(special_tokens)
+        self.tag_embeddings = nn.Embedding(num_embeddings, tag_embedding_size)
         if self.distance_embedding_size:
             self.distance_bins = np.array(
                 list(range(10)) + list(range(10, 40, 5)) + [40])
@@ -163,12 +167,12 @@ class DependencyNeuralModel(nn.Module):
         modifier_indices = []
         sibling_indices = []
 
-        for arc in parts.iterate_over_type(DependencyPartConsecutiveSibling):
+        for part in parts.iterate_over_type(DependencyPartConsecutiveSibling):
             # list all indices to the candidate head/modifier/siblings, then
             # process them all at once for faster execution.
-            head_indices.append(arc.head)
-            modifier_indices.append(arc.modifier)
-            sibling_indices.append(arc.sibling)
+            head_indices.append(part.head)
+            modifier_indices.append(part.modifier)
+            sibling_indices.append(part.sibling)
 
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]

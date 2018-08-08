@@ -17,6 +17,12 @@ import numpy as np
 import pickle
 import logging
 
+#TODO: maybe this should be elsewhere?
+# special pseudo-tokens to index embeddings
+# root is not one of these since it is a token in the sentences
+NULL_SIBLING = '_null_sibling_'
+special_tokens = [NULL_SIBLING]
+
 
 class TurboParser(StructuredClassifier):
     '''Dependency parser.'''
@@ -30,6 +36,8 @@ class TurboParser(StructuredClassifier):
         self.parameters = None
         if self.options.train:
             self.token_dictionary.initialize(self.reader)
+            for token in special_tokens:
+                self.token_dictionary.add_special_symbol(token)
             self.dictionary.create_relation_dictionary(self.reader)
             if self.options.neural:
                 self.neural_scorer.initialize(
