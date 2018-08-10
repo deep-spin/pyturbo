@@ -33,6 +33,8 @@ class TokenDictionary(Dictionary):
     def add_special_symbol(self, symbol):
         """
         Add special symbols to the dictionary.
+
+        Any calls to this method must be made before `initialize`.
         """
         self.special_symbols.insert(symbol)
 
@@ -128,6 +130,9 @@ class TokenDictionary(Dictionary):
         return self.shape_alphabet.lookup(shape)
 
     def initialize(self, reader):
+        """
+        Initializes the dictionary with indices for word forms and tags.
+        """
         logging.info('Creating token dictionary...')
 
         form_counts = []
