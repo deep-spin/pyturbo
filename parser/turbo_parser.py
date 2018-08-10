@@ -12,16 +12,10 @@ from parser.dependency_parts import DependencyParts, \
     DependencyPartArc, DependencyPartLabeledArc, DependencyPartGrandparent, \
     DependencyPartConsecutiveSibling
 from parser.dependency_features import DependencyFeatures
-from parser.dependency_neural_model import DependencyNeuralModel
+from parser.dependency_neural_model import DependencyNeuralModel, special_tokens
 import numpy as np
 import pickle
 import logging
-
-#TODO: maybe this should be elsewhere?
-# special pseudo-tokens to index embeddings
-# root is not one of these since it is a token in the sentences
-NULL_SIBLING = '_null_sibling_'
-special_tokens = [NULL_SIBLING]
 
 
 class TurboParser(StructuredClassifier):
@@ -35,9 +29,9 @@ class TurboParser(StructuredClassifier):
         self.decoder = DependencyDecoder()
         self.parameters = None
         if self.options.train:
-            self.token_dictionary.initialize(self.reader)
             for token in special_tokens:
                 self.token_dictionary.add_special_symbol(token)
+            self.token_dictionary.initialize(self.reader)
             self.dictionary.create_relation_dictionary(self.reader)
             if self.options.neural:
                 self.neural_scorer.initialize(
