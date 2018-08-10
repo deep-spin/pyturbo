@@ -2,9 +2,14 @@ import torch
 import torch.nn as nn
 from parser.dependency_parts import DependencyPartArc, DependencyParts, \
     DependencyPartConsecutiveSibling, DependencyPartGrandparent
-from parser.turbo_parser import special_tokens
 import numpy as np
 import pickle
+
+#TODO: maybe this should be elsewhere?
+# special pseudo-tokens to index embeddings
+# root is not one of these since it is a token in the sentences
+NULL_SIBLING = '_NULL_SIBLING_'
+special_tokens = [NULL_SIBLING]
 
 
 class DependencyNeuralModel(nn.Module):
@@ -25,11 +30,10 @@ class DependencyNeuralModel(nn.Module):
         self.num_layers = num_layers
         self.dropout = dropout
 
-        num_embeddings = token_dictionary.get_num_forms() + len(special_tokens)
-        self.word_embeddings = nn.Embedding(num_embeddings, word_embedding_size)
-
-        num_embeddings = token_dictionary.get_num_tags() + len(special_tokens)
-        self.tag_embeddings = nn.Embedding(num_embeddings, tag_embedding_size)
+        self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
+                                            word_embedding_size)
+        self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
+                                           tag_embedding_size)
         if self.distance_embedding_size:
             self.distance_bins = np.array(
                 list(range(10)) + list(range(10, 40, 5)) + [40])
@@ -57,6 +61,8 @@ class DependencyNeuralModel(nn.Module):
         self.gp_parent_projection = self._create_projection()
         self.gp_grandchild_projection = self._create_projection()
 
+        self.null_sibling_tensor = self._create_special_tensor()
+
         # second order -- consecutive siblings
         self.sib_head_projection = self._create_projection()
         self.sib_modifier_projection = self._create_projection()
@@ -75,6 +81,17 @@ class DependencyNeuralModel(nn.Module):
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
+
+    def _create_special_tensor(self, shape=None):
+        """
+        Create a tensor for representing some special token.
+
+        If shape is None, it will have shape equal to hidden_size.
+        """
+        if shape is None:
+            shape = self.hidden_size
+
+        return torch.randn(shape, requires_grad=True)
 
     def _create_scorer(self, input_size=None):
         """
@@ -161,7 +178,12 @@ class DependencyNeuralModel(nn.Module):
         """
         head_tensors = self.sib_head_projection(states)
         modifier_tensors = self.sib_modifier_projection(states)
-        sibling_tensors = self.sib_sibling_projection(states)
+        word_sibling_tensors = self.sib_sibling_projection(states)
+
+        # include the vector for null sibling
+        # word_sibling_tensors is (num_words, batch=1, hidden_units)
+        sibling_tensors = torch.cat([word_sibling_tensors,
+                                     self.null_sibling_tensor.view(1, 1, -1)])
 
         head_indices = []
         modifier_indices = []
@@ -172,7 +194,12 @@ class DependencyNeuralModel(nn.Module):
             # process them all at once for faster execution.
             head_indices.append(part.head)
             modifier_indices.append(part.modifier)
-            sibling_indices.append(part.sibling)
+            if part.sibling == 0:
+                # this indicates there's no sibling to the left
+                # (to the right, sibling == len(states))
+                sibling_indices.append(len(states))
+            else:
+                sibling_indices.append(part.sibling)
 
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
