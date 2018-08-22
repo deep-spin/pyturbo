@@ -18,7 +18,7 @@ class DependencyPartGrandparent(object):
         self.grandparent = grandparent
 
 
-class DependencyPartConsecutiveSibling(object):
+class DependencyPartNextSibling(object):
     def __init__(self, head=-1, modifier=-1, sibling=-1):
         self.head = head
         self.modifier = modifier
@@ -31,6 +31,16 @@ class DependencyParts(list):
         self.index_labeled = None
         self.offsets = {}
         self.arc_index = {}
+
+    def has_type(self, type_):
+        """
+        Return whether this object stores parts of a particular type.
+
+        :param type_: a class such as DependencyPartNextSibling or
+            DependencyPartGrandparent
+        :return: boolean
+        """
+        return type_ in self.offsets
 
     def append(self, part):
         """

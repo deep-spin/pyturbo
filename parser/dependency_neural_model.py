@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from parser.dependency_parts import DependencyPartArc, DependencyParts, \
-    DependencyPartConsecutiveSibling, DependencyPartGrandparent
+    DependencyPartNextSibling, DependencyPartGrandparent
 import numpy as np
 import pickle
 
@@ -189,7 +189,7 @@ class DependencyNeuralModel(nn.Module):
         modifier_indices = []
         sibling_indices = []
 
-        for part in parts.iterate_over_type(DependencyPartConsecutiveSibling):
+        for part in parts.iterate_over_type(DependencyPartNextSibling):
             # list all indices to the candidate head/modifier/siblings, then
             # process them all at once for faster execution.
             head_indices.append(part.head)
@@ -207,7 +207,7 @@ class DependencyNeuralModel(nn.Module):
         sibling_states = self.tanh(heads + modifiers + siblings)
         sibling_scores = self.sibling_scorer(sibling_states)
 
-        offset, size = parts.get_offset(DependencyPartConsecutiveSibling)
+        offset, size = parts.get_offset(DependencyPartNextSibling)
         scores[offset:offset + size] = sibling_scores.view(-1)
 
     def forward(self, instance, parts):

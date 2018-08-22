@@ -10,7 +10,7 @@ from parser.dependency_instance_numeric import DependencyInstanceNumeric
 from parser.token_dictionary import TokenDictionary
 from parser.dependency_parts import DependencyParts, \
     DependencyPartArc, DependencyPartLabeledArc, DependencyPartGrandparent, \
-    DependencyPartConsecutiveSibling
+    DependencyPartNextSibling
 from parser.dependency_features import DependencyFeatures
 from parser.dependency_neural_model import DependencyNeuralModel, special_tokens
 import numpy as np
@@ -167,7 +167,7 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
-                    parts.append(DependencyPartConsecutiveSibling(h, m, s))
+                    parts.append(DependencyPartNextSibling(h, m, s))
                     if make_gold:
                         gold_hs = s == len(instance) or \
                                     _check_gold_arc(instance, h, s)
@@ -198,7 +198,7 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
-                    parts.append(DependencyPartConsecutiveSibling(h, m, s))
+                    parts.append(DependencyPartNextSibling(h, m, s))
                     if make_gold:
                         gold_hs = s == 0 or _check_gold_arc(instance, h, s)
 
@@ -209,7 +209,7 @@ class TurboParser(StructuredClassifier):
                             value = 0
                         gold_output.append(value)
 
-        parts.set_offset(DependencyPartConsecutiveSibling, initial_index,
+        parts.set_offset(DependencyPartNextSibling, initial_index,
                          len(parts) - initial_index)
         if make_gold:
             gold_output = np.array(gold_output)
