@@ -94,11 +94,21 @@ class TurboParser(StructuredClassifier):
         self.options.model_type = model_options.model_type
         self.options.unlabeled = model_options.unlabeled
         self.options.projective = model_options.projective
+
+        # prune arcs with label/head POS/modifier POS unseen in training data
         self.options.prune_relations = model_options.prune_relations
+
+        # prune arcs with a distance unseen in training with the given POS tags
         self.options.prune_distances = model_options.prune_distances
+
+        # use a first-order model to prune arcs
         self.options.prune_basic = model_options.prune_basic
+
+        # threshold for the basic pruner, if used
         self.options.pruner_posterior_threshold = \
             model_options.pruner_posterior_threshold
+
+        # maximum candidate heads per word in the basic pruner, if used
         self.options.pruner_max_heads = model_options.pruner_max_heads
 
     def get_formatted_instance(self, instance):
