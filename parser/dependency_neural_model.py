@@ -223,5 +223,7 @@ class DependencyNeuralModel(nn.Module):
         states, _ = self.rnn(embeds.view(len(instance), 1, -1))
 
         self._compute_first_order_scores(states, parts, scores)
-        self._compute_consecutive_sibling_scores(states, parts, scores)
+        if parts.has_type(DependencyPartNextSibling):
+            self._compute_consecutive_sibling_scores(states, parts, scores)
+
         return scores

@@ -142,6 +142,17 @@ class TurboParser(StructuredClassifier):
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
 
+    def compute_scores(self, instance, parts, features):
+        """
+        Compute scores for each part. If the pruner is being trained, use the
+        pruner scorer.
+        """
+        if self.is_training_pruner:
+            return self.compute_pruner_scores(instance, parts)
+        else:
+            return super(TurboParser, self).compute_scores(
+                instance, parts, features)
+
     def compute_pruner_scores(self, instance, parts):
         """
         Compute the scores for every part according to the pruner

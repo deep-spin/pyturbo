@@ -9,14 +9,11 @@ class NeuralScorer(object):
 
     def initialize(self, model):
         self.model = model
-        #self.optimizer = optim.SGD(model.parameters(), lr=0.01)
         self.optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     def compute_scores(self, instance, parts):
         # Run the forward pass.
         self.scores = self.model(instance, parts)
-        #print(len(list(self.scores.detach().numpy())))
-        #print(list(self.scores.detach().numpy()))
         return self.scores.detach().numpy()
 
     def compute_gradients(self, gold_output, predicted_output):

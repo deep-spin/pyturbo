@@ -102,6 +102,9 @@ class DependencyDecoder(StructuredDecoder):
         predicted_output[offset_arcs:offset_arcs + num_arcs] = posteriors
 
         for type_ in self.part_types:
+            if not parts.has_type(type_):
+                continue
+            
             offset_type, num_this_type = parts.get_offset(type_)
 
             from_posteriors = offset_type - num_arcs
