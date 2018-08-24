@@ -70,7 +70,7 @@ class DependencyParts(list):
     def set_offset(self, type_, offset, size):
         self.offsets[type_] = (offset, size)
 
-def find_arc_index(self, head, modifier):
+    def find_arc_index(self, head, modifier):
         """
         Return the position of the arc connecting `head` and `modifier`. If no
         such arc exists, return -1.

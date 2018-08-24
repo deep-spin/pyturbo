@@ -1,18 +1,15 @@
 '''A generic implementation of an abstract structured classifier.'''
 
 import numpy as np
-#import sparse_vector as sv
-#import linear_model as lm
-import classifier.utils
 import torch
 from classifier.parameters import Parameters, FeatureVector
 from classifier.neural_scorer import NeuralScorer
-#import sys
 from classifier.utils import nearly_eq_tol
 import logging
 import time
 
 logging.basicConfig(level=logging.DEBUG)
+
 
 class StructuredClassifier(object):
     '''An abstract structured classifier.'''
@@ -31,6 +28,14 @@ class StructuredClassifier(object):
         # To delete:
         #self.model = lm.LinearModel()
         #self.decoder = StructuredDecoder()
+
+    @property
+    def neural_scorer(self):
+        return self._neural_scorer
+
+    @neural_scorer.setter
+    def neural_scorer(self, value):
+        self._neural_scorer = value
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''

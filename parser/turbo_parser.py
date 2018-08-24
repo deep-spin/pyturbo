@@ -30,6 +30,7 @@ class TurboParser(StructuredClassifier):
         self.parameters = None
         self.model_type = options.model_type.split('+')
         self.has_pruner = False
+        self.is_training_pruner = False
 
         if self.options.train:
             for token in special_tokens:
@@ -50,7 +51,6 @@ class TurboParser(StructuredClassifier):
                     )
                     self.pruner_neural_scorer = NeuralScorer()
                     self.pruner_neural_scorer.initialize(pruner_model)
-                    self.is_training_pruner = None
 
                 self.neural_scorer.initialize(
                     DependencyNeuralModel(self.token_dictionary,
@@ -61,6 +61,21 @@ class TurboParser(StructuredClassifier):
                                           hidden_size=50,
                                           num_layers=1,
                                           dropout=0.))
+
+    @property
+    def neural_scorer(self):
+        """
+        Return the neural scorer that should be used. When the pruner is being
+        trained, it is the pruner scorer. Otherwise, it is the full parser
+        scorer
+        """
+        if self.is_training_pruner:
+            return self.pruner_neural_scorer
+        return self._neural_scorer
+
+    @neural_scorer.setter
+    def neural_scorer(self, value):
+        self._neural_scorer = value
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -133,25 +148,18 @@ class TurboParser(StructuredClassifier):
         """
         Train the parser and a pruner, if set in the options.
         """
-        self.is_training_pruner = True
-        super(TurboParser, self).train()
-        self.has_pruner = True
+        if self.options.prune_basic:
+            self.is_training_pruner = True
+            logging.debug('Training pruner')
+            super(TurboParser, self).train()
+            self.has_pruner = True
+
         self.is_training_pruner = False
+        logging.debug('Training parser')
         super(TurboParser, self).train()
     
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
-
-    def compute_scores(self, instance, parts, features):
-        """
-        Compute scores for each part. If the pruner is being trained, use the
-        pruner scorer.
-        """
-        if self.is_training_pruner:
-            return self.compute_pruner_scores(instance, parts)
-        else:
-            return super(TurboParser, self).compute_scores(
-                instance, parts, features)
 
     def compute_pruner_scores(self, instance, parts):
         """
@@ -159,7 +167,7 @@ class TurboParser(StructuredClassifier):
         """
         return self.pruner_neural_scorer.compute_scores(instance, parts)
 
-    def prune(self, instance, parts):
+    def prune(self, instance, parts, gold_output):
         """
         Prune out some arcs according to the the pruner model.
 
@@ -168,19 +176,20 @@ class TurboParser(StructuredClassifier):
         :return: a new DependencyParts object contained the kept arcs
         """
         scores = self.compute_pruner_scores(instance, parts)
-        new_parts = self.decoder.decode_pruner_naive(
-            parts, scores, self.options.pruner_max_heads)
+        new_parts, new_gold = self.decoder.decode_pruner_naive(
+            parts, scores, gold_output, self.options.pruner_max_heads)
 
         # during training, make sure that the gold parts are included
-        if self.options.train:
+        if gold_output is not None:
             for m in range(1, len(instance)):
                 h = instance.output.heads[m]
                 if new_parts.find_arc_index(h, m) < 0:
                     new_parts.append(DependencyPartArc(h, m))
+                    new_gold.append(1)
 
-        print('Original parts had len', len(parts), ', pruned has',
-              len(new_parts))
-        return new_parts
+            new_parts.set_offset(DependencyPartArc, 0, len(new_parts))
+
+        return new_parts, new_gold
 
     def make_parts(self, instance):
         """
@@ -191,31 +200,35 @@ class TurboParser(StructuredClassifier):
             (parts, gold_output). If they don't, return only the parts.
         """
         parts = DependencyParts()
-        include_gold = instance.output is not None
-        gold_output = []
+        gold_output = None if instance.output is None else []
 
-        partial_gold = self.make_parts_basic(instance, parts,
-                                             add_relation_parts=False)
-        gold_output.append(partial_gold)
+        self.make_parts_basic(instance, parts, gold_output,
+                              add_relation_parts=False)
 
         if not self.is_training_pruner:
             if self.has_pruner:
-                parts = self.prune(instance, parts)
+                parts, gold_output = self.prune(instance, parts, gold_output)
+
+            assert len(parts) == len(gold_output)
 
             if 'cs' in self.model_type:
-                partial_gold = self.make_parts_consecutive_siblings(instance,
-                                                                    parts)
-                gold_output.append(partial_gold)
-                # partial_gold = self.make_parts_grandparent(instance, parts)
-                # gold_output.append(partial_gold)
+                self.make_parts_consecutive_siblings(instance, parts,
+                                                     gold_output)
+            if 'gp' in self.model_type:
+                self.make_parts_grandparent(instance, parts, gold_output)
 
         if instance.output is not None:
-            gold_output = np.concatenate(gold_output)
+            gold_output = np.array(gold_output)
+            num_parts = len(parts)
+            num_gold = len(gold_output)
+            assert num_parts == num_gold, \
+                'Number of parts = %d and number of gold outputs = % d' \
+                % (num_parts, num_gold)
             return parts, gold_output
 
         return parts
 
-    def make_parts_consecutive_siblings(self, instance, parts):
+    def make_parts_consecutive_siblings(self, instance, parts, gold_output):
         """
         Create the parts relative to consecutive siblings.
 
@@ -226,11 +239,12 @@ class TurboParser(StructuredClassifier):
         :param parts: a DependencyParts object. It must already have been
             pruned.
         :type parts: DependencyParts
+        :param gold_output: either None or a list with binary values indicating
+            the presence of each part.
         :return: if `instances` have the attribute output, return a numpy array
             with the gold output. If it doesn't, return None.
         """
         make_gold = instance.output is not None
-        gold_output = [] if make_gold else None
 
         initial_index = len(parts)
         for h in range(len(instance)):
@@ -296,12 +310,8 @@ class TurboParser(StructuredClassifier):
 
         parts.set_offset(DependencyPartNextSibling, initial_index,
                          len(parts) - initial_index)
-        if make_gold:
-            gold_output = np.array(gold_output)
 
-        return gold_output
-
-    def make_parts_grandparent(self, instance, parts):
+    def make_parts_grandparent(self, instance, parts, gold_output):
         """
         Create the parts relative to grandparents.
 
@@ -311,11 +321,12 @@ class TurboParser(StructuredClassifier):
         :param parts: a DependencyParts object. It must already have been
             pruned.
         :type parts: DependencyParts
+        :param gold_output: either None or a list with binary values indicating
+            the presence of each part.
         :return: if `instances` have the attribute output, return a numpy array
             with the gold output. If it doesn't, return None.
         """
         make_gold = instance.output is not None
-        gold_output = [] if make_gold else None
 
         initial_index = len(parts)
 
@@ -348,10 +359,6 @@ class TurboParser(StructuredClassifier):
 
         parts.set_offset(DependencyPartGrandparent,
                          initial_index, len(parts) - initial_index)
-        if make_gold:
-            gold_output = np.array(gold_output)
-
-        return gold_output
 
     def make_parts_global(self, instance):
         """
@@ -364,7 +371,8 @@ class TurboParser(StructuredClassifier):
         """
         #TODO: do we need this function?
 
-    def make_parts_basic(self, instance, parts, add_relation_parts=True):
+    def make_parts_basic(self, instance, parts, gold_output,
+                         add_relation_parts=True):
         """
         Create the first-order arcs into which the problem is factored.
 
@@ -372,6 +380,8 @@ class TurboParser(StructuredClassifier):
 
         :param instance: a DependencyInstance object
         :param parts: a DependencyParts object, modified in-place
+        :param gold_output: either None or a list with binary values indicating
+            the presence of each part.
         :param add_relation_parts: whether to include label information
         :return: if `instances` have the attribute `output`, return a numpy
             array with 1 signaling the presence of an arc in a combination
@@ -381,7 +391,6 @@ class TurboParser(StructuredClassifier):
             If `instances` doesn't have the attribute `output` return None.
         """
         make_gold = instance.output is not None
-        gold_outputs = [] if make_gold else None
 
         if add_relation_parts and not self.options.prune_relations:
             allowed_relations = range(len(
@@ -438,17 +447,17 @@ class TurboParser(StructuredClassifier):
                         if make_gold:
                             if instance.get_head(m) == h and \
                                instance.get_relation(m) == l:
-                                gold_outputs.append(1.)
+                                gold_output.append(1.)
                             else:
-                                gold_outputs.append(0.)
+                                gold_output.append(0.)
                 else:
                     part = DependencyPartArc(h, m)
                     parts.append(part)
                     if make_gold:
                         if instance.get_head(m) == h:
-                            gold_outputs.append(1.)
+                            gold_output.append(1.)
                         else:
-                            gold_outputs.append(0.)
+                            gold_output.append(0.)
 
         # When adding unlabeled arcs, make sure the graph stays connected.
         # Otherwise, enforce connectedness by adding some extra arcs
@@ -464,19 +473,14 @@ class TurboParser(StructuredClassifier):
                 parts.append(part)
                 if make_gold:
                     if instance.get_head(m) == h:
-                        gold_outputs.append(1.)
+                        gold_output.append(1.)
                     else:
-                        gold_outputs.append(0.)
+                        gold_output.append(0.)
             parts.set_offset(DependencyPartArc,
                              num_parts_initial, len(parts) - num_parts_initial)
         else:
             parts.set_offset(DependencyPartLabeledArc,
                              num_parts_initial, len(parts) - num_parts_initial)
-
-        if make_gold:
-            gold_outputs = np.array(gold_outputs)
-
-        return gold_outputs
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
