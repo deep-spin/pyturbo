@@ -215,8 +215,8 @@ class TurboParser(StructuredClassifier):
             if 'cs' in self.model_type:
                 self.make_parts_consecutive_siblings(instance, parts,
                                                      gold_output)
-            # if 'gp' in self.model_type:
-            #     self.make_parts_grandparent(instance, parts, gold_output)
+            if 'gp' in self.model_type:
+                self.make_parts_grandparent(instance, parts, gold_output)
 
         if instance.output is not None:
             gold_output = np.array(gold_output)

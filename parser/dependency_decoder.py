@@ -42,6 +42,9 @@ class DependencyDecoder(StructuredDecoder):
                 self.create_next_sibling_factors(instance, parts, scores,
                                                  graph, variables)
 
+            if type_ == DependencyPartGrandparent:
+                self.create_grandparent_factors(parts, scores, graph, variables)
+
         graph.set_eta_ad3(.05)
         graph.adapt_eta_ad3(True)
         graph.set_max_iterations_ad3(500)
@@ -184,6 +187,36 @@ class DependencyDecoder(StructuredDecoder):
         tree_factor.initialize(length, arc_indices)
 
         return variables
+
+    def create_grandparent_factors(self, parts, scores, graph, variables):
+        """
+        Include grandparent factors for constraining grandparents in the graph.
+
+        :param parts: DependencyParts
+        :param scores: np.array
+        :param graph: the graph
+        :param variables: list of binary variables denoting arcs
+        """
+        if not parts.has_type(DependencyPartGrandparent):
+            return
+
+        offset_arcs, num_arcs = parts.get_offset(DependencyPartArc)
+        offset_gp, num_gp = parts.get_offset(DependencyPartGrandparent)
+
+        for r in range(offset_gp, offset_gp + num_gp):
+            part = parts[r]
+            head = part.head
+            modifier = part.modifier
+            grandparent = part.grandparent
+
+            index_hm = parts.find_arc_index(head, modifier) - offset_arcs
+            index_gh = parts.find_arc_index(grandparent, head) - offset_arcs
+
+            var_hm = variables[index_hm]
+            var_gh = variables[index_gh]
+
+            score = scores[r]
+            graph.create_factor_pair([var_hm, var_gh], score)
 
     def create_next_sibling_factors(self, instance, parts, scores, graph,
                                     variables):
