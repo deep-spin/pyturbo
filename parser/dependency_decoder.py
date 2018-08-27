@@ -61,7 +61,7 @@ class DependencyDecoder(StructuredDecoder):
 
         :param parts: DependencyParts holding arcs
         :param scores: the scores for each part in `parts`
-        :param gold_scores: either None or gold binary labels for each part
+        :param gold_output: either None or gold binary labels for each part
         :param max_heads: maximum allowed head candidates for modifier
         :return: a new parts object and a corresponding new gold scores. If
             gold_scores was None, the second element will be None.
