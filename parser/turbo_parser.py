@@ -176,8 +176,9 @@ class TurboParser(StructuredClassifier):
         :return: a new DependencyParts object contained the kept arcs
         """
         scores = self.compute_pruner_scores(instance, parts)
-        new_parts, new_gold = self.decoder.decode_pruner_naive(
-            parts, scores, gold_output, self.options.pruner_max_heads)
+        new_parts, new_gold = self.decoder.decode_matrix_tree(
+            len(instance), parts.arc_index, parts, scores, gold_output,
+            self.options.pruner_max_heads)
 
         # during training, make sure that the gold parts are included
         if gold_output is not None:
@@ -214,8 +215,8 @@ class TurboParser(StructuredClassifier):
             if 'cs' in self.model_type:
                 self.make_parts_consecutive_siblings(instance, parts,
                                                      gold_output)
-            if 'gp' in self.model_type:
-                self.make_parts_grandparent(instance, parts, gold_output)
+            # if 'gp' in self.model_type:
+            #     self.make_parts_grandparent(instance, parts, gold_output)
 
         if instance.output is not None:
             gold_output = np.array(gold_output)
