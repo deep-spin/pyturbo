@@ -40,7 +40,7 @@ class DependencyParts(list):
             DependencyPartGrandparent
         :return: boolean
         """
-        return type_ in self.offsets
+        return type_ in self.offsets and self.offsets[type_][1] > 0
 
     def append(self, part):
         """

@@ -62,21 +62,6 @@ class TurboParser(StructuredClassifier):
                                           num_layers=1,
                                           dropout=0.))
 
-    @property
-    def neural_scorer(self):
-        """
-        Return the neural scorer that should be used. When the pruner is being
-        trained, it is the pruner scorer. Otherwise, it is the full parser
-        scorer
-        """
-        if self.is_training_pruner:
-            return self.pruner_neural_scorer
-        return self._neural_scorer
-
-    @neural_scorer.setter
-    def neural_scorer(self, value):
-        self._neural_scorer = value
-
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
         if not model_path:
@@ -160,6 +145,35 @@ class TurboParser(StructuredClassifier):
     
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
+    
+    def compute_scores(self, instance, parts, features):
+        """
+        Compute the scores of either the main parser or the pruner, as 
+        appropriate.
+        """
+        if self.is_training_pruner:
+            return self.compute_pruner_scores(instance, parts)
+        
+        return super(TurboParser, self).compute_scores(instance, parts,
+                                                       features)
+
+    def make_gradient_step(self, parts, features, eta, t, gold_output,
+                           predicted_output):
+        """
+        Perform a gradient step using either the main parser model or the
+        pruner, as appropriate.
+        """
+        if self.options.neural:
+            if self.is_training_pruner:
+                scorer = self.pruner_neural_scorer
+            else:
+                scorer = self.neural_scorer
+
+            scorer.compute_gradients(gold_output, predicted_output)
+            scorer.make_gradient_step()
+        else:
+            super(TurboParser, self).make_gradient_step(
+                parts, features, eta, t, gold_output, predicted_output)
 
     def compute_pruner_scores(self, instance, parts):
         """
@@ -178,7 +192,8 @@ class TurboParser(StructuredClassifier):
         scores = self.compute_pruner_scores(instance, parts)
         new_parts, new_gold = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores, gold_output,
-            self.options.pruner_max_heads)
+            self.options.pruner_max_heads,
+            self.options.pruner_posterior_threshold)
 
         # during training, make sure that the gold parts are included
         if gold_output is not None:
