@@ -10,7 +10,7 @@ from parser.dependency_instance_numeric import DependencyInstanceNumeric
 from parser.token_dictionary import TokenDictionary
 from parser.dependency_parts import DependencyParts, \
     DependencyPartArc, DependencyPartLabeledArc, DependencyPartGrandparent, \
-    DependencyPartNextSibling
+    DependencyPartNextSibling, DependencyPartGrandSibling
 from parser.dependency_features import DependencyFeatures
 from parser.dependency_neural_model import DependencyNeuralModel, special_tokens
 import numpy as np
@@ -135,12 +135,12 @@ class TurboParser(StructuredClassifier):
         """
         if self.options.prune_basic:
             self.is_training_pruner = True
-            logging.debug('Training pruner')
+            logging.info('Training pruner')
             super(TurboParser, self).train()
             self.has_pruner = True
 
         self.is_training_pruner = False
-        logging.debug('Training parser')
+        logging.info('Training parser')
         super(TurboParser, self).train()
     
     def get_formatted_instance(self, instance):
@@ -325,6 +325,94 @@ class TurboParser(StructuredClassifier):
                         gold_output.append(value)
 
         parts.set_offset(DependencyPartNextSibling, initial_index,
+                         len(parts) - initial_index)
+
+    def make_parts_grandsibling(self, instance, parts, gold_output):
+        """
+        Create the parts relative to grandsibling nodes.
+
+        Each part means that arcs g -> h, h -> m, and h ->s exist at the same
+        time.
+
+        :param instance:
+        :param parts:
+        :param gold_output:
+        :return:
+        """
+        make_gold = instance.output is not None
+
+        initial_index = len(parts)
+
+        for g in range(len(instance)):
+            for h in range(1, len(instance)):
+                if g == h:
+                    continue
+
+                if 0 > parts.find_arc_index(g, h):
+                    # pruned
+                    continue
+
+                gold_gh = _check_gold_arc(instance, g, h)
+
+                # check modifiers to the right
+                for m in range(h, len(instance)):
+                    if h != m and 0 > parts.find_arc_index(h, m):
+                        # pruned; h == m signals first child
+                        continue
+
+                    gold_hm = m == h or _check_gold_arc(instance, h, m)
+                    arc_between = False
+
+                    for s in range(m + 1, len(instance) + 1):
+                        if s < len(instance) and 0 > parts.find_arc_index(h, s):
+                            # pruned; s == len signals last child
+                            continue
+
+                        gold_hs = s == len(instance) or \
+                            _check_gold_arc(instance, h, s)
+
+                        part = DependencyPartGrandSibling(h, m, g, s)
+                        parts.append(part)
+
+                        if make_gold:
+                            value = 0
+                            if gold_hm and gold_hs and not arc_between:
+                                if gold_gh:
+                                    value = 1
+
+                                arc_between = True
+
+                            gold_output.append(value)
+
+                # check modifiers to the left
+                for m in range(h, 0, -1):
+                    if h != m and 0 > parts.find_arc_index(h, m):
+                        # pruned; h == m signals last child
+                        continue
+
+                    gold_hm = m == h or _check_gold_arc(instance, h, m)
+                    arc_between = False
+
+                    for s in range(m - 1, -1, -1):
+                        if s != 0 and 0 > parts.find_arc_index(h, s):
+                            # pruned out
+                            continue
+
+                        gold_hs = s == 0 or _check_gold_arc(instance, h, s)
+                        part = DependencyPartGrandSibling(h, m, g, s)
+                        parts.append(part)
+
+                        if make_gold:
+                            value = 0
+                            if gold_hm and gold_hs and not arc_between:
+                                if gold_gh:
+                                    value = 1
+
+                                arc_between = True
+
+                            gold_output.append(value)
+
+        parts.set_offset(DependencyPartGrandSibling, initial_index,
                          len(parts) - initial_index)
 
     def make_parts_grandparent(self, instance, parts, gold_output):

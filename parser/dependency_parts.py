@@ -25,6 +25,14 @@ class DependencyPartNextSibling(object):
         self.sibling = sibling
 
 
+class DependencyPartGrandSibling(object):
+    def __init__(self, head=-1, modifier=-1, grandparent=-1, sibling=-1):
+        self.head = head
+        self.modifier = modifier
+        self.sibling = sibling
+        self.grandparent = grandparent
+
+
 class DependencyParts(list):
     def __init__(self):
         self.index = None
