@@ -230,6 +230,7 @@ class TurboParser(StructuredClassifier):
             if 'cs' in self.model_type:
                 self.make_parts_consecutive_siblings(instance, parts,
                                                      gold_output)
+                self.print_parts(DependencyPartNextSibling, parts, gold_output)
             if 'gp' in self.model_type:
                 self.make_parts_grandparent(instance, parts, gold_output)
 
@@ -243,6 +244,23 @@ class TurboParser(StructuredClassifier):
             return parts, gold_output
 
         return parts
+
+    def print_parts(self, part_type, parts, gold):
+        """
+        Print the parts of a given type and their respective gold labels.
+
+        This function is for debugging purposes.
+
+        :param part_type: a subclass of DependencyPart
+        :param parts:
+        :param gold:
+        :return:
+        """
+        assert isinstance(parts, DependencyParts)
+        print('Iterating over parts of type', part_type.__name__)
+        for i, part in parts.iterate_over_type(part_type, True):
+            gold_label = gold[i] if gold is not None else None
+            print(part, gold_label)
 
     def make_parts_consecutive_siblings(self, instance, parts, gold_output):
         """
@@ -334,9 +352,10 @@ class TurboParser(StructuredClassifier):
         Each part means that arcs g -> h, h -> m, and h ->s exist at the same
         time.
 
-        :param instance:
-        :param parts:
-        :param gold_output:
+        :param instance: DependencyInstance
+        :param parts: DependencyParts, already pruned
+        :param gold_output: either None or a list with binary values indicating
+            the presence of each part. If a list, it will be modified in-place.
         :return:
         """
         make_gold = instance.output is not None
@@ -426,7 +445,7 @@ class TurboParser(StructuredClassifier):
             pruned.
         :type parts: DependencyParts
         :param gold_output: either None or a list with binary values indicating
-            the presence of each part.
+            the presence of each part. If a list, it will be modified in-place.1
         :return: if `instances` have the attribute output, return a numpy array
             with the gold output. If it doesn't, return None.
         """
