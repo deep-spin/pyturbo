@@ -52,15 +52,16 @@ class TurboParser(StructuredClassifier):
                     self.pruner_neural_scorer = NeuralScorer()
                     self.pruner_neural_scorer.initialize(pruner_model)
 
-                self.neural_scorer.initialize(
-                    DependencyNeuralModel(self.token_dictionary,
-                                          self.dictionary,
-                                          word_embedding_size=100,
-                                          tag_embedding_size=20,
-                                          distance_embedding_size=20,
-                                          hidden_size=50,
-                                          num_layers=1,
-                                          dropout=0.))
+                model = DependencyNeuralModel(
+                    self.token_dictionary, self.dictionary,
+                    word_embedding_size=self.options.embedding_size,
+                    tag_embedding_size=self.options.tag_embedding_size,
+                    distance_embedding_size=self.options.
+                    distance_embedding_size,
+                    hidden_size=self.options.hidden_size,
+                    num_layers=self.options.num_layers,
+                    dropout=self.options.dropout)
+                self.neural_scorer.initialize(model)
 
     @property
     def neural_scorer(self):

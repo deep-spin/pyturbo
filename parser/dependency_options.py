@@ -74,6 +74,18 @@ class DependencyOptions(Options):
                             default=10,
                             help="""Maximum number of possible head words for a
                             given word, in basic pruning.""")
+        parser.add_argument('--embedding_size', type=int, default=100,
+                            help="Size of word embeddings")
+        parser.add_argument('--tag_embedding_size', type='int', default=20,
+                            help='Size of tag embeddings')
+        parser.add_argument('--distance_embedding_size', type=int, default=20,
+                            help='Size of distance embeddings')
+        parser.add_argument('--hidden_size', type=int, default=100,
+                            help='Size of hidden layers')
+        parser.add_argument('--num_layers', type=int, default=1,
+                            help='Number of RNN layers')
+        parser.add_argument('--dropout', type=float, default=0,
+                            help='Dropout rate')
 
         """
 // Options for pruner training.
