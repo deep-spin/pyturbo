@@ -10,7 +10,7 @@ from parser.dependency_instance_numeric import DependencyInstanceNumeric
 from parser.token_dictionary import TokenDictionary
 from parser.dependency_parts import DependencyParts, \
     DependencyPartArc, DependencyPartLabeledArc, DependencyPartGrandparent, \
-    DependencyPartNextSibling
+    DependencyPartNextSibling, DependencyPartGrandSibling
 from parser.dependency_features import DependencyFeatures
 from parser.dependency_neural_model import DependencyNeuralModel, special_tokens
 import numpy as np
@@ -62,21 +62,6 @@ class TurboParser(StructuredClassifier):
                     num_layers=self.options.num_layers,
                     dropout=self.options.dropout)
                 self.neural_scorer.initialize(model)
-
-    @property
-    def neural_scorer(self):
-        """
-        Return the neural scorer that should be used. When the pruner is being
-        trained, it is the pruner scorer. Otherwise, it is the full parser
-        scorer
-        """
-        if self.is_training_pruner:
-            return self.pruner_neural_scorer
-        return self._neural_scorer
-
-    @neural_scorer.setter
-    def neural_scorer(self, value):
-        self._neural_scorer = value
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -151,16 +136,45 @@ class TurboParser(StructuredClassifier):
         """
         if self.options.prune_basic:
             self.is_training_pruner = True
-            logging.debug('Training pruner')
+            logging.info('Training pruner')
             super(TurboParser, self).train()
             self.has_pruner = True
 
         self.is_training_pruner = False
-        logging.debug('Training parser')
+        logging.info('Training parser')
         super(TurboParser, self).train()
     
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
+    
+    def compute_scores(self, instance, parts, features):
+        """
+        Compute the scores of either the main parser or the pruner, as 
+        appropriate.
+        """
+        if self.is_training_pruner:
+            return self.compute_pruner_scores(instance, parts)
+        
+        return super(TurboParser, self).compute_scores(instance, parts,
+                                                       features)
+
+    def make_gradient_step(self, parts, features, eta, t, gold_output,
+                           predicted_output):
+        """
+        Perform a gradient step using either the main parser model or the
+        pruner, as appropriate.
+        """
+        if self.options.neural:
+            if self.is_training_pruner:
+                scorer = self.pruner_neural_scorer
+            else:
+                scorer = self.neural_scorer
+
+            scorer.compute_gradients(gold_output, predicted_output)
+            scorer.make_gradient_step()
+        else:
+            super(TurboParser, self).make_gradient_step(
+                parts, features, eta, t, gold_output, predicted_output)
 
     def compute_pruner_scores(self, instance, parts):
         """
@@ -179,7 +193,8 @@ class TurboParser(StructuredClassifier):
         scores = self.compute_pruner_scores(instance, parts)
         new_parts, new_gold = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores, gold_output,
-            self.options.pruner_max_heads)
+            self.options.pruner_max_heads,
+            self.options.pruner_posterior_threshold)
 
         # during training, make sure that the gold parts are included
         if gold_output is not None:
@@ -216,6 +231,7 @@ class TurboParser(StructuredClassifier):
             if 'cs' in self.model_type:
                 self.make_parts_consecutive_siblings(instance, parts,
                                                      gold_output)
+                self.print_parts(DependencyPartNextSibling, parts, gold_output)
             if 'gp' in self.model_type:
                 self.make_parts_grandparent(instance, parts, gold_output)
 
@@ -229,6 +245,23 @@ class TurboParser(StructuredClassifier):
             return parts, gold_output
 
         return parts
+
+    def print_parts(self, part_type, parts, gold):
+        """
+        Print the parts of a given type and their respective gold labels.
+
+        This function is for debugging purposes.
+
+        :param part_type: a subclass of DependencyPart
+        :param parts:
+        :param gold:
+        :return:
+        """
+        assert isinstance(parts, DependencyParts)
+        print('Iterating over parts of type', part_type.__name__)
+        for i, part in parts.iterate_over_type(part_type, True):
+            gold_label = gold[i] if gold is not None else None
+            print(part, gold_label)
 
     def make_parts_consecutive_siblings(self, instance, parts, gold_output):
         """
@@ -313,6 +346,95 @@ class TurboParser(StructuredClassifier):
         parts.set_offset(DependencyPartNextSibling, initial_index,
                          len(parts) - initial_index)
 
+    def make_parts_grandsibling(self, instance, parts, gold_output):
+        """
+        Create the parts relative to grandsibling nodes.
+
+        Each part means that arcs g -> h, h -> m, and h ->s exist at the same
+        time.
+
+        :param instance: DependencyInstance
+        :param parts: DependencyParts, already pruned
+        :param gold_output: either None or a list with binary values indicating
+            the presence of each part. If a list, it will be modified in-place.
+        :return:
+        """
+        make_gold = instance.output is not None
+
+        initial_index = len(parts)
+
+        for g in range(len(instance)):
+            for h in range(1, len(instance)):
+                if g == h:
+                    continue
+
+                if 0 > parts.find_arc_index(g, h):
+                    # pruned
+                    continue
+
+                gold_gh = _check_gold_arc(instance, g, h)
+
+                # check modifiers to the right
+                for m in range(h, len(instance)):
+                    if h != m and 0 > parts.find_arc_index(h, m):
+                        # pruned; h == m signals first child
+                        continue
+
+                    gold_hm = m == h or _check_gold_arc(instance, h, m)
+                    arc_between = False
+
+                    for s in range(m + 1, len(instance) + 1):
+                        if s < len(instance) and 0 > parts.find_arc_index(h, s):
+                            # pruned; s == len signals last child
+                            continue
+
+                        gold_hs = s == len(instance) or \
+                            _check_gold_arc(instance, h, s)
+
+                        part = DependencyPartGrandSibling(h, m, g, s)
+                        parts.append(part)
+
+                        if make_gold:
+                            value = 0
+                            if gold_hm and gold_hs and not arc_between:
+                                if gold_gh:
+                                    value = 1
+
+                                arc_between = True
+
+                            gold_output.append(value)
+
+                # check modifiers to the left
+                for m in range(h, 0, -1):
+                    if h != m and 0 > parts.find_arc_index(h, m):
+                        # pruned; h == m signals last child
+                        continue
+
+                    gold_hm = m == h or _check_gold_arc(instance, h, m)
+                    arc_between = False
+
+                    for s in range(m - 1, -1, -1):
+                        if s != 0 and 0 > parts.find_arc_index(h, s):
+                            # pruned out
+                            continue
+
+                        gold_hs = s == 0 or _check_gold_arc(instance, h, s)
+                        part = DependencyPartGrandSibling(h, m, g, s)
+                        parts.append(part)
+
+                        if make_gold:
+                            value = 0
+                            if gold_hm and gold_hs and not arc_between:
+                                if gold_gh:
+                                    value = 1
+
+                                arc_between = True
+
+                            gold_output.append(value)
+
+        parts.set_offset(DependencyPartGrandSibling, initial_index,
+                         len(parts) - initial_index)
+
     def make_parts_grandparent(self, instance, parts, gold_output):
         """
         Create the parts relative to grandparents.
@@ -324,7 +446,7 @@ class TurboParser(StructuredClassifier):
             pruned.
         :type parts: DependencyParts
         :param gold_output: either None or a list with binary values indicating
-            the presence of each part.
+            the presence of each part. If a list, it will be modified in-place.1
         :return: if `instances` have the attribute output, return a numpy array
             with the gold output. If it doesn't, return None.
         """
