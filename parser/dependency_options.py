@@ -75,8 +75,8 @@ class DependencyOptions(Options):
                             help="""Maximum number of possible head words for a
                             given word, in basic pruning.""")
         parser.add_argument('--embedding_size', type=int, default=100,
-                            help="Size of word embeddings")
-        parser.add_argument('--tag_embedding_size', type='int', default=20,
+                            help='Size of word embeddings')
+        parser.add_argument('--tag_embedding_size', type=int, default=20,
                             help='Size of tag embeddings')
         parser.add_argument('--distance_embedding_size', type=int, default=20,
                             help='Size of distance embeddings')
@@ -134,6 +134,13 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.prune_basic = bool(args['prune_basic'])
         self.pruner_posterior_threshold = args['pruner_posterior_threshold']
         self.pruner_max_heads = args['pruner_max_heads']
+
+        self.embedding_size = args['embedding_size']
+        self.tag_embedding_size = args['tag_embedding_size']
+        self.distance_embedding_size = args['distance_embedding_size']
+        self.hidden_size = args['hidden_size']
+        self.num_layers = args['num_layers']
+        self.dropout = args['dropout']
 
         if self.model_type == 'basic':
             self.model_type = 'af'
