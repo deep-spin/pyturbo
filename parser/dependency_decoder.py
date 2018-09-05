@@ -68,7 +68,7 @@ class DependencyDecoder(StructuredDecoder):
 
         :param arc_index: a 2d array mapping pairs (head, modifier) to a
             position in the arcs list; -1 if the combination doesn't exist.
-        :param arcs: list of DependencyPartArc objects
+        :param parts: list of DependencyPartArc objects
         :param scores: 1d array with the score for each arc
         :return: a new parts object and a corresponding new gold scores. If
             gold_scores was None, the second element will be None.
