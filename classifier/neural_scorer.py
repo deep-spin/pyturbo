@@ -7,7 +7,7 @@ class NeuralScorer(object):
         if model:
             self.initialize(model, learning_rate)
 
-    def initialize(self, model, learning_rate):
+    def initialize(self, model, learning_rate=0.001):
         self.model = model
         self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
