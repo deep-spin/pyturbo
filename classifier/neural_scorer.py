@@ -9,6 +9,8 @@ class NeuralScorer(object):
 
     def initialize(self, model, learning_rate=0.001):
         self.model = model
+        if torch.cuda.is_available():
+            self.model.cuda()
         self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     def compute_scores(self, instance, parts):
