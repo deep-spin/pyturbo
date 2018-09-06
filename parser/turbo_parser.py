@@ -61,7 +61,7 @@ class TurboParser(StructuredClassifier):
                     hidden_size=self.options.hidden_size,
                     num_layers=self.options.num_layers,
                     dropout=self.options.dropout)
-                self.neural_scorer.initialize(model)
+                self.neural_scorer.initialize(model, self.options.learning_rate)
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -231,7 +231,6 @@ class TurboParser(StructuredClassifier):
             if 'cs' in self.model_type:
                 self.make_parts_consecutive_siblings(instance, parts,
                                                      gold_output)
-                self.print_parts(DependencyPartNextSibling, parts, gold_output)
             if 'gp' in self.model_type:
                 self.make_parts_grandparent(instance, parts, gold_output)
 

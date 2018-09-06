@@ -354,8 +354,6 @@ class StructuredClassifier(object):
                 if loss < 0.0:
                     if loss < -1e-12:
                         logging.warning('Negative loss set to zero: %f' % loss)
-                        print(instance.output.heads)
-                        exit()
                     loss = 0.0
 
                 total_loss += loss

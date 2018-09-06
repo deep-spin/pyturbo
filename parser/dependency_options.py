@@ -86,6 +86,8 @@ class DependencyOptions(Options):
                             help='Number of RNN layers')
         parser.add_argument('--dropout', type=float, default=0,
                             help='Dropout rate')
+        parser.add_argument('--learning_rate', type=float, default=0.001,
+                            help='Neural model learning rate')
 
         """
 // Options for pruner training.
@@ -141,6 +143,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.hidden_size = args['hidden_size']
         self.num_layers = args['num_layers']
         self.dropout = args['dropout']
+        self.learning_rate = args['learning_rate']
 
         if self.model_type == 'basic':
             self.model_type = 'af'

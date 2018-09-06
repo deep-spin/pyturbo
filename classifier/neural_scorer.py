@@ -2,14 +2,14 @@ import torch
 import torch.optim as optim
 
 class NeuralScorer(object):
-    def __init__(self, model=None):
+    def __init__(self, model=None, learning_rate=0.001):
         self.scores = None
         if model:
-            self.initialize(model)
+            self.initialize(model, learning_rate)
 
-    def initialize(self, model):
+    def initialize(self, model, learning_rate):
         self.model = model
-        self.optimizer = optim.Adam(model.parameters(), lr=0.001)
+        self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     def compute_scores(self, instance, parts):
         # Run the forward pass.
