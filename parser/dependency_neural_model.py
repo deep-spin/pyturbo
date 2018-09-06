@@ -154,7 +154,7 @@ class DependencyNeuralModel(nn.Module):
                     dist = arc.head - arc.modifier
                     dist = np.nonzero(dist >= self.distance_bins)[0][-1]
                     dist += len(self.distance_bins)
-                dist = torch.tensor(dist, dtype=torch.long)
+                dist = torch.tensor(dist, dtype=torch.long).cuda()
                 dist_embed = self.distance_embeddings(dist).view(1, -1)
                 arc_state = self.tanh(heads[arc.head] + \
                                       modifiers[arc.modifier] + \
@@ -250,8 +250,8 @@ class DependencyNeuralModel(nn.Module):
 
         word_indices = [instance.get_form(i) for i in range(len(instance))]
         tag_indices = [instance.get_tag(i) for i in range(len(instance))]
-        words = torch.tensor(word_indices, dtype=torch.long)
-        tags = torch.tensor(tag_indices, dtype=torch.long)
+        words = torch.tensor(word_indices).cuda()
+        tags = torch.tensor(tag_indices).cuda()
         embeds = torch.cat([self.word_embeddings(words),
                             self.tag_embeddings(tags)],
                            dim=1)
