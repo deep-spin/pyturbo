@@ -15,6 +15,7 @@ class StructuredDecoder(object):
                     old_mira=False):
         '''Perform cost-augmented decoding or classical MIRA.'''
         p = 0.5 - gold_outputs
+        #TODO: any reason why this is not 0.5 * np.sum(gold_outputs)?
         q = 0.5 * np.ones(len(gold_outputs)).dot(gold_outputs)
         if old_mira:
             predicted_outputs = self.decode(instance, parts, scores)
