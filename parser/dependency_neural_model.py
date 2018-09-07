@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from parser.dependency_parts import DependencyPartArc, DependencyParts, \
-    DependencyPartNextSibling, DependencyPartGrandparent
+    DependencyPartNextSibling, DependencyPartGrandparent, \
+    DependencyPartGrandSibling
 import numpy as np
 import pickle
 
@@ -29,6 +30,7 @@ class DependencyNeuralModel(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
+        self.on_gpu = torch.cuda.is_available()
 
         self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
                                             word_embedding_size)
@@ -56,6 +58,8 @@ class DependencyNeuralModel(nn.Module):
         self.head_projection = self._create_projection()
         self.modifier_projection = self._create_projection()
 
+        #TODO: only create parameters as necessary for the model
+
         # second order -- grandparent
         self.gp_grandparent_projection = self._create_projection()
         self.gp_head_projection = self._create_projection()
@@ -66,6 +70,12 @@ class DependencyNeuralModel(nn.Module):
         self.sib_modifier_projection = self._create_projection()
         self.sib_sibling_projection = self._create_projection()
         self.null_sibling_tensor = self._create_special_tensor()
+
+        # third order -- grandsiblings (consecutive)
+        self.gsib_head_projection = self._create_projection()
+        self.gsib_modifier_projection = self._create_projection()
+        self.gsib_sibling_projection = self._create_projection()
+        self.gsib_grandparent_projection = self._create_projection()
 
         if self.distance_embedding_size:
             self.distance_projection = nn.Linear(
@@ -78,6 +88,7 @@ class DependencyNeuralModel(nn.Module):
         self.arc_scorer = self._create_scorer()
         self.sibling_scorer = self._create_scorer()
         self.grandparent_scorer = self._create_scorer()
+        self.grandsibling_scorer = self._create_scorer()
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -91,7 +102,10 @@ class DependencyNeuralModel(nn.Module):
         if shape is None:
             shape = self.hidden_size
 
-        return torch.randn(shape, requires_grad=True)
+        tensor = torch.randn(shape, requires_grad=True)
+        if self.on_gpu:
+            tensor = tensor.cuda()
+        return 
 
     def _create_scorer(self, input_size=None):
         """
@@ -137,32 +151,52 @@ class DependencyNeuralModel(nn.Module):
 
         :param states: hidden states returned by the RNN; one for each word
         :param parts: a DependencyParts object containing the parts to be scored
+        :type parts: DependencyParts
         :param scores: tensor for storing the scores for each part. The
             positions relative to first order features are indexed by the parts
             object. It is modified in-place.
         """
-        heads = self.head_projection(states)
-        modifiers = self.modifier_projection(states)
-        offset, size = parts.get_offset(DependencyPartArc)
-        for r in range(offset, offset + size):
-            arc = parts[r]
+        head_tensors = self.head_projection(states)
+        modifier_tensors = self.modifier_projection(states)
+        offset, num_arcs = parts.get_offset(DependencyPartArc)
+
+        head_indices = []
+        modifier_indices = []
+        distance_indices = []
+
+        for part in parts.iterate_over_type(DependencyPartArc):
+            head_indices.append(part.head)
+            modifier_indices.append(part.modifier)
             if self.distance_embedding_size:
-                if arc.modifier > arc.head:
-                    dist = arc.modifier - arc.head
+                if part.modifier > part.head:
+                    dist = part.modifier - part.head
                     dist = np.nonzero(dist >= self.distance_bins)[0][-1]
                 else:
-                    dist = arc.head - arc.modifier
+                    dist = part.head - part.modifier
                     dist = np.nonzero(dist >= self.distance_bins)[0][-1]
                     dist += len(self.distance_bins)
-                dist = torch.tensor(dist, dtype=torch.long).cuda()
-                dist_embed = self.distance_embeddings(dist).view(1, -1)
-                arc_state = self.tanh(heads[arc.head] + \
-                                      modifiers[arc.modifier] + \
-                                      self.distance_projection(dist_embed))
-            else:
-                arc_state = self.tanh(heads[arc.head] + \
-                                      modifiers[arc.modifier])
-            scores[r] = self.arc_scorer(arc_state)
+
+                distance_indices.append(dist)
+
+        # now index all of them to process at once
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
+        if self.distance_embedding_size:
+            distance_indices = torch.tensor(distance_indices, dtype=torch.long)
+            if self.on_gpu:
+                distance_indices = distance_indices.cuda()
+            
+            distances = self.distance_embeddings(distance_indices)
+            distance_projections = self.distance_projection(distances)
+            distance_projections = distance_projections.view(
+                -1, 1, self.hidden_size)
+
+        else:
+            distance_projections = 0
+
+        arc_states = self.tanh(heads + modifiers + distance_projections)
+        arc_scores = self.arc_scorer(arc_states)
+        scores[offset:offset + num_arcs] = arc_scores.view(-1)
 
     def _compute_grandparent_scores(self, states, parts, scores):
         """
@@ -245,6 +279,55 @@ class DependencyNeuralModel(nn.Module):
         offset, size = parts.get_offset(DependencyPartNextSibling)
         scores[offset:offset + size] = sibling_scores.view(-1)
 
+    def _compute_grandsibling_scores(self, states, parts, scores):
+        """
+        Compute the consecutive grandsibling scores and store them in the
+        appropriate position in the `scores` tensor.
+
+        :param states: hidden states returned by the RNN; one for each word
+        :param parts: a DependencyParts object containing the parts to be scored
+        :type parts: DependencyParts
+        :param scores: tensor for storing the scores for each part. The
+            positions relative to the features are indexed by the parts
+            object. It is modified in-place.
+        """
+        head_tensors = self.gsib_head_projection(states)
+        modifier_tensors = self.gsib_modifier_projection(states)
+        word_sibling_tensors = self.gsib_sibling_projection(states)
+        grandparent_tensors = self.gsib_grandparent_projection(states)
+
+        # include the vector for null sibling
+        # word_sibling_tensors is (num_words, batch=1, hidden_units)
+        sibling_tensors = torch.cat([word_sibling_tensors,
+                                    self.null_sibling_tensor.view(1, 1, -1)])
+
+        head_indices = []
+        modifier_indices = []
+        sibling_indices = []
+        grandparent_indices = []
+
+        for part in parts.iterate_over_type(DependencyPartGrandSibling):
+            # list all indices to the candidate head/mod/sib/grandparent
+            head_indices.append(part.head)
+            modifier_indices.append(part.modifier)
+            grandparent_indices.append(part.grandparent)
+            if part.sibling == 0:
+                # this indicates there's no sibling to the left
+                # (to the right, sibling == len(states))
+                sibling_indices.append(len(states))
+            else:
+                sibling_indices.append(part.sibling)
+
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
+        siblings = sibling_tensors[sibling_indices]
+        grandparents = grandparent_tensors[grandparent_indices]
+        gsib_states = self.tanh(heads + modifiers + siblings + grandparents)
+        gsib_scores = self.grandsibling_scorer(gsib_states)
+
+        offset, size = parts.get_offset(DependencyPartGrandSibling)
+        scores[offset:offset + size] = gsib_scores.view(-1)
+
     def forward(self, instance, parts):
         scores = torch.zeros(len(parts))
 
@@ -255,12 +338,18 @@ class DependencyNeuralModel(nn.Module):
         embeds = torch.cat([self.word_embeddings(words),
                             self.tag_embeddings(tags)],
                            dim=1)
+
+        # new shape is (num_tokens, batch=1, hidden_size)
         states, _ = self.rnn(embeds.view(len(instance), 1, -1))
 
         self._compute_first_order_scores(states, parts, scores)
         if parts.has_type(DependencyPartNextSibling):
             self._compute_consecutive_sibling_scores(states, parts, scores)
+
         if parts.has_type(DependencyPartGrandparent):
             self._compute_grandparent_scores(states, parts, scores)
+
+        if parts.has_type(DependencyPartGrandSibling):
+            self._compute_grandsibling_scores(states, parts, scores)
 
         return scores
