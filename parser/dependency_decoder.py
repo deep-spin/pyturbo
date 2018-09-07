@@ -7,7 +7,7 @@ from classifier.structured_decoder import StructuredDecoder
 from parser.dependency_instance import DependencyInstance
 from parser.dependency_parts import DependencyPartArc, \
     DependencyPartLabeledArc, DependencyPartNextSibling, \
-    DependencyParts, DependencyPartGrandparent
+    DependencyParts, DependencyPartGrandparent, DependencyPartGrandSibling
 
 
 class DependencyDecoder(StructuredDecoder):
@@ -195,6 +195,56 @@ class DependencyDecoder(StructuredDecoder):
         tree_factor.initialize(length, arc_indices)
 
         return variables
+
+    def create_grandsibling_factors(self, instance, parts, scores, graph,
+                                    variables):
+        """
+        Include grandsibling factors (grandparent head automata) in the graph.
+
+        :type parts: DependencyParts
+        :param scores: np.array
+        :param graph: the graph
+        :param variables: list of binary variables denoting arcs
+        """
+        # TODO: try to avoid repeitition with the head_automaton function
+        offset_arcs, _ = parts.get_offset(DependencyPartArc)
+
+        n = len(instance)
+        offset_gsib, num_gsib = parts.get_offset(
+            DependencyPartNextSibling)
+
+        # loop through all parts and organize them according to the head
+        left_siblings = create_empty_lists(n)
+        right_siblings = create_empty_lists(n)
+        left_scores = create_empty_lists(n)
+        right_scores = create_empty_lists(n)
+
+        for r, part in parts.iterate_over_type(DependencyPartGrandSibling,
+                                               True):
+            h = part.head
+            m = part.modifier
+            g = part.grandparent
+            s = part.sibling
+
+            if s > h:
+                # right sibling
+                right_siblings[h].append((g, h, m, s))
+                right_scores[h].append(scores[r])
+            else:
+                # left sibling
+                left_siblings[h].append((g, h, m, s))
+                left_scores[h].append(scores[r])
+
+        # create right and left automata for each head
+        for h in range(n):
+
+            # left hand side
+            # these are the variables constrained by the factor and their arcs
+            local_variables = []
+
+            # these are tuples (h, m)
+            arcs = []
+
 
     def create_grandparent_factors(self, parts, scores, graph, variables):
         """
