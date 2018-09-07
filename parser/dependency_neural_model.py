@@ -105,7 +105,8 @@ class DependencyNeuralModel(nn.Module):
         tensor = torch.randn(shape, requires_grad=True)
         if self.on_gpu:
             tensor = tensor.cuda()
-        return 
+
+        return tensor
 
     def _create_scorer(self, input_size=None):
         """
