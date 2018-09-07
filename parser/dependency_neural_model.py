@@ -147,32 +147,49 @@ class DependencyNeuralModel(nn.Module):
 
         :param states: hidden states returned by the RNN; one for each word
         :param parts: a DependencyParts object containing the parts to be scored
+        :type parts: DependencyParts
         :param scores: tensor for storing the scores for each part. The
             positions relative to first order features are indexed by the parts
             object. It is modified in-place.
         """
-        heads = self.head_projection(states)
-        modifiers = self.modifier_projection(states)
-        offset, size = parts.get_offset(DependencyPartArc)
-        for r in range(offset, offset + size):
-            arc = parts[r]
+        head_tensors = self.head_projection(states)
+        modifier_tensors = self.modifier_projection(states)
+        offset, num_arcs = parts.get_offset(DependencyPartArc)
+
+        head_indices = []
+        modifier_indices = []
+        distance_indices = []
+
+        for part in parts.iterate_over_type(DependencyPartArc):
+            head_indices.append(part.head)
+            modifier_indices.append(part.modifier)
             if self.distance_embedding_size:
-                if arc.modifier > arc.head:
-                    dist = arc.modifier - arc.head
+                if part.modifier > part.head:
+                    dist = part.modifier - part.head
                     dist = np.nonzero(dist >= self.distance_bins)[0][-1]
                 else:
-                    dist = arc.head - arc.modifier
+                    dist = part.head - part.modifier
                     dist = np.nonzero(dist >= self.distance_bins)[0][-1]
                     dist += len(self.distance_bins)
-                dist = torch.tensor(dist, dtype=torch.long)
-                dist_embed = self.distance_embeddings(dist).view(1, -1)
-                arc_state = self.tanh(heads[arc.head] + \
-                                      modifiers[arc.modifier] + \
-                                      self.distance_projection(dist_embed))
-            else:
-                arc_state = self.tanh(heads[arc.head] + \
-                                      modifiers[arc.modifier])
-            scores[r] = self.arc_scorer(arc_state)
+
+                distance_indices.append(dist)
+
+        # now index all of them to process at once
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
+        if self.distance_embedding_size:
+            distance_indices = torch.tensor(distance_indices, dtype=torch.long)
+            distances = self.distance_embeddings(distance_indices)
+            distance_projections = self.distance_projection(distances)
+            distance_projections = distance_projections.view(
+                -1, 1, self.hidden_size)
+
+        else:
+            distance_projections = 0
+
+        arc_states = self.tanh(heads + modifiers + distance_projections)
+        arc_scores = self.arc_scorer(arc_states)
+        scores[offset:offset + num_arcs] = arc_scores.view(-1)
 
     def _compute_grandparent_scores(self, states, parts, scores):
         """
@@ -314,6 +331,8 @@ class DependencyNeuralModel(nn.Module):
         embeds = torch.cat([self.word_embeddings(words),
                             self.tag_embeddings(tags)],
                            dim=1)
+
+        # new shape is (num_tokens, batch=1, hidden_size)
         states, _ = self.rnn(embeds.view(len(instance), 1, -1))
 
         self._compute_first_order_scores(states, parts, scores)
