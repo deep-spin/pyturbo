@@ -18,6 +18,20 @@ class DependencyDecoder(StructuredDecoder):
 
     def __init__(self):
         StructuredDecoder.__init__(self)
+        self.left_siblings = None
+        self.right_siblings = None
+        self.left_siblings_scores = None
+        self.right_siblings_scores = None
+
+        self.left_grandparents = None
+        self.right_grandparents = None
+        self.left_grandparents_scores = None
+        self.right_grandparents_scores = None
+
+        self.left_grandsiblings = None
+        self.right_grandsiblings = None
+        self.left_grandsiblings_scores = None
+        self.right_grandsiblings_scores = None
 
     def decode(self, instance, parts, scores):
         """
@@ -33,7 +47,6 @@ class DependencyDecoder(StructuredDecoder):
         :return:
         """
         graph = fg.PFactorGraph()
-        # graph.set_verbosity(2)
         variables = self.create_tree_factor(instance, parts, scores, graph)
 
         # create the factors in a predetermined order
@@ -59,6 +72,46 @@ class DependencyDecoder(StructuredDecoder):
                                                      additional_posteriors)
 
         return predicted_output
+
+    def _index_parts_by_head(self, parts, instance, scores):
+        """
+        Create data structures mapping heads to lists of dependency parts,
+        such as siblings or grandparents. The data strutctures are member
+        variables.
+
+        :type parts: DependencyParts
+        :type instance: DependencyInstance
+        :type scores: np.ndarray
+        """
+        n = len(instance)
+        use_siblings = parts.has_type(DependencyPartNextSibling)
+        use_grandparents = parts.has_type(DependencyPartGrandparent)
+        use_grandsiblings = parts.has_type(DependencyPartGrandSibling)
+
+        if use_siblings:
+            self.left_siblings = create_empty_lists(n)
+            self.left_siblings_scores = create_empty_lists(n)
+            self.right_siblings = create_empty_lists(n)
+            self.right_siblings_scores = create_empty_lists(n)
+
+            for i, part in parts.iterate_over_type(DependencyPartNextSibling,
+                                                   return_index=True):
+                h = part.head
+                m = part.modifier
+                s = part.sibling
+
+                if s > h:
+                    # right sibling
+                    self.right_siblings[h].append((h, m, s))
+                    self.right_siblings_scores[h].append(scores[i])
+                else:
+                    # left sibling
+                    self.left_siblings[h].append((h, m, s))
+                    self.left_siblings_scores[h].append(scores[i])
+
+        if use_grandsiblings:
+            pass
+
 
     def decode_matrix_tree(self, length, arc_index, parts, scores, gold_output,
                            max_heads, threshold=0):
@@ -242,8 +295,24 @@ class DependencyDecoder(StructuredDecoder):
             # these are the variables constrained by the factor and their arcs
             local_variables = []
 
-            # these are tuples (h, m)
-            arcs = []
+            # tuples (g, h)
+            incoming_arcs = []
+
+            # tuples (h, m)
+            outgoing_arcs = []
+
+            for part in left_siblings[h]:
+                h = part.head
+                m = part.modifier
+                g = part.grandparent
+                s = part.sibling
+
+                index_gh = parts.find_arc_index(g, h)
+                var_index_gh = index_gh - offset_arcs
+
+                incoming_arcs.append((g, h))
+                outgoing_arcs.append((h, m))
+
 
 
     def create_grandparent_factors(self, parts, scores, graph, variables):
