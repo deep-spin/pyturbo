@@ -334,8 +334,12 @@ class DependencyNeuralModel(nn.Module):
 
         word_indices = [instance.get_form(i) for i in range(len(instance))]
         tag_indices = [instance.get_tag(i) for i in range(len(instance))]
-        words = torch.tensor(word_indices).cuda()
-        tags = torch.tensor(tag_indices).cuda()
+        words = torch.tensor(word_indices)
+        tags = torch.tensor(tag_indices)
+        if self.on_gpu:
+            words = words.cuda()
+            tags = tags.cuda()
+
         embeds = torch.cat([self.word_embeddings(words),
                             self.tag_embeddings(tags)],
                            dim=1)
