@@ -10,28 +10,44 @@ from parser.dependency_parts import DependencyPartArc, \
     DependencyParts, DependencyPartGrandparent, DependencyPartGrandSibling
 
 
-class DependencyDecoder(StructuredDecoder):
+class PartStructure(object):
+    """
+    Class to store a list of dependency parts relative to a given head, as well
+    as their scores and indices.
+    """
+    def __init__(self):
+        self.parts = []
+        self.scores = []
+        self.indices = []
 
-    # this tracks the order in which different types of part are processed
-    # (it shall later include grandparents, grandsiblings, etc)
-    part_types = [DependencyPartNextSibling, DependencyPartGrandparent]
+    def append(self, part, score, index):
+        self.parts.append(part)
+        self.scores.append(score)
+        self.indices.append(index)
+
+    def get_arcs(self):
+        """
+        Return a list of (h, m) tuples in the structure (only considers the head
+        and modifier compoinent of each part).
+        """
+        return [(part.head, part.modifier) for part in self.parts]
+
+
+class DependencyDecoder(StructuredDecoder):
 
     def __init__(self):
         StructuredDecoder.__init__(self)
         self.left_siblings = None
         self.right_siblings = None
-        self.left_siblings_scores = None
-        self.right_siblings_scores = None
-
         self.left_grandparents = None
         self.right_grandparents = None
-        self.left_grandparents_scores = None
-        self.right_grandparents_scores = None
-
         self.left_grandsiblings = None
         self.right_grandsiblings = None
-        self.left_grandsiblings_scores = None
-        self.right_grandsiblings_scores = None
+
+        self.additional_indices = None
+        self.use_grandsiblings = None
+        self.use_grandparents = None
+        self.use_siblings = None
 
     def decode(self, instance, parts, scores):
         """
@@ -49,17 +65,21 @@ class DependencyDecoder(StructuredDecoder):
         graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores, graph)
 
-        # create the factors in a predetermined order
-        for type_ in self.part_types:
-            if not parts.has_type(type_):
-                continue
+        # this keeps track of the index of each additional part added to the
+        # graph. The i-th part added to the graph will have its index to the
+        # parts list stored in additiona_index[i]
+        self.additional_indices = []
 
-            if type_ == DependencyPartNextSibling:
-                self.create_next_sibling_factors(instance, parts, scores,
-                                                 graph, variables)
+        self.use_siblings = parts.has_type(DependencyPartNextSibling)
+        self.use_grandparents = parts.has_type(DependencyPartGrandparent)
+        self.use_grandsiblings = parts.has_type(DependencyPartGrandSibling)
 
-            if type_ == DependencyPartGrandparent:
-                self.create_grandparent_factors(parts, scores, graph, variables)
+        self._index_parts_by_head(parts, instance, scores)
+
+        if self.use_grandparents:
+            self.create_grandparent_factors(parts, scores, graph, variables)
+        if self.use_siblings:
+            self.create_next_sibling_factors(parts, graph, variables)
 
         graph.set_eta_ad3(.05)
         graph.adapt_eta_ad3(True)
@@ -84,34 +104,27 @@ class DependencyDecoder(StructuredDecoder):
         :type scores: np.ndarray
         """
         n = len(instance)
-        use_siblings = parts.has_type(DependencyPartNextSibling)
-        use_grandparents = parts.has_type(DependencyPartGrandparent)
-        use_grandsiblings = parts.has_type(DependencyPartGrandSibling)
 
-        if use_siblings:
-            self.left_siblings = create_empty_lists(n)
-            self.left_siblings_scores = create_empty_lists(n)
-            self.right_siblings = create_empty_lists(n)
-            self.right_siblings_scores = create_empty_lists(n)
+        if self.use_siblings:
+            self.left_siblings = create_empty_structures(n)
+            self.right_siblings = create_empty_structures(n)
+            _populate_structure_list(
+                self.left_siblings, self.right_siblings, parts, scores,
+                DependencyPartNextSibling)
 
-            for i, part in parts.iterate_over_type(DependencyPartNextSibling,
-                                                   return_index=True):
-                h = part.head
-                m = part.modifier
-                s = part.sibling
+        if self.use_grandparents:
+            self.left_grandparents = create_empty_structures(n)
+            self.right_grandparents = create_empty_structures(n)
+            _populate_structure_list(
+                self.left_grandparents, self.right_grandparents, parts, scores,
+                DependencyPartGrandparent)
 
-                if s > h:
-                    # right sibling
-                    self.right_siblings[h].append((h, m, s))
-                    self.right_siblings_scores[h].append(scores[i])
-                else:
-                    # left sibling
-                    self.left_siblings[h].append((h, m, s))
-                    self.left_siblings_scores[h].append(scores[i])
-
-        if use_grandsiblings:
-            pass
-
+        if self.use_grandsiblings:
+            self.left_grandsiblings = create_empty_structures(n)
+            self.right_grandsiblings = create_empty_structures(n)
+            _populate_structure_list(
+                self.left_grandsiblings, self.right_grandsiblings, parts,
+                scores, DependencyPartGrandSibling)
 
     def decode_matrix_tree(self, length, arc_index, parts, scores, gold_output,
                            max_heads, threshold=0):
@@ -196,26 +209,28 @@ class DependencyDecoder(StructuredDecoder):
         :return: a numpy array with the same size as parts
         """
         posteriors = np.array(posteriors)
-        additional_posteriors = np.array(additional_posteriors)
         predicted_output = np.zeros(len(parts), posteriors.dtype)
 
-        # copy the posteriors and additional to predicted_output in the same
-        # order they were created
+        # first, copy the posteriors to the appropriate place
         offset_arcs, num_arcs = parts.get_offset(DependencyPartArc)
         predicted_output[offset_arcs:offset_arcs + num_arcs] = posteriors
 
-        for type_ in self.part_types:
-            if not parts.has_type(type_):
-                continue
-            
-            offset_type, num_this_type = parts.get_offset(type_)
+        for value, index in zip(additional_posteriors, self.additional_indices):
+            predicted_output[index] = value
 
-            from_posteriors = offset_type - num_arcs
-            until_posteriors = from_posteriors + num_this_type
+        # copy the posteriors and additional to predicted_output in the same
+        # order they were created
 
-            predicted_output[offset_type:offset_type + num_this_type] = \
-                additional_posteriors[from_posteriors:until_posteriors]
-
+        #
+        #
+        #     offset_type, num_this_type = parts.get_offset(type_)
+        #
+        #     from_posteriors = offset_type - num_arcs
+        #     until_posteriors = from_posteriors + num_this_type
+        #
+        #     predicted_output[offset_type:offset_type + num_this_type] = \
+        #         additional_posteriors[from_posteriors:until_posteriors]
+        #
         return predicted_output
 
     def create_tree_factor(self, instance, parts, scores, graph):
@@ -313,8 +328,6 @@ class DependencyDecoder(StructuredDecoder):
                 incoming_arcs.append((g, h))
                 outgoing_arcs.append((h, m))
 
-
-
     def create_grandparent_factors(self, parts, scores, graph, variables):
         """
         Include grandparent factors for constraining grandparents in the graph.
@@ -325,10 +338,9 @@ class DependencyDecoder(StructuredDecoder):
         :param variables: list of binary variables denoting arcs
         """
         offset_arcs, num_arcs = parts.get_offset(DependencyPartArc)
-        offset_gp, num_gp = parts.get_offset(DependencyPartGrandparent)
 
-        for r in range(offset_gp, offset_gp + num_gp):
-            part = parts[r]
+        for i, part in parts.iterate_over_type(DependencyPartGrandparent,
+                                               return_index=True):
             head = part.head
             modifier = part.modifier
             grandparent = part.grandparent
@@ -339,40 +351,21 @@ class DependencyDecoder(StructuredDecoder):
             var_hm = variables[index_hm]
             var_gh = variables[index_gh]
 
-            score = scores[r]
+            score = scores[i]
             graph.create_factor_pair([var_hm, var_gh], score)
+            self.additional_indices.append(i)
 
-    def create_next_sibling_factors(self, instance, parts, scores, graph,
-                                    variables):
+    def create_next_sibling_factors(self, parts, graph, variables):
         """
         Include head automata for constraining consecutive siblings in the
         graph.
 
         :type parts: DependencyParts
-        :type instance: DependencyInstance
-        :type scores: np.array
         :param graph: the graph
         :param variables: list of binary variables denoting arcs
         """
         # needed to map indices in parts to indices in variables
         offset_arcs, _ = parts.get_offset(DependencyPartArc)
-
-        def add_variable_and_arc(local_variables, arcs, h, m):
-            """
-            Add to `local_variables` the AD3 binary variable representing the
-            arc from h to m, and to `arcs` the tuple (h, m).
-
-            If there is not an arc from h to m in `parts`, don't do anything.
-            """
-            parts_index = parts.find_arc_index(h, m)
-            if parts_index < 0:
-                return
-
-            # var_index is the index to the binary variable
-            var_index = parts_index - offset_arcs
-            arc_variable = variables[var_index]
-            local_variables.append(arc_variable)
-            arcs.append((h, m))
 
         def set_factor(local_variables, arcs, siblings, scores):
             """
@@ -387,58 +380,17 @@ class DependencyDecoder(StructuredDecoder):
             factor.initialize(arcs, siblings, validate=False)
             factor.set_additional_log_potentials(scores)
 
-        n = len(instance)
-        offset_siblings, num_siblings = parts.get_offset(
-            DependencyPartNextSibling)
-
-        # loop through all parts and organize them according to the head
-        left_siblings = create_empty_lists(n)
-        right_siblings = create_empty_lists(n)
-        left_scores = create_empty_lists(n)
-        right_scores = create_empty_lists(n)
-
-        for r in range(offset_siblings, offset_siblings + num_siblings):
-            part = parts[r]
-            h = part.head
-            m = part.modifier
-            s = part.sibling
-
-            assert s != h, 'Sibling index cannot be the same as head index'
-
-            if s > h:
-                # right sibling
-                right_siblings[h].append((h, m, s))
-                right_scores[h].append(scores[r])
-            else:
-                # left sibling
-                left_siblings[h].append((h, m, s))
-                left_scores[h].append(scores[r])
-
-        # create right and left automata for each head
-        for h in range(n):
-
-            # left hand side
-            # these are the variables constrained by the factor and their arcs
-            local_variables = []
-
-            # these are tuples (h, m)
-            arcs = []
-
-            for m in range(h - 1, 0, -1):
-                add_variable_and_arc(local_variables, arcs, h, m)
-
-            set_factor(local_variables, arcs, left_siblings[h], left_scores[h])
-
-            # right hand side
-            # these are the variables constrained by the factor and their arcs
-            local_variables = []
-            arcs = []
-
-            for m in range(h + 1, n):
-                add_variable_and_arc(local_variables, arcs, h, m)
-
-            set_factor(local_variables, arcs, right_siblings[h],
-                       right_scores[h])
+        for head_structure in self.left_siblings + self.right_siblings:
+            indices = head_structure.indices
+            arcs = head_structure.get_arcs()
+            var_inds = [parts.find_arc_index(arc[0], arc[1]) - offset_arcs
+                        for arc in arcs]
+            local_variables = [variables[i] for i in var_inds]
+            part_tuples = [(p.head, p.modifier, p.sibling)
+                           for p in head_structure.parts]
+            set_factor(local_variables, arcs, part_tuples,
+                       head_structure.scores)
+            self.additional_indices.extend(indices)
 
 
 def create_empty_lists(n):
@@ -446,3 +398,33 @@ def create_empty_lists(n):
     Create a list with n empty lists
     """
     return [[] for _ in range(n)]
+
+
+def create_empty_structures(n):
+    """
+    Create a list with n empty PartStructures
+    """
+    return [PartStructure() for _ in range(n)]
+
+
+def _populate_structure_list(left_list, right_list, parts, scores,
+                             type_):
+    """
+    Populate structure lists left_list and right_list with the dependency
+    parts that appear to the left and right of each head.
+
+    :param left_list: a list with empty PartStructure objects, one for each
+        head. It will be filled with the structures occurring left to each
+        head.
+    :param parts: a DependencyParts object
+    :param scores: a list or array of scores
+    :param right_list: same as above, for the right hand side.
+    :param type_: a type of dependency part
+    """
+    for i, part in parts.iterate_over_type(type_, return_index=True):
+        if part.modifier > part.head:
+            # right sibling
+            right_list[part.head].append(part, scores[i], i)
+        else:
+            # left sibling
+            left_list[part.head].append(part, scores[i], i)
