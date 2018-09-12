@@ -260,6 +260,7 @@ class StructuredClassifier(object):
         start = time.time()
         time_decoding = 0
         time_scores = 0
+        time_gradient = 0
 
         total_cost = 0.
         total_loss = 0.
@@ -394,8 +395,10 @@ class StructuredClassifier(object):
                 self.parameters.scale(decay)
 
             # Make gradient step.
+            start_gradient = time.time()
             self.make_gradient_step(parts, features, eta, t, gold_output,
                                     predicted_output)
+            time_gradient += time.time() - start_gradient
 
             # Increment the round.
             t += 1
@@ -404,6 +407,7 @@ class StructuredClassifier(object):
         logging.info('Time: %f' % (end - start))
         logging.info('Time to score: %f' % time_scores)
         logging.info('Time to decode: %f' % time_decoding)
+        logging.info('Time to do gradient step: %f' % time_gradient)
         logging.info('Number of features: %d' % len(self.parameters))
 
         if algorithm in ['perceptron']:
