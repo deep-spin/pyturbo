@@ -25,12 +25,17 @@ class PartStructure(object):
         self.scores.append(score)
         self.indices.append(index)
 
-    def get_arcs(self):
+    def get_arcs(self, sort_decreasing=False):
         """
         Return a list of (h, m) tuples in the structure (only considers the head
         and modifier compoinent of each part).
         """
-        return [(part.head, part.modifier) for part in self.parts]
+        arc_set = set([(part.head, part.modifier)
+                       for part in self.parts
+                       if part.head != part.modifier])
+        arc_list = sorted(arc_set, key=lambda arc: arc[1],
+                          reverse=sort_decreasing)
+        return arc_list
 
 
 class DependencyDecoder(StructuredDecoder):
@@ -367,30 +372,35 @@ class DependencyDecoder(StructuredDecoder):
         # needed to map indices in parts to indices in variables
         offset_arcs, _ = parts.get_offset(DependencyPartArc)
 
-        def set_factor(local_variables, arcs, siblings, scores):
+        def create_head_automaton(structures, decreasing):
             """
-            Create and add a factor head automaton to the graph.
+            Creates and sets the head automaton factors for either left or
+            right siblings.
             """
-            if len(siblings) == 0:
-                return
+            for head_structure in structures:
+                if len(head_structure.parts) == 0:
+                    continue
 
-            # important: first declare the factor in the graph, then initialize
-            factor = PFactorHeadAutomaton()
-            graph.declare_factor(factor, local_variables, owned_by_graph=True)
-            factor.initialize(arcs, siblings, validate=False)
-            factor.set_additional_log_potentials(scores)
+                indices = head_structure.indices
+                arcs = head_structure.get_arcs(decreasing)
+                var_inds = [parts.find_arc_index(arc[0], arc[1]) - offset_arcs
+                            for arc in arcs]
+                local_variables = [variables[i] for i in var_inds]
+                siblings = [(p.head, p.modifier, p.sibling)
+                            for p in head_structure.parts]
 
-        for head_structure in self.left_siblings + self.right_siblings:
-            indices = head_structure.indices
-            arcs = head_structure.get_arcs()
-            var_inds = [parts.find_arc_index(arc[0], arc[1]) - offset_arcs
-                        for arc in arcs]
-            local_variables = [variables[i] for i in var_inds]
-            part_tuples = [(p.head, p.modifier, p.sibling)
-                           for p in head_structure.parts]
-            set_factor(local_variables, arcs, part_tuples,
-                       head_structure.scores)
-            self.additional_indices.extend(indices)
+                # important: first declare the factor in the graph,
+                # then initialize
+                factor = PFactorHeadAutomaton()
+                graph.declare_factor(factor, local_variables,
+                                     owned_by_graph=True)
+                factor.initialize(arcs, siblings, validate=False)
+                factor.set_additional_log_potentials(head_structure.scores)
+
+                self.additional_indices.extend(indices)
+
+        create_head_automaton(self.left_siblings, decreasing=True)
+        create_head_automaton(self.right_siblings, decreasing=False)
 
 
 def create_empty_lists(n):
@@ -422,7 +432,15 @@ def _populate_structure_list(left_list, right_list, parts, scores,
     :param type_: a type of dependency part
     """
     for i, part in parts.iterate_over_type(type_, return_index=True):
-        if part.modifier > part.head:
+
+        # make this check because modifier == head has a special meaning for
+        # sibling parts
+        if isinstance(part, DependencyPartNextSibling):
+            is_right = part.sibling > part.head
+        else:
+            is_right = part.modifier > part.head
+
+        if is_right:
             # right sibling
             right_list[part.head].append(part, scores[i], i)
         else:
