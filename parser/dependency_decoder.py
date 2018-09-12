@@ -286,52 +286,20 @@ class DependencyDecoder(StructuredDecoder):
         offset_gsib, num_gsib = parts.get_offset(
             DependencyPartNextSibling)
 
-        # loop through all parts and organize them according to the head
-        left_siblings = create_empty_lists(n)
-        right_siblings = create_empty_lists(n)
-        left_scores = create_empty_lists(n)
-        right_scores = create_empty_lists(n)
+        if self.use_grandsiblings:
+            structures = zip(self.left_siblings, self.left_grandparents,
+                             self.left_grandsiblings)
+        else:
+            structures = zip(self.left_siblings, self.left_grandparents)
 
-        for r, part in parts.iterate_over_type(DependencyPartGrandSibling,
-                                               True):
-            h = part.head
-            m = part.modifier
-            g = part.grandparent
-            s = part.sibling
+        for head_structure in structures:
+            sibling_structure = head_structure[0]
+            grandparent_structure = head_structure[1]
+            if self.use_grandsiblings:
+                grandsibling_structure = head_structure[2]
 
-            if s > h:
-                # right sibling
-                right_siblings[h].append((g, h, m, s))
-                right_scores[h].append(scores[r])
-            else:
-                # left sibling
-                left_siblings[h].append((g, h, m, s))
-                left_scores[h].append(scores[r])
+            
 
-        # create right and left automata for each head
-        for h in range(n):
-
-            # left hand side
-            # these are the variables constrained by the factor and their arcs
-            local_variables = []
-
-            # tuples (g, h)
-            incoming_arcs = []
-
-            # tuples (h, m)
-            outgoing_arcs = []
-
-            for part in left_siblings[h]:
-                h = part.head
-                m = part.modifier
-                g = part.grandparent
-                s = part.sibling
-
-                index_gh = parts.find_arc_index(g, h)
-                var_index_gh = index_gh - offset_arcs
-
-                incoming_arcs.append((g, h))
-                outgoing_arcs.append((h, m))
 
     def create_grandparent_factors(self, parts, scores, graph, variables):
         """
