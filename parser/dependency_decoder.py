@@ -1,6 +1,7 @@
 from collections import defaultdict
 import ad3.factor_graph as fg
-from ad3.extensions import PFactorTree, PFactorHeadAutomaton, decode_matrix_tree
+from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
+    decode_matrix_tree, PFactorGrandparentHeadAutomaton
 import numpy as np
 
 from classifier.structured_decoder import StructuredDecoder
@@ -25,15 +26,17 @@ class PartStructure(object):
         self.scores.append(score)
         self.indices.append(index)
 
-    def get_arcs(self, sort_decreasing=False):
+    def get_arcs(self, sort_decreasing=False, head='head', modifier='modifier',
+                 sort_by_head=False):
         """
-        Return a list of (h, m) tuples in the structure (only considers the head
-        and modifier compoinent of each part).
+        Return a list of (h, m) tuples in the structure.
         """
-        arc_set = set([(part.head, part.modifier)
+        arc_set = set([(getattr(part, head), getattr(part, modifier))
                        for part in self.parts
                        if part.head != part.modifier])
-        arc_list = sorted(arc_set, key=lambda arc: arc[1],
+
+        idx = 0 if sort_by_head else 1
+        arc_list = sorted(arc_set, key=lambda arc: arc[idx],
                           reverse=sort_decreasing)
         return arc_list
 
@@ -81,10 +84,12 @@ class DependencyDecoder(StructuredDecoder):
 
         self._index_parts_by_head(parts, instance, scores)
 
-        if self.use_grandparents:
+        if self.use_siblings and self.use_grandparents:
+            self.create_gp_head_automata(parts, graph, variables)
+        elif self.use_grandparents:
             self.create_grandparent_factors(parts, scores, graph, variables)
-        if self.use_siblings:
-            self.create_next_sibling_factors(parts, graph, variables)
+        elif self.use_siblings:
+            self.create_head_automata(parts, graph, variables)
 
         graph.set_eta_ad3(.05)
         graph.adapt_eta_ad3(True)
@@ -269,8 +274,7 @@ class DependencyDecoder(StructuredDecoder):
 
         return variables
 
-    def create_grandsibling_factors(self, instance, parts, scores, graph,
-                                    variables):
+    def create_gp_head_automata(self, parts, graph, variables):
         """
         Include grandsibling factors (grandparent head automata) in the graph.
 
@@ -279,27 +283,87 @@ class DependencyDecoder(StructuredDecoder):
         :param graph: the graph
         :param variables: list of binary variables denoting arcs
         """
-        # TODO: try to avoid repeitition with the head_automaton function
         offset_arcs, _ = parts.get_offset(DependencyPartArc)
 
-        n = len(instance)
-        offset_gsib, num_gsib = parts.get_offset(
-            DependencyPartNextSibling)
+        def create_gp_head_automaton(structures, decreasing):
+            """
+            Create and sets the grandparent head automaton for either or right
+            siblings and grandparents.
+            """
+            # side = 'right' if decreasing else 'left'
+            # print('Adding gp head automaton in the', side)
+
+            for head_structure in structures:
+                siblings_structure = head_structure[0]
+                sib_indices = siblings_structure.indices
+                sib_tuples = [(p.head, p.modifier, p.sibling)
+                              for p in siblings_structure.parts]
+
+                grandparent_structure = head_structure[1]
+                gp_indices = grandparent_structure.indices
+                gp_tuples = [(p.grandparent, p.head, p.modifier)
+                             for p in grandparent_structure.parts]
+
+                # (g, h) arcs must always be in increasing order
+                incoming_arcs = grandparent_structure.get_arcs(
+                    sort_decreasing=False, head='grandparent', modifier='head',
+                    sort_by_head=True)
+
+                # get arcs from siblings because we must include even outgoing
+                # arcs that would make a cycle with the grandparent
+                outgoing_arcs = siblings_structure.get_arcs(decreasing)
+
+                in_var_inds = [parts.find_arc_index(arc[0],
+                                                    arc[1]) - offset_arcs
+                               for arc in incoming_arcs]
+                out_var_inds = [parts.find_arc_index(arc[0],
+                                                     arc[1]) - offset_arcs
+                                for arc in outgoing_arcs]
+
+                if len(out_var_inds) == 0:
+                    continue
+
+                incoming_vars = [variables[i] for i in in_var_inds]
+                outgoing_vars = [variables[i] for i in out_var_inds]
+                local_variables = incoming_vars + outgoing_vars
+
+                indices = gp_indices + sib_indices
+                scores = grandparent_structure.scores + \
+                    siblings_structure.scores
+
+                if len(head_structure) == 3:
+                    grandsibling_structure = head_structure[2]
+                    gsib_tuples = [(p.grandparent, p.head,
+                                    p.modifier, p.sibling)
+                                   for p in grandsibling_structure.parts]
+                    scores += grandsibling_structure.scores
+                    indices += grandsibling_structure.indices
+                else:
+                    gsib_tuples = None
+
+                factor = PFactorGrandparentHeadAutomaton()
+                graph.declare_factor(factor, local_variables,
+                                     owned_by_graph=True)
+                factor.initialize(incoming_arcs, outgoing_arcs, gp_tuples,
+                                  sib_tuples, gsib_tuples)
+                factor.set_additional_log_potentials(scores)
+                self.additional_indices.extend(indices)
 
         if self.use_grandsiblings:
-            structures = zip(self.left_siblings, self.left_grandparents,
-                             self.left_grandsiblings)
+            left_structures = zip(self.left_siblings,
+                                  self.left_grandparents,
+                                  self.left_grandsiblings)
+            right_structures = zip(self.right_siblings,
+                                   self.right_grandparents,
+                                   self.right_grandsiblings)
         else:
-            structures = zip(self.left_siblings, self.left_grandparents)
+            left_structures = zip(self.left_siblings,
+                                  self.left_grandparents)
+            right_structures = zip(self.right_siblings,
+                                   self.right_grandparents)
 
-        for head_structure in structures:
-            sibling_structure = head_structure[0]
-            grandparent_structure = head_structure[1]
-            if self.use_grandsiblings:
-                grandsibling_structure = head_structure[2]
-
-            
-
+        create_gp_head_automaton(left_structures, decreasing=True)
+        create_gp_head_automaton(right_structures, decreasing=False)
 
     def create_grandparent_factors(self, parts, scores, graph, variables):
         """
@@ -328,7 +392,7 @@ class DependencyDecoder(StructuredDecoder):
             graph.create_factor_pair([var_hm, var_gh], score)
             self.additional_indices.append(i)
 
-    def create_next_sibling_factors(self, parts, graph, variables):
+    def create_head_automata(self, parts, graph, variables):
         """
         Include head automata for constraining consecutive siblings in the
         graph.
