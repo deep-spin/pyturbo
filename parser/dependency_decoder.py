@@ -70,6 +70,7 @@ class DependencyDecoder(StructuredDecoder):
             the model. It should be a 1d array.
         :return:
         """
+        # print(len(scores), scores, scores.max(), scores.min())
         graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores, graph)
 
@@ -228,19 +229,19 @@ class DependencyDecoder(StructuredDecoder):
         for value, index in zip(additional_posteriors, self.additional_indices):
             predicted_output[index] = value
 
-        # copy the posteriors and additional to predicted_output in the same
-        # order they were created
+        # np.set_printoptions(threshold=np.nan)
+        if sum(predicted_output) > len(predicted_output):
+            offset_sib, num_sibs = parts.get_offset(DependencyPartNextSibling)
+            offset_gp, num_gp = parts.get_offset(DependencyPartGrandparent)
+            print('offsets:', offset_arcs, offset_sib, offset_gp)
 
-        #
-        #
-        #     offset_type, num_this_type = parts.get_offset(type_)
-        #
-        #     from_posteriors = offset_type - num_arcs
-        #     until_posteriors = from_posteriors + num_this_type
-        #
-        #     predicted_output[offset_type:offset_type + num_this_type] = \
-        #         additional_posteriors[from_posteriors:until_posteriors]
-        #
+            big_idx = np.where(predicted_output > len(predicted_output))[0]
+            print('big index:', big_idx)
+
+            print('pred len:', len(predicted_output))
+            print('pred sum:', sum(predicted_output))
+            raise ValueError
+
         return predicted_output
 
     def create_tree_factor(self, instance, parts, scores, graph):
@@ -279,7 +280,6 @@ class DependencyDecoder(StructuredDecoder):
         Include grandsibling factors (grandparent head automata) in the graph.
 
         :type parts: DependencyParts
-        :param scores: np.array
         :param graph: the graph
         :param variables: list of binary variables denoting arcs
         """
@@ -341,6 +341,12 @@ class DependencyDecoder(StructuredDecoder):
                 else:
                     gsib_tuples = None
 
+                # print('incoming:', incoming_arcs)
+                # print('outgoing:', outgoing_arcs)
+                # print('gp:', gp_tuples)
+                # print('sib:', sib_tuples)
+                # print()
+
                 factor = PFactorGrandparentHeadAutomaton()
                 graph.declare_factor(factor, local_variables,
                                      owned_by_graph=True)
@@ -348,6 +354,9 @@ class DependencyDecoder(StructuredDecoder):
                                   sib_tuples, gsib_tuples)
                 factor.set_additional_log_potentials(scores)
                 self.additional_indices.extend(indices)
+
+                # factor.print_factor()
+                # print()
 
         if self.use_grandsiblings:
             left_structures = zip(self.left_siblings,
