@@ -465,7 +465,8 @@ class TurboParser(StructuredClassifier):
                 gold_gh = _check_gold_arc(instance, g, h)
 
                 for m in range(1, len(instance)):
-                    if g == m or h == m:
+                    if h == m:
+                        # g == m is necessary to run the grandparent factor
                         continue
 
                     if 0 > parts.find_arc_index(h, m):
