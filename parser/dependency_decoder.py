@@ -226,6 +226,8 @@ class DependencyDecoder(StructuredDecoder):
         offset_arcs, num_arcs = parts.get_offset(DependencyPartArc)
         predicted_output[offset_arcs:offset_arcs + num_arcs] = posteriors
 
+        assert len(additional_posteriors) == len(self.additional_indices)
+
         for value, index in zip(additional_posteriors, self.additional_indices):
             predicted_output[index] = value
 
@@ -313,15 +315,21 @@ class DependencyDecoder(StructuredDecoder):
                 # arcs that would make a cycle with the grandparent
                 outgoing_arcs = siblings_structure.get_arcs(decreasing)
 
+                if len(incoming_arcs) == 0 or len(outgoing_arcs) == 0:
+                    # no grandparent structure; create simple head automaton
+                    # TODO: maybe change the function to receive a single
+                    # structure instead of a list?
+                    self._create_head_automata(
+                        [siblings_structure], parts, graph, variables,
+                        decreasing, offset_arcs)
+                    continue
+
                 in_var_inds = [parts.find_arc_index(arc[0],
                                                     arc[1]) - offset_arcs
                                for arc in incoming_arcs]
                 out_var_inds = [parts.find_arc_index(arc[0],
                                                      arc[1]) - offset_arcs
                                 for arc in outgoing_arcs]
-
-                if len(out_var_inds) == 0:
-                    continue
 
                 incoming_vars = [variables[i] for i in in_var_inds]
                 outgoing_vars = [variables[i] for i in out_var_inds]
@@ -341,12 +349,6 @@ class DependencyDecoder(StructuredDecoder):
                 else:
                     gsib_tuples = None
 
-                # print('incoming:', incoming_arcs)
-                # print('outgoing:', outgoing_arcs)
-                # print('gp:', gp_tuples)
-                # print('sib:', sib_tuples)
-                # print()
-
                 factor = PFactorGrandparentHeadAutomaton()
                 graph.declare_factor(factor, local_variables,
                                      owned_by_graph=True)
@@ -354,9 +356,6 @@ class DependencyDecoder(StructuredDecoder):
                                   sib_tuples, gsib_tuples)
                 factor.set_additional_log_potentials(scores)
                 self.additional_indices.extend(indices)
-
-                # factor.print_factor()
-                # print()
 
         if self.use_grandsiblings:
             left_structures = zip(self.left_siblings,
@@ -401,6 +400,43 @@ class DependencyDecoder(StructuredDecoder):
             graph.create_factor_pair([var_hm, var_gh], score)
             self.additional_indices.append(i)
 
+    def _create_head_automata(self, structures, parts, graph, variables,
+                              decreasing, offset_arcs=0):
+        """
+        Creates and sets the head automaton factors for either left or
+        right siblings.
+
+        :param structures: a list of PartStructure objects containing
+            next sibling parts
+        :param parts: DependencyParts
+        :param graph: the AD3 graph
+        :param variables: list of variables constrained by the automata
+        :param decreasing: whether to sort modifiers in decreasing order.
+            It should be True for left hand side automata and False for
+            right hand side.
+        """
+        for head_structure in structures:
+            if len(head_structure.parts) == 0:
+                continue
+
+            indices = head_structure.indices
+            arcs = head_structure.get_arcs(decreasing)
+            var_inds = [parts.find_arc_index(arc[0], arc[1]) - offset_arcs
+                        for arc in arcs]
+            local_variables = [variables[i] for i in var_inds]
+            siblings = [(p.head, p.modifier, p.sibling)
+                        for p in head_structure.parts]
+
+            # important: first declare the factor in the graph,
+            # then initialize
+            factor = PFactorHeadAutomaton()
+            graph.declare_factor(factor, local_variables,
+                                 owned_by_graph=True)
+            factor.initialize(arcs, siblings, validate=False)
+            factor.set_additional_log_potentials(head_structure.scores)
+
+            self.additional_indices.extend(indices)
+
     def create_head_automata(self, parts, graph, variables):
         """
         Include head automata for constraining consecutive siblings in the
@@ -412,36 +448,12 @@ class DependencyDecoder(StructuredDecoder):
         """
         # needed to map indices in parts to indices in variables
         offset_arcs, _ = parts.get_offset(DependencyPartArc)
-
-        def create_head_automaton(structures, decreasing):
-            """
-            Creates and sets the head automaton factors for either left or
-            right siblings.
-            """
-            for head_structure in structures:
-                if len(head_structure.parts) == 0:
-                    continue
-
-                indices = head_structure.indices
-                arcs = head_structure.get_arcs(decreasing)
-                var_inds = [parts.find_arc_index(arc[0], arc[1]) - offset_arcs
-                            for arc in arcs]
-                local_variables = [variables[i] for i in var_inds]
-                siblings = [(p.head, p.modifier, p.sibling)
-                            for p in head_structure.parts]
-
-                # important: first declare the factor in the graph,
-                # then initialize
-                factor = PFactorHeadAutomaton()
-                graph.declare_factor(factor, local_variables,
-                                     owned_by_graph=True)
-                factor.initialize(arcs, siblings, validate=False)
-                factor.set_additional_log_potentials(head_structure.scores)
-
-                self.additional_indices.extend(indices)
-
-        create_head_automaton(self.left_siblings, decreasing=True)
-        create_head_automaton(self.right_siblings, decreasing=False)
+        self._create_head_automata(
+            self.left_siblings, parts, graph, variables, decreasing=True,
+            offset_arcs=offset_arcs)
+        self._create_head_automata(
+            self.right_siblings, parts, graph, variables, decreasing=False,
+            offset_arcs=offset_arcs)
 
 
 def create_empty_lists(n):
