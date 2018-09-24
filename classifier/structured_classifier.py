@@ -209,6 +209,9 @@ class StructuredClassifier(object):
         self.parameters = Parameters(use_average=self.options.use_averaging)
         if self.options.only_supported_features:
             self.make_supported_parameters()
+
+        self.lambda_coeff = 1.0 / (self.options.regularization_constant *
+                                   float(len(instances)))
         for epoch in range(self.options.training_epochs):
             self.train_epoch(epoch, instances)
         self.parameters.finalize(self.options.training_epochs * len(instances))
@@ -250,39 +253,22 @@ class StructuredClassifier(object):
         self.parameters.stop_growth()
         logging.info('Number of features: %d', len(self.parameters))
 
-    def train_epoch(self, epoch, instances):
-        '''Run one epoch of an online algorithm.
-
-        :param epoch: the number of the epoch, starting from 0
-        :param instances: a list of Instance objects
+    def train_batch(self, instances, t):
         '''
-        import time
-        start = time.time()
-        time_decoding = 0
-        time_scores = 0
-        time_gradient = 0
+        Run one batch of a learning algorithm. If it is an online one, just
+        run through each instance.
 
+        :param instances: list of Instance objects composing the batch
+        :param t: integer indicating that the batch starts with the t-th
+            instance in the dataset
+        '''
         total_cost = 0.
-        total_loss = 0.
-        if self.options.training_algorithm in ['perceptron']:
-            num_mistakes = 0
-            num_total = 0
-        elif self.options.training_algorithm in ['mira', 'svm_mira']:
-            truncated = 0
+        algorithm = self.options.training_algorithm
 
-        lambda_coeff = 1.0 / (self.options.regularization_constant *
-                              float(len(instances)))
-        if epoch == 0:
-            logging.info('\t'.join(
-                ['Lambda: %f' % lambda_coeff,
-                 'Regularization constant: %f' %
-                 self.options.regularization_constant,
-                 'Number of instances: %d' % len(instances)]))
-        logging.info(' Iteration #%d' % (epoch + 1))
+        # if running a neural model, first run the RNN for the whole batch
+        if self.options.neural:
+            pass
 
-        self.dictionary.stop_growth()
-
-        t = len(instances) * epoch
         for instance in instances:
             # Compute parts, features, and scores.
             parts, gold_output = self.make_parts(instance)
@@ -300,7 +286,7 @@ class StructuredClassifier(object):
             start_scores = time.time()
             scores = self.compute_scores(instance, parts, features)
             end_scores = time.time()
-            time_scores += end_scores - start_scores
+            self.time_scores += end_scores - start_scores
 
             # This is a no-op by default. But it's convenient to have it here to
             # build latent-variable structured classifiers (e.g. for coreference
@@ -310,15 +296,14 @@ class StructuredClassifier(object):
 
             # Do the decoding.
             start_decoding = time.time()
-            algorithm = self.options.training_algorithm
             if algorithm in ['perceptron']:
                 predicted_output = self.decoder.decode(instance, parts,
                                                        scores)
                 for r in range(len(parts)):
-                    num_total += 1
+                    self.num_total += 1
                     if not nearly_eq_tol(gold_output[r],
                                          predicted_output[r], 1e-6):
-                        num_mistakes += 1
+                        self.num_mistakes += 1
 
             elif algorithm in ['mira']:
                 predicted_output, cost, loss = self.decoder.decode_mira(
@@ -346,7 +331,7 @@ class StructuredClassifier(object):
             else:
                 raise NotImplementedError
             end_decoding = time.time()
-            time_decoding += end_decoding - start_decoding
+            self.time_decoding += end_decoding - start_decoding
 
             # Update the total loss and cost.
             if algorithm in ['mira', 'svm_mira', 'svm_sgd', 'crf_mira',
@@ -357,7 +342,7 @@ class StructuredClassifier(object):
                         logging.warning('Negative loss set to zero: %f' % loss)
                     loss = 0.0
 
-                total_loss += loss
+                self.total_loss += loss
 
             # Compute the stepsize.
             if algorithm in ['perceptron']:
@@ -377,7 +362,7 @@ class StructuredClassifier(object):
                     eta = loss / squared_norm
                 if eta > self.options.regularization_constant:
                     eta = self.options.regularization_constant
-                    truncated += 1
+                    self.truncated += 1
             elif algorithm in ['svm_sgd']:
                 if self.options.learning_rate_schedule == 'fixed':
                     eta = self.options.initial_learning_rate
@@ -390,7 +375,7 @@ class StructuredClassifier(object):
                     raise NotImplementedError
 
                 # Scale the weight vector.
-                decay = 1.0 - eta * lambda_coeff
+                decay = 1.0 - eta * self.lambda_coeff
                 assert decay >= 0.
                 self.parameters.scale(decay)
 
@@ -398,29 +383,70 @@ class StructuredClassifier(object):
             start_gradient = time.time()
             self.make_gradient_step(parts, features, eta, t, gold_output,
                                     predicted_output)
-            time_gradient += time.time() - start_gradient
+            self.time_gradient += time.time() - start_gradient
 
             # Increment the round.
             t += 1
 
+    def train_epoch(self, epoch, instances):
+        '''Run one epoch of an online algorithm.
+
+        :param epoch: the number of the epoch, starting from 0
+        :param instances: a list of Instance objects
+        '''
+        import time
+        self.time_decoding = 0
+        self.time_scores = 0
+        self.time_gradient = 0
+        start = time.time()
+
+        self.total_loss = 0.
+        if self.options.training_algorithm in ['perceptron']:
+            self.num_mistakes = 0
+            self.num_total = 0
+        elif self.options.training_algorithm in ['mira', 'svm_mira']:
+            self.truncated = 0
+
+        if epoch == 0:
+            logging.info('\t'.join(
+                ['Lambda: %f' % self.lambda_coeff,
+                 'Regularization constant: %f' %
+                 self.options.regularization_constant,
+                 'Number of instances: %d' % len(instances)]))
+        logging.info(' Iteration #%d' % (epoch + 1))
+
+        self.dictionary.stop_growth()
+
+        t = len(instances) * epoch
+        batch_index = 0
+        batch_size = self.options.batch_size
+        while batch_index < len(instances):
+            next_batch_index = batch_index + batch_size
+            batch = instances[batch_index:next_batch_index]
+            self.train_batch(batch, t)
+            t += len(batch)
+            batch_index = next_batch_index
+
         end = time.time()
         logging.info('Time: %f' % (end - start))
-        logging.info('Time to score: %f' % time_scores)
-        logging.info('Time to decode: %f' % time_decoding)
-        logging.info('Time to do gradient step: %f' % time_gradient)
+        logging.info('Time to score: %f' % self.time_scores)
+        logging.info('Time to decode: %f' % self.time_decoding)
+        logging.info('Time to do gradient step: %f' % self.time_gradient)
         logging.info('Number of features: %d' % len(self.parameters))
 
-        if algorithm in ['perceptron']:
-            logging.info('Number of mistakes: %d/%d (%f)' % num_mistakes,
-                         num_total, float(num_mistakes) / float(num_total))
+        if self.options.training_algorithm in ['perceptron']:
+            logging.info('Number of mistakes: %d/%d (%f)' %
+                         (self.num_mistakes,
+                          self.num_total,
+                          float(self.num_mistakes) / float(self.num_total)))
         else:
             sq_norm = self.parameters.get_squared_norm()
-            regularization_value = 0.5 * lambda_coeff * \
+            regularization_value = 0.5 * self.lambda_coeff * \
                 float(len(instances)) * sq_norm
-            logging.info('\t'.join(['Total Loss: %f' % total_loss,
+            logging.info('\t'.join(['Total Loss: %f' % self.total_loss,
                                     'Total Reg: %f' % regularization_value,
                                     'Total Loss+Reg: %f' % \
-                                    (total_loss + regularization_value),
+                                    (self.total_loss + regularization_value),
                                     'Squared norm: %f' % sq_norm]))
 
     def run(self):

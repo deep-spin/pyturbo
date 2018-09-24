@@ -47,6 +47,8 @@ class Options(object):
         parser.add_argument('--regularization_constant', type=float,
                             default=1e12,
                             help='Regularization parameter C.')
+        parser.add_argument('--batch_size', type=int, default=16,
+                            help='Batch size for neural models')
 
     def parse_args(self, args):
         import sys
@@ -68,4 +70,5 @@ class Options(object):
         self.use_averaging = args['use_averaging']
         self.training_epochs = args['training_epochs']
         self.regularization_constant = args['regularization_constant']
+        self.batch_size = args['batch_size']
 
