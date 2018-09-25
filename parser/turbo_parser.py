@@ -45,7 +45,8 @@ class TurboParser(StructuredClassifier):
                         word_embedding_size=100,
                         tag_embedding_size=20,
                         distance_embedding_size=20,
-                        hidden_size=50,
+                        rnn_size=50,
+                        mlp_size=50,
                         num_layers=1,
                         dropout=0.
                     )
@@ -58,7 +59,8 @@ class TurboParser(StructuredClassifier):
                     tag_embedding_size=self.options.tag_embedding_size,
                     distance_embedding_size=self.options.
                     distance_embedding_size,
-                    hidden_size=self.options.hidden_size,
+                    rnn_size=self.options.rnn_size,
+                    mlp_size=self.options.mlp_size,
                     num_layers=self.options.num_layers,
                     dropout=self.options.dropout)
                 self.neural_scorer.initialize(model, self.options.learning_rate)

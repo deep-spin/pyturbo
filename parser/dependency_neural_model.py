@@ -20,14 +20,16 @@ class DependencyNeuralModel(nn.Module):
                  word_embedding_size,
                  tag_embedding_size,
                  distance_embedding_size,
-                 hidden_size,
+                 rnn_size,
+                 mlp_size,
                  num_layers,
                  dropout):
         super(DependencyNeuralModel, self).__init__()
         self.word_embedding_size = word_embedding_size
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
-        self.hidden_size = hidden_size
+        self.rnn_size = rnn_size
+        self.mlp_size = mlp_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.on_gpu = torch.cuda.is_available()
@@ -53,7 +55,7 @@ class DependencyNeuralModel(nn.Module):
         input_size = word_embedding_size + tag_embedding_size
         self.rnn = nn.LSTM(
             input_size=input_size,
-            hidden_size=hidden_size,
+            hidden_size=rnn_size,
             num_layers=num_layers,
             dropout=dropout,
             bidirectional=True)
@@ -85,7 +87,7 @@ class DependencyNeuralModel(nn.Module):
         if self.distance_embedding_size:
             self.distance_projection = nn.Linear(
                 distance_embedding_size,
-                hidden_size,
+                mlp_size,
                 bias=True)
         else:
             self.distance_projection = None
@@ -105,7 +107,7 @@ class DependencyNeuralModel(nn.Module):
         If shape is None, it will have shape equal to hidden_size.
         """
         if shape is None:
-            shape = self.hidden_size
+            shape = self.mlp_size
 
         tensor = torch.randn(shape, requires_grad=True)
         if self.on_gpu:
@@ -123,7 +125,7 @@ class DependencyNeuralModel(nn.Module):
         :return: an nn.Linear object
         """
         if input_size is None:
-            input_size = self.hidden_size
+            input_size = self.mlp_size
         scorer = nn.Linear(input_size, 1, bias=False)
 
         return scorer
@@ -137,8 +139,8 @@ class DependencyNeuralModel(nn.Module):
             to hidden_units.
         """
         projection = nn.Linear(
-            self.hidden_size * 2,
-            self.hidden_size,
+            self.rnn_size * 2,
+            self.mlp_size,
             bias=False
         )
         return projection
@@ -195,7 +197,7 @@ class DependencyNeuralModel(nn.Module):
             distances = self.distance_embeddings(distance_indices)
             distance_projections = self.distance_projection(distances)
             distance_projections = distance_projections.view(
-                -1, 1, self.hidden_size)
+                -1, 1, self.mlp_size)
 
         else:
             distance_projections = 0

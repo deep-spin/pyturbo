@@ -80,8 +80,10 @@ class DependencyOptions(Options):
                             help='Size of tag embeddings')
         parser.add_argument('--distance_embedding_size', type=int, default=20,
                             help='Size of distance embeddings')
-        parser.add_argument('--hidden_size', type=int, default=100,
-                            help='Size of hidden layers')
+        parser.add_argument('--rnn_size', type=int, default=100,
+                            help='Size of hidden RNN layers')
+        parser.add_argument('--mlp_size', type=int, default=100,
+                            help='Size of hidden MLP layers')
         parser.add_argument('--num_layers', type=int, default=1,
                             help='Number of RNN layers')
         parser.add_argument('--dropout', type=float, default=0,
@@ -140,7 +142,8 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.embedding_size = args['embedding_size']
         self.tag_embedding_size = args['tag_embedding_size']
         self.distance_embedding_size = args['distance_embedding_size']
-        self.hidden_size = args['hidden_size']
+        self.rnn_size = args['rnn_size']
+        self.mlp_size = args['mlp_size']
         self.num_layers = args['num_layers']
         self.dropout = args['dropout']
         self.learning_rate = args['learning_rate']
