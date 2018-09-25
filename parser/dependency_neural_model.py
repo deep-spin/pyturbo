@@ -34,8 +34,13 @@ class DependencyNeuralModel(nn.Module):
 
         self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
                                             word_embedding_size)
-        self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
-                                           tag_embedding_size)
+
+        if self.tag_embedding_size:
+            self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
+                                               tag_embedding_size)
+        else:
+            self.tag_embeddings = None
+
         if self.distance_embedding_size:
             self.distance_bins = np.array(
                 list(range(10)) + list(range(10, 40, 5)) + [40])
@@ -333,16 +338,18 @@ class DependencyNeuralModel(nn.Module):
         scores = torch.zeros(len(parts))
 
         word_indices = [instance.get_form(i) for i in range(len(instance))]
-        tag_indices = [instance.get_tag(i) for i in range(len(instance))]
         words = torch.tensor(word_indices)
-        tags = torch.tensor(tag_indices)
         if self.on_gpu:
             words = words.cuda()
-            tags = tags.cuda()
+        embeds = self.word_embeddings(words)
 
-        embeds = torch.cat([self.word_embeddings(words),
-                            self.tag_embeddings(tags)],
-                           dim=1)
+        if self.tag_embeddings is not None:
+            tag_indices = [instance.get_tag(i) for i in range(len(instance))]
+            tags = torch.tensor(tag_indices)
+            if self.on_gpu:
+                tags = tags.cuda()
+            tag_embeddings = self.tag_embeddings(tags)
+            embeds = torch.cat([embeds, tag_embeddings], dim=1)
 
         # new shape is (num_tokens, batch=1, hidden_size)
         states, _ = self.rnn(embeds.view(len(instance), 1, -1))
