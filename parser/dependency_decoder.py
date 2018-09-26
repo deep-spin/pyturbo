@@ -231,19 +231,6 @@ class DependencyDecoder(StructuredDecoder):
         for value, index in zip(additional_posteriors, self.additional_indices):
             predicted_output[index] = value
 
-        # np.set_printoptions(threshold=np.nan)
-        if sum(predicted_output) > len(predicted_output):
-            offset_sib, num_sibs = parts.get_offset(DependencyPartNextSibling)
-            offset_gp, num_gp = parts.get_offset(DependencyPartGrandparent)
-            print('offsets:', offset_arcs, offset_sib, offset_gp)
-
-            big_idx = np.where(predicted_output > len(predicted_output))[0]
-            print('big index:', big_idx)
-
-            print('pred len:', len(predicted_output))
-            print('pred sum:', sum(predicted_output))
-            raise ValueError
-
         return predicted_output
 
     def create_tree_factor(self, instance, parts, scores, graph):
