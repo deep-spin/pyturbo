@@ -30,7 +30,11 @@ class TurboParser(StructuredClassifier):
         self.parameters = None
         self.model_type = options.model_type.split('+')
         self.has_pruner = False
-        self.is_training_pruner = False
+
+        if options.pruner_path:
+            self.pruner = self.load_pruner(options.pruner_path)
+        else:
+            self.pruner = None
 
         if self.options.train:
             for token in special_tokens:
@@ -38,21 +42,6 @@ class TurboParser(StructuredClassifier):
             self.token_dictionary.initialize(self.reader)
             self.dictionary.create_relation_dictionary(self.reader)
             if self.options.neural:
-                if self.options.prune_basic:
-                    pruner_model = DependencyNeuralModel(
-                        self.token_dictionary,
-                        self.dictionary,
-                        word_embedding_size=100,
-                        tag_embedding_size=20,
-                        distance_embedding_size=20,
-                        rnn_size=50,
-                        mlp_size=50,
-                        num_layers=1,
-                        dropout=0.
-                    )
-                    self.pruner_neural_scorer = NeuralScorer()
-                    self.pruner_neural_scorer.initialize(pruner_model)
-
                 model = DependencyNeuralModel(
                     self.token_dictionary, self.dictionary,
                     word_embedding_size=self.options.embedding_size,
@@ -125,67 +114,30 @@ class TurboParser(StructuredClassifier):
         # prune arcs with a distance unseen in training with the given POS tags
         self.options.prune_distances = model_options.prune_distances
 
-        # use a first-order model to prune arcs
-        self.options.prune_basic = model_options.prune_basic
-
         # threshold for the basic pruner, if used
         self.options.pruner_posterior_threshold = \
             model_options.pruner_posterior_threshold
 
         # maximum candidate heads per word in the basic pruner, if used
         self.options.pruner_max_heads = model_options.pruner_max_heads
-    
-    def train(self):
-        """
-        Train the parser and a pruner, if set in the options.
-        """
-        if self.options.prune_basic:
-            self.is_training_pruner = True
-            logging.info('Training pruner')
-            super(TurboParser, self).train()
-            self.has_pruner = True
 
-        self.is_training_pruner = False
-        logging.info('Training parser')
-        super(TurboParser, self).train()
+    def load_pruner(self, model_path):
+        """
+        Load and return a pruner model.
+
+        This function takes care of keeping the main parser and the pruner
+        configurations separate.
+        """
+        logging.info('Loading pruner from %s' % model_path)
+        with open(model_path, 'rb') as f:
+            pruner_options = pickle.load(f)
+
+        pruner = TurboParser(pruner_options)
+        pruner.load(model_path)
+        return pruner
     
     def get_formatted_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
-    
-    def compute_scores(self, instance, parts, features):
-        """
-        Compute the scores of either the main parser or the pruner, as 
-        appropriate.
-        """
-        if self.is_training_pruner:
-            return self.compute_pruner_scores(instance, parts)
-        
-        return super(TurboParser, self).compute_scores(instance, parts,
-                                                       features)
-
-    def make_gradient_step(self, parts, features, eta, t, gold_output,
-                           predicted_output):
-        """
-        Perform a gradient step using either the main parser model or the
-        pruner, as appropriate.
-        """
-        if self.options.neural:
-            if self.is_training_pruner:
-                scorer = self.pruner_neural_scorer
-            else:
-                scorer = self.neural_scorer
-
-            scorer.compute_gradients(gold_output, predicted_output)
-            scorer.make_gradient_step()
-        else:
-            super(TurboParser, self).make_gradient_step(
-                parts, features, eta, t, gold_output, predicted_output)
-
-    def compute_pruner_scores(self, instance, parts):
-        """
-        Compute the scores for every part according to the pruner
-        """
-        return self.pruner_neural_scorer.compute_scores(instance, parts)
 
     def prune(self, instance, parts, gold_output):
         """
@@ -195,7 +147,7 @@ class TurboParser(StructuredClassifier):
         :param parts: a DependencyParts object with arcs
         :return: a new DependencyParts object contained the kept arcs
         """
-        scores = self.compute_pruner_scores(instance, parts)
+        scores = self.pruner.compute_scores(instance, parts)
         new_parts, new_gold = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores, gold_output,
             self.options.pruner_max_heads,
@@ -227,17 +179,16 @@ class TurboParser(StructuredClassifier):
         self.make_parts_basic(instance, parts, gold_output,
                               add_relation_parts=False)
 
-        if not self.is_training_pruner:
-            if self.has_pruner:
-                parts, gold_output = self.prune(instance, parts, gold_output)
+        if self.has_pruner:
+            parts, gold_output = self.prune(instance, parts, gold_output)
 
-            assert len(parts) == len(gold_output)
+        assert len(parts) == len(gold_output)
 
-            if 'cs' in self.model_type:
-                self.make_parts_consecutive_siblings(instance, parts,
-                                                     gold_output)
-            if 'gp' in self.model_type:
-                self.make_parts_grandparent(instance, parts, gold_output)
+        if 'cs' in self.model_type:
+            self.make_parts_consecutive_siblings(instance, parts,
+                                                 gold_output)
+        if 'gp' in self.model_type:
+            self.make_parts_grandparent(instance, parts, gold_output)
 
         if instance.output is not None:
             gold_output = np.array(gold_output)
@@ -489,17 +440,6 @@ class TurboParser(StructuredClassifier):
         parts.set_offset(DependencyPartGrandparent,
                          initial_index, len(parts) - initial_index)
 
-    def make_parts_global(self, instance):
-        """
-        Create the parts (arcs) involving global structures: siblings,
-        grandparents, etc.
-
-        :param instance: a DependencyInstance object
-        :return: if `instances` have the attribute output, return a numpy array
-            with the gold output. If it doesn't, return None.
-        """
-        #TODO: do we need this function?
-
     def make_parts_basic(self, instance, parts, gold_output,
                          add_relation_parts=True):
         """
@@ -745,17 +685,17 @@ def main():
     options.parse_args(args)
 
     if options.train:
-        logging.info('Training parser...')
         train_parser(options)
     elif options.test:
-        logging.info('Running parser...')
         test_parser(options)
+
 
 def train_parser(options):
     logging.info('Training the parser...')
     dependency_parser = TurboParser(options)
     dependency_parser.train()
     dependency_parser.save()
+
 
 def test_parser(options):
     logging.info('Running the parser...')

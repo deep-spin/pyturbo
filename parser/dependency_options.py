@@ -60,9 +60,9 @@ class DependencyOptions(Options):
                             distances taking into account the distances that
                             have occured for each pair of POS tags in the
                             training data.""")
-        parser.add_argument('--prune_basic', type=int, default=1,
-                            help="""1 for using a basic pruner from a
-                            probabilistic first-order model.""")
+        parser.add_argument('--pruner_path',
+                            help="""Path to a pretrained model to be used as
+                            pruner.""")
         parser.add_argument('--pruner_posterior_threshold', type=float,
                             default=0.0001,
                             help="""Posterior probability threshold for an arc
@@ -135,7 +135,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.projective = bool(args['projective'])
         self.prune_relations = bool(args['prune_relations'])
         self.prune_distances = bool(args['prune_distances'])
-        self.prune_basic = bool(args['prune_basic'])
+        self.pruner_path = args['pruner_path']
         self.pruner_posterior_threshold = args['pruner_posterior_threshold']
         self.pruner_max_heads = args['pruner_max_heads']
 

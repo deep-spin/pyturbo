@@ -25,10 +25,6 @@ class StructuredClassifier(object):
         else:
             self.neural_scorer = None
 
-        # To delete:
-        #self.model = lm.LinearModel()
-        #self.decoder = StructuredDecoder()
-
     @property
     def neural_scorer(self):
         return self._neural_scorer
