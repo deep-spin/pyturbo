@@ -52,6 +52,7 @@ class DependencyDecoder(StructuredDecoder):
         self.left_grandsiblings = None
         self.right_grandsiblings = None
 
+        self.arc_indices = None
         self.additional_indices = None
         self.use_grandsiblings = None
         self.use_grandparents = None
@@ -70,14 +71,14 @@ class DependencyDecoder(StructuredDecoder):
             the model. It should be a 1d array.
         :return:
         """
-        # print(len(scores), scores, scores.max(), scores.min())
+        # this keeps track of the index of each part added to the
+        # graph. The i-th part added to the graph will have its index to the
+        # parts list stored in additiona_index[i] or arc_index[i]
+        self.arc_indices = []
+        self.additional_indices = []
+
         graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores, graph)
-
-        # this keeps track of the index of each additional part added to the
-        # graph. The i-th part added to the graph will have its index to the
-        # parts list stored in additiona_index[i]
-        self.additional_indices = []
 
         self.use_siblings = parts.has_type(DependencyPartNextSibling)
         self.use_grandparents = parts.has_type(DependencyPartGrandparent)
@@ -219,16 +220,14 @@ class DependencyDecoder(StructuredDecoder):
             variables introduced by factors
         :return: a numpy array with the same size as parts
         """
-        posteriors = np.array(posteriors)
-        predicted_output = np.zeros(len(parts), posteriors.dtype)
+        predicted_output = np.zeros(len(parts), np.float)
 
-        # first, copy the posteriors to the appropriate place
-        offset_arcs, num_arcs = parts.get_offset(DependencyPartArc)
-        predicted_output[offset_arcs:offset_arcs + num_arcs] = posteriors
-
+        assert len(posteriors) == len(self.arc_indices)
         assert len(additional_posteriors) == len(self.additional_indices)
 
-        for value, index in zip(additional_posteriors, self.additional_indices):
+        all_posteriors = posteriors + additional_posteriors
+        all_indices = self.arc_indices + self.additional_indices
+        for value, index in zip(all_posteriors, all_indices):
             predicted_output[index] = value
 
         return predicted_output
@@ -246,21 +245,21 @@ class DependencyDecoder(StructuredDecoder):
         """
         # length is the number of tokens in the instance, including root
         length = len(instance)
-        offset_arcs, num_arcs = parts.get_offset(DependencyPartArc)
 
         tree_factor = PFactorTree()
-        arc_indices = []
+        arcs = []
         variables = []
-        for r in range(offset_arcs, offset_arcs + num_arcs):
-            arc_indices.append((parts[r].head, parts[r].modifier))
+        for r, part in parts.iterate_over_type(DependencyPartArc, True):
+            arcs.append((part.head, part.modifier))
             arc_variable = graph.create_binary_variable()
             arc_variable.set_log_potential(scores[r])
             variables.append(arc_variable)
+            self.arc_indices.append(r)
 
         # owned_by_graph makes the factor persist after calling this function
         # if left as False, the factor is garbage collected
         graph.declare_factor(tree_factor, variables, owned_by_graph=True)
-        tree_factor.initialize(length, arc_indices)
+        tree_factor.initialize(length, arcs)
 
         return variables
 
