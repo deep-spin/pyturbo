@@ -13,9 +13,9 @@ class NeuralScorer(object):
             self.model.cuda()
         self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    def compute_scores(self, instance, parts):
+    def compute_scores(self, instances, parts):
         # Run the forward pass.
-        self.scores = self.model(instance, parts)
+        self.scores = self.model(instances, parts)
         return self.scores.detach().numpy()
 
     def compute_gradients(self, gold_output, predicted_output):

@@ -22,6 +22,7 @@ class TokenDictionary(Dictionary):
         self.token_unknown = self.special_symbols.insert('_UNKNOWN_')
         self.token_start = self.special_symbols.insert('_START_')
         self.token_stop = self.special_symbols.insert('_STOP_')
+        self.token_padding = self.special_symbols.insert('_PADDING_')
 
         # Maximum alphabet sizes.
         self.max_forms = 0xffff

@@ -336,10 +336,21 @@ class DependencyNeuralModel(nn.Module):
         offset, size = parts.get_offset(DependencyPartGrandSibling)
         scores[offset:offset + size] = gsib_scores.view(-1)
 
-    def forward(self, instance, parts):
+    def forward(self, instances, parts):
+        """
+        :param instances: a list of DependencyInstance objects
+        :param parts: a list of DependencyParts objects
+        :return: a score matrix with shape (num_instances, longest_length)
+        """
         scores = torch.zeros(len(parts))
+        batch_size = len(instances)
+        max_length = max(len(instance) for instance in instances)
 
-        word_indices = [instance.get_form(i) for i in range(len(instance))]
+        index_matrix = torch.full((batch_size, max_length), -1)
+        for i, instance in enumerate(instances):
+            word_indices = [instance.get_form(i) for i in range(len(instance))]
+            index_matrix[i, :len(instance)] = torch.tensor(word_indices)
+
         words = torch.tensor(word_indices)
         if self.on_gpu:
             words = words.cuda()
