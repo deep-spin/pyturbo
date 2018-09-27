@@ -5,6 +5,7 @@ import torch
 from classifier.parameters import Parameters, FeatureVector
 from classifier.neural_scorer import NeuralScorer
 from classifier.utils import nearly_eq_tol
+from classifier.instance import InstanceData
 import logging
 import time
 
@@ -25,14 +26,6 @@ class StructuredClassifier(object):
         else:
             self.neural_scorer = None
 
-    @property
-    def neural_scorer(self):
-        return self._neural_scorer
-
-    @neural_scorer.setter
-    def neural_scorer(self, value):
-        self._neural_scorer = value
-
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
         raise NotImplementedError
@@ -41,7 +34,7 @@ class StructuredClassifier(object):
         '''Load the full configuration and model.'''
         raise NotImplementedError
 
-    def get_formatted_instance(self, instance):
+    def format_instance(self, instance):
         '''Obtain a "formatted" instance. Override this function for
         task-specific formatted instances, which may be different from instance
         since they may have extra information, data in numeric format for faster
@@ -61,9 +54,22 @@ class StructuredClassifier(object):
         for task-specific instance preprocessing.'''
         return
 
-    def write_prediction(self, instance, parts, predicted_output):
-        '''Write prediction to a file.'''
-        raise NotImplementedError
+    def write_predictions(self, instances, parts, predictions):
+        """
+        Write predictions to a file.
+
+        :param instances: the instances in the original format (i.e., not the
+            "formatted" one, but retaining the original contents)
+        :param parts: list with the parts per instance
+        :param predictions: list with predictions per instance
+        """
+        self.writer.open(self.options.output_path)
+        for instance, inst_parts, inst_prediction in zip(instances,
+                                                         parts, predictions):
+            self.label_instance(instance, inst_parts, inst_prediction)
+            self.writer.write(instance)
+
+        self.writer.close()
 
     def make_parts(self, instance):
         '''Compute the task-specific parts for this instance.
@@ -201,53 +207,84 @@ class StructuredClassifier(object):
     def train(self):
         '''Train with a general online algorithm.'''
         self.preprocess_data()
-        instances = self.create_instances()
+        train_instances, valid_instances = self.read_train_instances()
+        train_data = self.make_parts_batch(train_instances)
+        valid_data = self.make_parts_batch(valid_instances)
         self.parameters = Parameters(use_average=self.options.use_averaging)
-        if self.options.only_supported_features:
-            self.make_supported_parameters()
 
+        # if self.options.only_supported_features:
+        #     self.make_supported_parameters()
+
+        self.best_loss = np.inf
         self.lambda_coeff = 1.0 / (self.options.regularization_constant *
-                                   float(len(instances)))
+                                   float(len(train_instances)))
         for epoch in range(self.options.training_epochs):
-            self.train_epoch(epoch, instances)
-        self.parameters.finalize(self.options.training_epochs * len(instances))
+            self.train_epoch(epoch, train_data, valid_data)
+        self.parameters.finalize(self.options.training_epochs
+                                 * len(train_instances))
 
-    def create_instances(self):
-        '''Create batch of training instances.'''
+    def read_instances(self, path, return_originals=False):
+        """
+        Read instances from the given path and change them to the format
+        used internally.
+
+        :param path: path to a file
+        :param return_originals: if True, return a tuple (formatted_instances,
+        original_instances)
+        :return: list of instances
+        """
+        instances = []
+        original_instances = []
+
+        self.reader.open(path)
+        instance = self.reader.next()
+        while instance:
+            formatted_instance = self.format_instance(instance)
+            instances.append(formatted_instance)
+            if return_originals:
+                original_instances.append(instance)
+
+            instance = self.reader.next()
+
+        self.reader.close()
+        if return_originals:
+            return instances, original_instances
+
+        return instances
+
+    def read_train_instances(self):
+        '''Create batch of training and validation instances.'''
         import time
         tic = time.time()
         logging.info('Creating instances...')
-        self.reader.open(self.options.training_path)
-        instances = []
-        instance = self.reader.next()
-        while instance:
-            formatted_instance = self.get_formatted_instance(instance)
-            instances.append(formatted_instance)
-            instance = self.reader.next()
-        self.reader.close()
-        logging.info('Number of instances: %d' % len(instances))
+
+        train_instances = self.read_instances(self.options.training_path)
+        valid_instances = self.read_instances(self.options.valid_path)
+        logging.info('Number of train instances: %d' % len(train_instances))
+        logging.info('Number of validation instances: %d'
+                     % len(valid_instances))
         toc = time.time()
         logging.info('Time: %f' % (toc - tic))
-        return instances
+        return train_instances, valid_instances
 
-    def make_supported_parameters(self):
-        '''Create parameters using only those supported in the gold outputs.
-        Build and lock a parameter vector with only supported parameters, by
-        looking at the gold outputs in the training data. This is a
-        preprocessing stage for training with supported features (flag
-        --only_supported_features).'''
-        logging.info('Building supported feature set...')
-        self.dictionary.stop_growth()
-        self.parameters.allow_growth()
-        for instance in instances:
-            parts, gold_outputs = self.make_parts(instance)
-            selected_parts = [True if gold_outputs[r] > 0.5 else False
-                              for r in range(len(parts))]
-            features = self.make_selected_features(instance, parts,
-                                                   selected_parts)
-            self.touch_parameters(parts, features, selected_parts)
-        self.parameters.stop_growth()
-        logging.info('Number of features: %d', len(self.parameters))
+    # def make_supported_parameters(self):
+    #     '''Create parameters using only those supported in the gold outputs.
+    #     Build and lock a parameter vector with only supported parameters, by
+    #     looking at the gold outputs in the training data. This is a
+    #     preprocessing stage for training with supported features (flag
+    #     --only_supported_features).'''
+    #     logging.info('Building supported feature set...')
+    #     self.dictionary.stop_growth()
+    #     self.parameters.allow_growth()
+    #     for instance in instances:
+    #         parts, gold_outputs = self.make_parts(instance)
+    #         selected_parts = [True if gold_outputs[r] > 0.5 else False
+    #                           for r in range(len(parts))]
+    #         features = self.make_selected_features(instance, parts,
+    #                                                selected_parts)
+    #         self.touch_parameters(parts, features, selected_parts)
+    #     self.parameters.stop_growth()
+    #     logging.info('Number of features: %d', len(self.parameters))
 
     def _decode_train(self, instance, parts, scores, gold_output,
                       features=None, t=None):
@@ -351,33 +388,24 @@ class StructuredClassifier(object):
 
         return predicted_output, eta
 
-    def train_batch(self, instances, t):
+    def train_batch(self, instance_data, t):
         '''
         Run one batch of a learning algorithm. If it is an online one, just
         run through each instance.
 
-        :param instances: list of Instance objects composing the batch
+        :param instance_data: InstanceData object
         :param t: integer indicating that the batch starts with the t-th
             instance in the dataset
         '''
-        all_parts = []
-        all_gold = []
         all_scores = []
-        for instance in instances:
-            # Compute parts, features, and scores.
-            parts, gold_output = self.make_parts(instance)
+        for i in range(len(instance_data)):
             if self.options.neural:
-                all_parts.append(parts)
-                all_gold.append(gold_output)
-                continue
-            else:
-                features = self.make_features(instance, parts)
+                break
 
-            # If using only supported features, must remove the unsupported
-            # ones. This is necessary not to mess up the computation of the
-            # squared norm of the feature difference vector in MIRA.
-            if self.options.only_supported_features:
-                self.remove_unsupported_features(instance, parts, features)
+            instance = instance_data.instances[i]
+            parts = instance_data.parts[i]
+            features = instance_data.features[i]
+            gold_output = instance_data.gold_labels[i]
 
             start_scores = time.time()
             scores = self.compute_scores(instance, parts, features)
@@ -400,16 +428,17 @@ class StructuredClassifier(object):
         # if running a neural model, run a whole batch at once
         if self.options.neural:
             start_time = time.time()
-            scores = self.neural_scorer.compute_scores(instances, all_parts)
+            scores = self.neural_scorer.compute_scores(instance_data.instances,
+                                                       instance_data.parts)
             end_time = time.time()
             self.time_scores += end_time - start_time
 
             all_predictions = []
 
-            for i in range(len(instances)):
-                instance = instances[i]
-                parts = all_parts[i]
-                gold_output = all_gold[i]
+            for i in range(len(instance_data)):
+                instance = instance_data.instances[i]
+                parts = instance_data.parts[i]
+                gold_output = instance_data.gold_labels[i]
 
                 # network scores are as long as the instance with most parts
                 instance_scores = scores[i][:len(parts)]
@@ -421,15 +450,16 @@ class StructuredClassifier(object):
 
             # run the gradient step for the whole batch
             start_time = time.time()
-            self.make_gradient_step(all_gold, all_predictions)
+            self.make_gradient_step(instance_data.gold_labels, all_predictions)
             end_time = time.time()
             self.time_gradient += end_time - start_time
 
-    def train_epoch(self, epoch, instances):
+    def train_epoch(self, epoch, train_data, valid_data):
         '''Run one epoch of an online algorithm.
 
         :param epoch: the number of the epoch, starting from 0
-        :param instances: a list of Instance objects
+        :param train_data: InstanceData
+        :param valid_data: InstanceData
         '''
         import time
         self.time_decoding = 0
@@ -449,27 +479,35 @@ class StructuredClassifier(object):
                 ['Lambda: %f' % self.lambda_coeff,
                  'Regularization constant: %f' %
                  self.options.regularization_constant,
-                 'Number of instances: %d' % len(instances)]))
+                 'Number of instances: %d' % len(train_data)]))
         logging.info(' Iteration #%d' % (epoch + 1))
 
         self.dictionary.stop_growth()
 
-        t = len(instances) * epoch
+        t = len(train_data) * epoch
         batch_index = 0
         batch_size = self.options.batch_size
-        while batch_index < len(instances):
+        while batch_index < len(train_data):
             next_batch_index = batch_index + batch_size
-            batch = instances[batch_index:next_batch_index]
+            batch = train_data[batch_index:next_batch_index]
             self.train_batch(batch, t)
             t += len(batch)
             batch_index = next_batch_index
 
         end = time.time()
+
+        _, validation_losses = self.run_batch(valid_data, return_loss=True)
+        train_loss = self.total_loss / len(train_data)
+        validation_loss = np.array(validation_losses).mean()
+
         logging.info('Time: %f' % (end - start))
         logging.info('Time to score: %f' % self.time_scores)
         logging.info('Time to decode: %f' % self.time_decoding)
         logging.info('Time to do gradient step: %f' % self.time_gradient)
         logging.info('Number of features: %d' % len(self.parameters))
+        if self.should_save(validation_loss):
+            self.save()
+            logging.info('Saved model')
 
         if self.options.training_algorithm in ['perceptron']:
             logging.info('Number of mistakes: %d/%d (%f)' %
@@ -479,12 +517,100 @@ class StructuredClassifier(object):
         else:
             sq_norm = self.parameters.get_squared_norm()
             regularization_value = 0.5 * self.lambda_coeff * \
-                float(len(instances)) * sq_norm
-            logging.info('\t'.join(['Total Loss: %f' % self.total_loss,
+                float(len(train_data)) * sq_norm
+            logging.info('\t'.join(['Total Train Loss: %f' % train_loss,
+                                    'Validation Loss: %f' % validation_loss,
                                     'Total Reg: %f' % regularization_value,
-                                    'Total Loss+Reg: %f' % \
-                                    (self.total_loss + regularization_value),
+                                    'Total Loss+Reg: %f' %
+                                    (train_loss + regularization_value),
                                     'Squared norm: %f' % sq_norm]))
+
+    def should_save(self, validation_loss):
+        """
+        Determine if the model improved since the last evaluation and should be
+        saved.
+
+        :return: boolean
+        """
+        if validation_loss < self.best_loss:
+            self.best_loss = validation_loss
+            return True
+
+        return False
+
+    def make_parts_batch(self, instances):
+        """
+        Create parts for all instances in the batch.
+
+        :param instances: list of Instance objects
+        :return: an InstanceData object.
+            If the instances do not have the gold label, the gold attribute
+            will be a list of None. In neural models, features is also a
+            list of None.
+        """
+        all_parts = []
+        all_gold = []
+        all_features = []
+        for instance in instances:
+            parts, gold_output = self.make_parts(instance)
+            if self.options.neural:
+                features = None
+            else:
+                features = self.make_features(instance, parts)
+
+                # If using only supported features, must remove the unsupported
+                # ones. This is necessary not to mess up the computation of the
+                # squared norm of the feature difference vector in MIRA.
+                if self.options.only_supported_features:
+                    self.remove_unsupported_features(instance, parts, features)
+
+            all_parts.append(parts)
+            all_features.append(features)
+            all_gold.append(gold_output)
+
+        data = InstanceData(instances, all_parts, all_features, all_gold)
+        return data
+
+    def run_batch(self, instance_data, return_loss=False):
+        """
+        Predict the output for the given instances.
+
+        :type instance_data: InstanceData
+        :param return_loss: if True, also return the loss (only use if
+            instance_data has the gold outputs)
+        :return: a list of arrays with the predicted outputs.
+        """
+        if self.options.neural:
+            scores = self.neural_scorer.compute_scores(instance_data.instances,
+                                                       instance_data.parts)
+        else:
+            scores = []
+            zipped = zip(instance_data.instances,
+                         instance_data.parts, instance_data.features)
+            for instance, inst_parts, inst_features in zipped:
+                inst_scores = self.compute_scores(instance, inst_parts,
+                                                  inst_features)
+                scores.append(inst_scores)
+
+        predictions = []
+        losses = []
+        for i in range(len(instance_data)):
+            instance = instance_data.instances[i]
+            parts = instance_data.parts[i]
+            inst_scores = scores[i][:len(parts)]
+
+            predicted_output = self.decoder.decode(instance, parts, inst_scores)
+            predictions.append(predicted_output)
+            if return_loss:
+                gold = instance_data.gold_labels[i]
+                loss = self.decoder.compute_loss(gold, predicted_output,
+                                                 inst_scores)
+                losses.append(loss)
+
+        if return_loss:
+            return predictions, losses
+
+        return predictions
 
     def run(self):
         '''Run the structured classifier on test data.'''
@@ -494,20 +620,18 @@ class StructuredClassifier(object):
         if self.options.evaluate:
             self.begin_evaluation()
 
-        self.reader.open(self.options.test_path)
-        self.writer.open(self.options.output_path)
+        instances, orig_instances = self.read_instances(self.options.test_path)
+        data = self.make_parts_batch(instances)
+        predictions = []
+        batch_index = 0
+        while batch_index < len(instances):
+            next_index = batch_index + self.options.batch_size
+            batch_data = data[batch_index:next_index]
+            batch_predictions = self.run_batch(batch_data.instances)
+            predictions.extend(batch_predictions)
+            batch_index = next_index
 
-        instances = []
-        instance = self.reader.next()
-        while instance:
-            output_instance = self.classify_instance(instance)
-            self.writer.write(output_instance)
-            instances.append(instance)
-            instance = self.reader.next()
-
-        self.writer.close()
-        self.reader.close()
-
+        self.write_predictions(instances, data.parts, predictions)
         logging.info('Number of instances: %d' % len(instances))
         toc = time.time()
         logging.info('Time: %f' % (toc - tic))
@@ -517,7 +641,7 @@ class StructuredClassifier(object):
 
     def classify_instance(self, instance):
         '''Run the structured classifier on a single instance.'''
-        formatted_instance = self.get_formatted_instance(instance)
+        formatted_instance = self.format_instance(instance)
         parts, gold_output = self.make_parts(formatted_instance)
         features = self.make_features(formatted_instance, parts)
         scores = self.compute_scores(formatted_instance, parts, features)
@@ -526,8 +650,7 @@ class StructuredClassifier(object):
         output_instance = type(instance)(input=instance.input, output=None)
         self.label_instance(output_instance, parts, predicted_output)
         if self.options.evaluate:
-            self.evaluate_instance(instance, output_instance, parts,
-                                   gold_output, predicted_output)
+            self.evaluate_instance(parts, gold_output, predicted_output)
         return output_instance
 
     def begin_evaluation(self):
@@ -540,8 +663,7 @@ class StructuredClassifier(object):
         self.num_mistakes = 0
         self.num_total_parts = 0
 
-    def evaluate_instance(self, instance, output_instance, parts, gold_output,
-                          predicted_output):
+    def evaluate_instance(self, parts, gold_output, predicted_output):
         for r in range(len(parts)):
             if not nearly_eq_tol(gold_output[r],
                                  predicted_output[r], 1e-6):

@@ -31,3 +31,12 @@ class StructuredDecoder(object):
         '''Perform cost-augmented decoding.'''
         return self.decode_mira(instance, parts, scores, gold_outputs,
                                 old_mira=False)
+
+    def compute_loss(self, gold_output, predicted_output, scores):
+        '''Compute the cost-augmented loss for the given prediction'''
+        p = 0.5 - gold_output
+        q = 0.5 * np.sum(gold_output)
+        cost = p.dot(predicted_output) + q
+        loss = cost + scores.dot(predicted_output - gold_output)
+
+        return loss

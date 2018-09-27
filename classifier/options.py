@@ -13,6 +13,8 @@ class Options(object):
                             (requires --test).""")
         parser.add_argument('--training_path', type=str, default=None,
                             help='Path to the training data.')
+        parser.add_argument('--valid_path', type=str,
+                            help='Path to validation data.')
         parser.add_argument('--test_path', type=str, default=None,
                             help='Path to the test data.')
         parser.add_argument('--model_path', type=str, default=None,
@@ -57,6 +59,7 @@ class Options(object):
         self.test = bool(args['test'])
         self.evaluate = bool(args['evaluate'])
         self.training_path = args['training_path']
+        self.valid_path = args['valid_path']
         self.test_path = args['test_path']
         self.model_path = args['model_path']
         self.output_path = args['output_path']

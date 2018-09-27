@@ -136,7 +136,7 @@ class TurboParser(StructuredClassifier):
         pruner.load(model_path)
         return pruner
     
-    def get_formatted_instance(self, instance):
+    def format_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
 
     def prune(self, instance, parts, gold_output):
@@ -170,8 +170,8 @@ class TurboParser(StructuredClassifier):
         Create the parts (arcs) into which the problem is factored.
 
         :param instance: a DependencyInstance object
-        :return: if instances have the expected output, return a tuple
-            (parts, gold_output). If they don't, return only the parts.
+        :return: a tuple (parts, gold_output). If the instances don't have the
+            gold label, `gold_output` is None. If it does, it is a numpy array.
         """
         parts = DependencyParts()
         gold_output = None if instance.output is None else []
@@ -197,9 +197,8 @@ class TurboParser(StructuredClassifier):
             assert num_parts == num_gold, \
                 'Number of parts = %d and number of gold outputs = % d' \
                 % (num_parts, num_gold)
-            return parts, gold_output
 
-        return parts
+        return parts, gold_output
 
     def print_parts(self, part_type, parts, gold):
         """
