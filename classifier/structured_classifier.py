@@ -261,15 +261,16 @@ class StructuredClassifier(object):
         total_cost = 0.
         algorithm = self.options.training_algorithm
 
-        # if running a neural model, first run the RNN for the whole batch
-        if self.options.neural:
-            pass
-
+        all_parts = []
+        all_gold = []
+        all_scores = []
         for instance in instances:
             # Compute parts, features, and scores.
             parts, gold_output = self.make_parts(instance)
             if self.options.neural:
-                features = None
+                all_parts.append(parts)
+                all_gold.append(gold_output)
+                continue
             else:
                 features = self.make_features(instance, parts)
 
@@ -283,6 +284,7 @@ class StructuredClassifier(object):
             scores = self.compute_scores(instance, parts, features)
             end_scores = time.time()
             self.time_scores += end_scores - start_scores
+            all_scores.append(scores)
 
             # This is a no-op by default. But it's convenient to have it here to
             # build latent-variable structured classifiers (e.g. for coreference
@@ -383,6 +385,38 @@ class StructuredClassifier(object):
 
             # Increment the round.
             t += 1
+
+        # if running a neural model, run a whole batch at once
+        if self.options.neural:
+            start_time = time.time()
+            scores = self.neural_scorer.compute_scores(instances, all_parts)
+            end_time = time.time()
+            self.time_scores += end_time - start_time
+
+            for i in range(len(instances)):
+                instance = instances[i]
+                parts = all_parts[i]
+                gold_output = all_gold[i]
+
+                start_time = time.time()
+                predicted_output, cost, loss = \
+                    self.decoder.decode_cost_augmented(instance, parts,
+                                                       scores, gold_output)
+                end_time = time.time()
+                self.time_decoding += end_time - start_time
+
+                if loss < 0.0:
+                    if loss < -1e-5:
+                        logging.warning('Negative loss set to zero: %f' % loss)
+                    loss = 0.0
+                self.total_loss += loss
+
+                start_time = time.time()
+                self.make_gradient_step(parts, None, None, None, gold_output,
+                                        predicted_output)
+                end_time = time.time()
+                self.time_gradient += end_time - start_time
+
 
     def train_epoch(self, epoch, instances):
         '''Run one epoch of an online algorithm.

@@ -32,6 +32,7 @@ class DependencyNeuralModel(nn.Module):
         self.mlp_size = mlp_size
         self.num_layers = num_layers
         self.dropout = dropout
+        self.padding = token_dictionary.token_padding
         self.on_gpu = torch.cuda.is_available()
 
         self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
@@ -58,7 +59,8 @@ class DependencyNeuralModel(nn.Module):
             hidden_size=rnn_size,
             num_layers=num_layers,
             dropout=dropout,
-            bidirectional=True)
+            bidirectional=True,
+            batch_first=True)
         self.tanh = nn.Tanh()
 
         # first order
@@ -336,45 +338,71 @@ class DependencyNeuralModel(nn.Module):
         offset, size = parts.get_offset(DependencyPartGrandSibling)
         scores[offset:offset + size] = gsib_scores.view(-1)
 
+    def _get_embeddings(self, instances, batch_size, max_length,
+                        word_or_tag):
+        """
+        Get the word or tag embeddings for all tokens in the instance.
+        :param word_or_tag: either 'word' or 'tag'
+        """
+        index_matrix = torch.full((batch_size, max_length), self.padding,
+                                  dtype=torch.long)
+        for i, instance in enumerate(instances):
+            if word_or_tag == 'word':
+                getter = instance.get_form
+            else:
+                getter = instance.get_tag
+
+            indices = [getter(i) for i in range(len(instance))]
+            index_matrix[i, :len(instance)] = torch.tensor(indices)
+
+        if self.on_gpu:
+            index_matrix = index_matrix.cuda()
+
+        if word_or_tag == 'word':
+            embedding_matrix = self.word_embeddings
+        else:
+            embedding_matrix = self.tag_embeddings
+
+        return embedding_matrix(index_matrix)
+
     def forward(self, instances, parts):
         """
         :param instances: a list of DependencyInstance objects
         :param parts: a list of DependencyParts objects
         :return: a score matrix with shape (num_instances, longest_length)
         """
-        scores = torch.zeros(len(parts))
         batch_size = len(instances)
         max_length = max(len(instance) for instance in instances)
+        max_num_parts = max(len(p) for p in parts)
+        batch_scores = torch.zeros(batch_size, max_num_parts)
 
-        index_matrix = torch.full((batch_size, max_length), -1)
-        for i, instance in enumerate(instances):
-            word_indices = [instance.get_form(i) for i in range(len(instance))]
-            index_matrix[i, :len(instance)] = torch.tensor(word_indices)
-
-        words = torch.tensor(word_indices)
-        if self.on_gpu:
-            words = words.cuda()
-        embeds = self.word_embeddings(words)
-
+        embeddings = self._get_embeddings(instances, batch_size, max_length,
+                                          'word')
         if self.tag_embeddings is not None:
-            tag_indices = [instance.get_tag(i) for i in range(len(instance))]
-            tags = torch.tensor(tag_indices)
-            if self.on_gpu:
-                tags = tags.cuda()
-            tag_embeddings = self.tag_embeddings(tags)
-            embeds = torch.cat([embeds, tag_embeddings], dim=1)
+            tag_embeddings = self._get_embeddings(instances, batch_size,
+                                                  max_length, 'tag')
+            # each embedding tensor is (batch, num_tokens, embedding_size)
+            embeddings = torch.cat([embeddings, tag_embeddings], dim=2)
 
-        # new shape is (num_tokens, batch=1, hidden_size)
-        states, _ = self.rnn(embeds.view(len(instance), 1, -1))
+        # batch_states is (batch, num_tokens, hidden_size)
+        batch_states, _ = self.rnn(embeddings)
 
-        self._compute_first_order_scores(states, parts, scores)
-        if parts.has_type(DependencyPartNextSibling):
-            self._compute_consecutive_sibling_scores(states, parts, scores)
+        # now go through each batch item and treat it
+        for i in range(batch_size):
+            states = batch_states[i]
+            scores = batch_scores[i]
+            sent_parts = parts[i]
 
-        if parts.has_type(DependencyPartGrandparent):
-            self._compute_grandparent_scores(states, parts, scores)
+            self._compute_first_order_scores(states, sent_parts, scores)
 
-        if parts.has_type(DependencyPartGrandSibling):
-            self._compute_grandsibling_scores(states, parts, scores)
+            if parts.has_type(DependencyPartNextSibling):
+                self._compute_consecutive_sibling_scores(states, sent_parts,
+                                                         scores)
 
-        return scores
+            if parts.has_type(DependencyPartGrandparent):
+                self._compute_grandparent_scores(states, sent_parts, scores)
+
+            if parts.has_type(DependencyPartGrandSibling):
+                self._compute_grandsibling_scores(states, sent_parts, scores)
+
+        return batch_scores
