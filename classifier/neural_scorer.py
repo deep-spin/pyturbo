@@ -19,9 +19,27 @@ class NeuralScorer(object):
         return self.scores.detach().numpy()
 
     def compute_gradients(self, gold_output, predicted_output):
-        # Compute error.
-        error = (self.scores * torch.tensor(
-            predicted_output - gold_output, dtype=self.scores.dtype)).sum()
+        """
+        Compute the error gradient.
+
+        :param gold_output: either a numpy 1d array for a single item or a list
+            of 1d arrays for a batch.
+        :param predicted_output: same as gold_output
+        """
+        if isinstance(gold_output, list):
+            batch_size = len(gold_output)
+            max_length = max(len(g) for g in gold_output)
+            shape = [batch_size, max_length]
+            diff = torch.zeros(shape, dtype=self.scores.dtype)
+            for i in range(batch_size):
+                gold_item = gold_output[i]
+                pred_item = predicted_output[i]
+                diff[i, :len(gold_item)] = torch.tensor(pred_item - gold_item)
+        else:
+            diff = torch.tensor(predicted_output - gold_output,
+                                dtype=self.scores.dtype)
+
+        error = (self.scores * diff).sum()
         # Backpropagate to accumulate gradients.
         error.backward()
 

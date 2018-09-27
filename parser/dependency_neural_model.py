@@ -395,14 +395,14 @@ class DependencyNeuralModel(nn.Module):
 
             self._compute_first_order_scores(states, sent_parts, scores)
 
-            if parts.has_type(DependencyPartNextSibling):
+            if sent_parts.has_type(DependencyPartNextSibling):
                 self._compute_consecutive_sibling_scores(states, sent_parts,
                                                          scores)
 
-            if parts.has_type(DependencyPartGrandparent):
+            if sent_parts.has_type(DependencyPartGrandparent):
                 self._compute_grandparent_scores(states, sent_parts, scores)
 
-            if parts.has_type(DependencyPartGrandSibling):
+            if sent_parts.has_type(DependencyPartGrandSibling):
                 self._compute_grandsibling_scores(states, sent_parts, scores)
 
         return batch_scores

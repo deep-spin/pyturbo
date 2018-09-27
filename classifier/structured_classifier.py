@@ -98,7 +98,7 @@ class StructuredClassifier(object):
             scores[r] = self.neural_model.compute_score(instance, r)
         return scores
 
-    def compute_scores(self, instance, parts, features):
+    def compute_scores(self, instance, parts, features=None):
         '''Compute a score for every part in the instance using the current
         model and the part-specific features.
         Given an instance, parts, and features, compute the scores. This will
@@ -116,8 +116,8 @@ class StructuredClassifier(object):
                 scores[r] = self.parameters.compute_score(features[r])
         return scores
 
-    def make_gradient_step(self, parts, features, eta, t, gold_output,
-                           predicted_output):
+    def make_gradient_step(self, gold_output, predicted_output, parts=None,
+                           features=None, eta=None, t=None):
         '''Perform a gradient step updating the current model.
         Perform a gradient step with stepsize eta. The iteration number is
         provided as input since it may be necessary to keep track of the
@@ -249,6 +249,108 @@ class StructuredClassifier(object):
         self.parameters.stop_growth()
         logging.info('Number of features: %d', len(self.parameters))
 
+    def _decode_train(self, instance, parts, scores, gold_output,
+                      features=None, t=None):
+        """
+        Decode the scores at training time.
+
+        Return the predicted output, loss, eta.
+        """
+        algorithm = self.options.training_algorithm
+        eta = None
+
+        # This is a no-op by default. But it's convenient to have it here to
+        # build latent-variable structured classifiers (e.g. for coreference
+        # resolution).
+        inner_loss = self.transform_gold(instance, parts, scores,
+                                         gold_output)
+
+        # Do the decoding.
+        start_decoding = time.time()
+        if algorithm in ['perceptron']:
+            predicted_output = self.decoder.decode(instance, parts,
+                                                   scores)
+            for r in range(len(parts)):
+                self.num_total += 1
+                if not nearly_eq_tol(gold_output[r],
+                                     predicted_output[r], 1e-6):
+                    self.num_mistakes += 1
+
+        elif algorithm in ['mira']:
+            predicted_output, cost, loss = self.decoder.decode_mira(
+                instance,
+                parts,
+                scores,
+                gold_output,
+                old_mira=True)
+
+        elif algorithm in ['svm_mira', 'svm_sgd']:
+            predicted_output, cost, loss = \
+                self.decoder.decode_cost_augmented(instance,
+                                                   parts,
+                                                   scores,
+                                                   gold_output)
+
+        elif algorithm in ['crf_mira', 'crf_sgd']:
+            predicted_output, entropy, loss = \
+                self.decoder.decode_marginals(instance,
+                                              parts,
+                                              scores,
+                                              gold_output)
+            assert entropy >= 0
+        else:
+            raise NotImplementedError
+        end_decoding = time.time()
+        self.time_decoding += end_decoding - start_decoding
+
+        # Update the total loss and cost.
+        if algorithm in ['mira', 'svm_mira', 'svm_sgd', 'crf_mira',
+                         'crf_sgd']:
+            loss -= inner_loss
+            if loss < 0.0:
+                if loss < -1e-12:
+                    logging.warning('Negative loss set to zero: %f' % loss)
+                loss = 0.0
+
+            self.total_loss += loss
+
+        # Compute the stepsize.
+        if algorithm in ['perceptron']:
+            eta = 1.0
+        elif algorithm in ['mira', 'svm_mira', 'crf_mira']:
+            if self.options.neural:
+                squared_norm = 0.
+            else:
+                difference = self.make_feature_difference(parts, features,
+                                                          gold_output,
+                                                          predicted_output)
+                squared_norm = difference.get_squared_norm()
+            threshold = 1e-9
+            if loss < threshold or squared_norm < threshold:
+                eta = 0.0
+            else:
+                eta = loss / squared_norm
+            if eta > self.options.regularization_constant:
+                eta = self.options.regularization_constant
+                self.truncated += 1
+        elif algorithm in ['svm_sgd']:
+            if self.options.learning_rate_schedule == 'fixed':
+                eta = self.options.initial_learning_rate
+            elif self.options.learning_rate_schedule == 'invsqrt':
+                eta = self.options.initial_learning_rate / \
+                      np.sqrt(float(t + 1))
+            elif self.options.learning_rate_schedule == 'inv':
+                eta = self.options.initial_learning_rate / (float(t + 1))
+            else:
+                raise NotImplementedError
+
+            # Scale the weight vector.
+            decay = 1.0 - eta * self.lambda_coeff
+            assert decay >= 0.
+            self.parameters.scale(decay)
+
+        return predicted_output, eta
+
     def train_batch(self, instances, t):
         '''
         Run one batch of a learning algorithm. If it is an online one, just
@@ -258,9 +360,6 @@ class StructuredClassifier(object):
         :param t: integer indicating that the batch starts with the t-th
             instance in the dataset
         '''
-        total_cost = 0.
-        algorithm = self.options.training_algorithm
-
         all_parts = []
         all_gold = []
         all_scores = []
@@ -286,101 +385,13 @@ class StructuredClassifier(object):
             self.time_scores += end_scores - start_scores
             all_scores.append(scores)
 
-            # This is a no-op by default. But it's convenient to have it here to
-            # build latent-variable structured classifiers (e.g. for coreference
-            # resolution).
-            inner_loss = self.transform_gold(instance, parts, scores,
-                                             gold_output)
-
-            # Do the decoding.
-            start_decoding = time.time()
-            if algorithm in ['perceptron']:
-                predicted_output = self.decoder.decode(instance, parts,
-                                                       scores)
-                for r in range(len(parts)):
-                    self.num_total += 1
-                    if not nearly_eq_tol(gold_output[r],
-                                         predicted_output[r], 1e-6):
-                        self.num_mistakes += 1
-
-            elif algorithm in ['mira']:
-                predicted_output, cost, loss = self.decoder.decode_mira(
-                    instance,
-                    parts,
-                    scores,
-                    gold_output,
-                    old_mira=True)
-
-            elif algorithm in ['svm_mira', 'svm_sgd']:
-                predicted_output, cost, loss = \
-                    self.decoder.decode_cost_augmented(instance,
-                                                       parts,
-                                                       scores,
-                                                       gold_output)
-                total_cost += cost
-
-            elif algorithm in ['crf_mira', 'crf_sgd']:
-                predicted_output, entropy, loss = \
-                    self.decoder.decode_marginals(instance,
-                                                  parts,
-                                                  scores,
-                                                  gold_output)
-                assert entropy >= 0
-            else:
-                raise NotImplementedError
-            end_decoding = time.time()
-            self.time_decoding += end_decoding - start_decoding
-
-            # Update the total loss and cost.
-            if algorithm in ['mira', 'svm_mira', 'svm_sgd', 'crf_mira',
-                             'crf_sgd']:
-                loss -= inner_loss
-                if loss < 0.0:
-                    if loss < -1e-12:
-                        logging.warning('Negative loss set to zero: %f' % loss)
-                    loss = 0.0
-
-                self.total_loss += loss
-
-            # Compute the stepsize.
-            if algorithm in ['perceptron']:
-                eta = 1.0
-            elif algorithm in ['mira', 'svm_mira', 'crf_mira']:
-                if self.options.neural:
-                    squared_norm = 0.
-                else:
-                    difference = self.make_feature_difference(parts, features,
-                                                              gold_output,
-                                                              predicted_output)
-                    squared_norm = difference.get_squared_norm()
-                threshold = 1e-9
-                if loss < threshold or squared_norm < threshold:
-                    eta = 0.0
-                else:
-                    eta = loss / squared_norm
-                if eta > self.options.regularization_constant:
-                    eta = self.options.regularization_constant
-                    self.truncated += 1
-            elif algorithm in ['svm_sgd']:
-                if self.options.learning_rate_schedule == 'fixed':
-                    eta = self.options.initial_learning_rate
-                elif self.options.learning_rate_schedule == 'invsqrt':
-                    eta = self.options.initial_learning_rate / \
-                          np.sqrt(float(t + 1))
-                elif self.options.learning_rate_schedule == 'inv':
-                    eta = self.options.initial_learning_rate / (float(t + 1))
-                else:
-                    raise NotImplementedError
-
-                # Scale the weight vector.
-                decay = 1.0 - eta * self.lambda_coeff
-                assert decay >= 0.
-                self.parameters.scale(decay)
+            predicted_output, eta = self._decode_train(
+                instance, parts, scores, gold_output, features, t)
 
             # Make gradient step.
             start_gradient = time.time()
-            self.make_gradient_step(parts, features, eta, t, gold_output,
-                                    predicted_output)
+            self.make_gradient_step(gold_output, predicted_output, parts,
+                                    features, eta, t)
             self.time_gradient += time.time() - start_gradient
 
             # Increment the round.
@@ -393,30 +404,26 @@ class StructuredClassifier(object):
             end_time = time.time()
             self.time_scores += end_time - start_time
 
+            all_predictions = []
+
             for i in range(len(instances)):
                 instance = instances[i]
                 parts = all_parts[i]
                 gold_output = all_gold[i]
 
-                start_time = time.time()
-                predicted_output, cost, loss = \
-                    self.decoder.decode_cost_augmented(instance, parts,
-                                                       scores, gold_output)
-                end_time = time.time()
-                self.time_decoding += end_time - start_time
+                # network scores are as long as the instance with most parts
+                instance_scores = scores[i][:len(parts)]
 
-                if loss < 0.0:
-                    if loss < -1e-5:
-                        logging.warning('Negative loss set to zero: %f' % loss)
-                    loss = 0.0
-                self.total_loss += loss
+                predicted_output, _ = self._decode_train(
+                    instance, parts, instance_scores, gold_output)
 
-                start_time = time.time()
-                self.make_gradient_step(parts, None, None, None, gold_output,
-                                        predicted_output)
-                end_time = time.time()
-                self.time_gradient += end_time - start_time
+                all_predictions.append(predicted_output)
 
+            # run the gradient step for the whole batch
+            start_time = time.time()
+            self.make_gradient_step(all_gold, all_predictions)
+            end_time = time.time()
+            self.time_gradient += end_time - start_time
 
     def train_epoch(self, epoch, instances):
         '''Run one epoch of an online algorithm.
