@@ -15,8 +15,11 @@ class DependencyReader(Reader):
     def next(self):
         sentence_fields = []
         for line in self.file:
-            line = line.rstrip('\n')
+            line = line.strip()
             if line == '':
+                if len(sentence_fields) == 0:
+                    # ignore multiple empty lines
+                    continue
                 break
             # Ignore comment lines (necessary for CONLLU files).
             if line[0] == '#':
