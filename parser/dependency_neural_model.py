@@ -260,9 +260,9 @@ class DependencyNeuralModel(nn.Module):
         word_sibling_tensors = self.sib_sibling_projection(states)
 
         # include the vector for null sibling
-        # word_sibling_tensors is (num_words, batch=1, hidden_units)
+        # word_sibling_tensors is (num_words=1, hidden_units)
         sibling_tensors = torch.cat([word_sibling_tensors,
-                                     self.null_sibling_tensor.view(1, 1, -1)])
+                                     self.null_sibling_tensor.view(1, -1)])
 
         head_indices = []
         modifier_indices = []
@@ -307,9 +307,9 @@ class DependencyNeuralModel(nn.Module):
         grandparent_tensors = self.gsib_grandparent_projection(states)
 
         # include the vector for null sibling
-        # word_sibling_tensors is (num_words, batch=1, hidden_units)
+        # word_sibling_tensors is (num_words=1, hidden_units)
         sibling_tensors = torch.cat([word_sibling_tensors,
-                                    self.null_sibling_tensor.view(1, 1, -1)])
+                                    self.null_sibling_tensor.view(1, -1)])
 
         head_indices = []
         modifier_indices = []

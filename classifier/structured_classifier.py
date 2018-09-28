@@ -620,14 +620,15 @@ class StructuredClassifier(object):
         if self.options.evaluate:
             self.begin_evaluation()
 
-        instances, orig_instances = self.read_instances(self.options.test_path)
+        instances, orig_instances = self.read_instances(self.options.test_path,
+                                                        return_originals=True)
         data = self.make_parts_batch(instances)
         predictions = []
         batch_index = 0
         while batch_index < len(instances):
             next_index = batch_index + self.options.batch_size
             batch_data = data[batch_index:next_index]
-            batch_predictions = self.run_batch(batch_data.instances)
+            batch_predictions = self.run_batch(batch_data)
             predictions.extend(batch_predictions)
             batch_index = next_index
 
