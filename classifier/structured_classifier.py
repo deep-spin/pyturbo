@@ -597,12 +597,16 @@ class StructuredClassifier(object):
         for i in range(len(instance_data)):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
+            gold = instance_data.gold_labels[i]
             inst_scores = scores[i][:len(parts)]
 
             predicted_output = self.decoder.decode(instance, parts, inst_scores)
             predictions.append(predicted_output)
+
+            if self.options.evaluate:
+                self.evaluate_instance(parts, gold, predicted_output)
+
             if return_loss:
-                gold = instance_data.gold_labels[i]
                 loss = self.decoder.compute_loss(gold, predicted_output,
                                                  inst_scores)
                 losses.append(loss)
@@ -632,7 +636,7 @@ class StructuredClassifier(object):
             predictions.extend(batch_predictions)
             batch_index = next_index
 
-        self.write_predictions(instances, data.parts, predictions)
+        self.write_predictions(orig_instances, data.parts, predictions)
         logging.info('Number of instances: %d' % len(instances))
         toc = time.time()
         logging.info('Time: %f' % (toc - tic))
