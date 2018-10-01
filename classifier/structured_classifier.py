@@ -345,7 +345,7 @@ class StructuredClassifier(object):
                          'crf_sgd']:
             loss -= inner_loss
             if loss < 0.0:
-                if loss < -1e-12:
+                if loss < -1e-6:
                     logging.warning('Negative loss set to zero: %f' % loss)
                 loss = 0.0
 
@@ -558,7 +558,8 @@ class StructuredClassifier(object):
             sq_norm = self.parameters.get_squared_norm()
             regularization_value = 0.5 * self.lambda_coeff * \
                 float(len(train_data)) * sq_norm
-            logging.info('\t'.join(['Total Train Loss: %f' % train_loss,
+            logging.info('\t'.join(['Total Train Loss (cost augmented): %f'
+                                    % train_loss,
                                     'Validation Loss: %f' % validation_loss,
                                     'Total Reg: %f' % regularization_value,
                                     'Total Loss+Reg: %f' %
