@@ -454,6 +454,41 @@ class StructuredClassifier(object):
             end_time = time.time()
             self.time_gradient += end_time - start_time
 
+    def _run_batches(self, instance_data, batch_size, return_loss=False):
+        """
+        Run the model for the given instances, one batch at a time. This is
+        useful when running on validation or test data.
+
+        :param instance_data: InstanceData
+        :param batch_size: the batch size at inference time; it doesn't need
+            to be the same as the one in self.options.batch_size (as a rule of
+            thumb, it can be the largest that fits in memory)
+        :param return_loss: if True, include the losses in the return. This
+            can only be True for data which have known gold output.
+        :return: a list of predictions. If return_loss is True, a tuple with
+            the list of predictions and the list of losses.
+        """
+        batch_index = 0
+        predictions = []
+        losses = []
+
+        while batch_index < len(instance_data):
+            next_index = batch_index + batch_size
+            batch_data = instance_data[batch_index:next_index]
+            result = self.run_batch(batch_data, return_loss)
+            if return_loss:
+                predictions.extend(result[0])
+                losses.extend(result[1])
+            else:
+                predictions.extend(result)
+
+            batch_index = next_index
+
+        if return_loss:
+            return predictions, losses
+
+        return predictions
+
     def train_epoch(self, epoch, train_data, valid_data):
         '''Run one epoch of an online algorithm.
 
@@ -496,7 +531,11 @@ class StructuredClassifier(object):
 
         end = time.time()
 
-        _, validation_losses = self.run_batch(valid_data, return_loss=True)
+        valid_start = time.time()
+        _, validation_losses = self._run_batches(valid_data, 128,
+                                                 return_loss=True)
+        valid_end = time.time()
+        time_validation = valid_end - valid_start
         train_loss = self.total_loss / len(train_data)
         validation_loss = np.array(validation_losses).mean()
 
@@ -504,6 +543,7 @@ class StructuredClassifier(object):
         logging.info('Time to score: %f' % self.time_scores)
         logging.info('Time to decode: %f' % self.time_decoding)
         logging.info('Time to do gradient step: %f' % self.time_gradient)
+        logging.info('Time to run on validation: %f' % time_validation)
         logging.info('Number of features: %d' % len(self.parameters))
         if self.should_save(validation_loss):
             self.save()
@@ -577,8 +617,9 @@ class StructuredClassifier(object):
 
         :type instance_data: InstanceData
         :param return_loss: if True, also return the loss (only use if
-            instance_data has the gold outputs)
-        :return: a list of arrays with the predicted outputs.
+            instance_data has the gold outputs) as a list of values
+        :return: a list of arrays with the predicted outputs if return_loss is
+            False. If it's True, a tuple with predictions and losses.
         """
         if self.options.neural:
             scores = self.neural_scorer.compute_scores(instance_data.instances,
