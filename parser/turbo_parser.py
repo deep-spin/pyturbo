@@ -82,6 +82,8 @@ class TurboParser(StructuredClassifier):
             self.token_dictionary.load(f)
             self.dictionary.load(f)
             self.parameters = pickle.load(f)
+            if model_options.pruner_path:
+                self.pruner = self.load_pruner(model_options.pruner_path)
             if model_options.neural:
                 word_embedding_size = pickle.load(f)
                 tag_embedding_size = pickle.load(f)
