@@ -632,12 +632,33 @@ class TurboParser(StructuredClassifier):
         relations = ['NULL' for i in range(len(instance))]
         instance.output = DependencyInstanceOutput(heads, relations)
         threshold = .5
+        root = -1
+        root_score = -1
+
         if self.options.unlabeled:
             offset, size = parts.get_offset(DependencyPartArc)
-            for r in range(offset, offset + size):
-                arc = parts[r]
-                if output[r] >= threshold:
-                    instance.output.heads[arc.modifier] = arc.head
+            arcs = parts[offset:offset + size]
+            scores = output[offset:offset + size]
+            score_matrix = _make_score_matrix(len(instance), arcs, scores)
+            heads = chu_liu_edmonds(score_matrix)
+            for m, h in enumerate(heads):
+                instance.output.heads[m] = h
+                if h == 0:
+                    # avoid more than one root!
+                    index = parts.find_arc_index(h, m)
+                    score = output[index]
+
+                    if root != -1:
+                        if score > root_score:
+                            # this token is better scored for root
+                            instance.output.heads[root] = m
+                        else:
+                            # attach it to the other root
+                            instance.output.heads[m] = root
+                            continue
+
+                    root = m
+                    root_score = score
         else:
             offset, size = parts.get_offset(DependencyPartLabeledArc)
             for r in range(offset, offset + size):
@@ -646,13 +667,212 @@ class TurboParser(StructuredClassifier):
                     instance.output.heads[arc.modifier] = arc.head
                     instance.output.relations[arc.modifier] = \
                         self.dictionary.get_relation_name(arc.label)
+                    if arc.head == 0:
+                        # avoid more than one root!
+                        if root != -1:
+                            if output[r] > root_score:
+                                # this token is better scored for root
+                                instance.output.heads[root] = arc.modifier
+                            else:
+                                # attach it to the other root
+                                instance.output.heads[arc.modifier] = root
+                                continue
+
+                        root = arc.modifier
+                        root_score = output[r]
+        if root == -1:
+            logging.info('Sentence without root')
+
+        # assign words without heads to the root word
         for m in range(1, len(instance)):
             if instance.get_head(m) < 0:
                 logging.info('Word without head.')
-                instance.output.heads[m] = 0
+                instance.output.heads[m] = root
                 if not self.options.unlabeled:
                     instance.output.relations[m] = \
                         self.dictionary.get_relation_name(0)
+
+
+def _make_score_matrix(length, arcs, scores):
+    """
+    Makes a score matrix from an array of scores ordered in the same way as a
+    list of DependencyPartArcs. Positions [h, m] corresponding to non-existing
+    arcs have score of -inf.
+    """
+    score_matrix = np.full([length, length], -np.inf, np.float32)
+    for arc, score in zip(arcs, scores):
+        h = arc.head
+        m = arc.modifier
+        score_matrix[h, m] = score
+
+    return score_matrix
+
+
+def chu_liu_edmonds(score_matrix):
+    """
+    Run the Chu-Liu-Edmonds' algorithm to find the maximum spanning tree.
+
+    :param score_matrix: a matrix such that cell [h, m] has the score for the
+        arc (h, m).
+    """
+    while True:
+        # pick the highest score head for each modifier
+        heads = score_matrix.argmax(0)
+
+        # find and solve cycles
+        cycle = find_cycle(heads)
+
+        if cycle is None:
+            break
+        solve_cycle(heads, cycle, score_matrix)
+
+    return heads
+
+
+def find_cycle(heads):
+    """
+    Finds and returns the first cycle in the given list of heads, or None if
+    there is no cycle.
+
+    :param heads: candidate heads for each word in a sentence; i.e., heads[i]
+        contains the head for modifier i. heads[0] is ignored (0 is the root).
+    :return:
+    """
+    # this set stores all vertices with a valid path to the root
+    reachable_vertices = {0}
+
+    # vertices known to be unreachable from the root, i.e., in a cycle
+    vertices_in_cycles = set()
+
+    # vertices currently being evaluated, not known if they're reachable
+    visited = set()
+
+    # the directions of the edges don't matter if we only want to find cycles
+    for vertex in range(len(heads)):
+        if vertex in reachable_vertices or vertex in vertices_in_cycles:
+            continue
+
+        cycle = _find_cycle_recursive(heads, vertex, visited,
+                                      reachable_vertices, vertices_in_cycles)
+        if cycle is not None:
+            return cycle
+
+    return None
+
+
+def _find_cycle_recursive(heads, token, visited_tokens, reachable_tokens,
+                          tokens_in_cycles):
+    """
+    Return the first cycle it finds starting from the given token.
+
+    :param heads: heads for each token; heads[i] has the head of token i
+    :param token: which token is being currently visited
+    :param visited_tokens: set of tokens already visited in this round of
+        recursive calls
+    :param reachable_tokens: set of tokens known to be reachable from the root
+    :param tokens_in_cycles: set of tokens known to be unreachable from the
+        root
+    :return:
+    """
+    next_token = heads[token]
+    visited_tokens.add(token)
+
+    if next_token in reachable_tokens:
+        reachable_tokens.update(visited_tokens)
+        visited_tokens.clear()
+        cycle = None
+
+    elif next_token in visited_tokens:
+        # we found a cycle. return the tokens that are part of it.
+        visited_tokens.clear()
+        cycle = {token}
+        while next_token != token:
+            cycle.add(next_token)
+            next_token = heads[next_token]
+
+        tokens_in_cycles.update(cycle)
+
+    elif next_token in tokens_in_cycles:
+        # vertex linked to an existing cycle, but not part of it
+        visited_tokens.clear()
+        cycle = None
+
+    else:
+        # we still don't know if it's reachable or not, continue exploring
+        cycle = _find_cycle_recursive(heads, next_token, visited_tokens,
+                                      reachable_tokens, tokens_in_cycles)
+
+    return cycle
+
+
+def solve_cycle(heads, cycle, scores):
+    """
+    Resolve a cycle in the dependency tree.
+
+    :param heads: heads for each token; heads[i] has the head of token i
+    :param cycle: set of tokens which make up a cycle
+    :param scores: 2d numpy array with the scores for each [h, m] arc
+    :return:
+    """
+    num_tokens = len(heads)
+
+    # tokens outside this cycle
+    tokens_outside = np.array([x for x in range(num_tokens) if x not in cycle])
+
+    cycle = np.array(list(cycle))
+
+    # first, pick an arc from the cycle to the outside tokens
+    # if len(outside) == 1, all vertices except for the root are in a cycle
+    if len(tokens_outside) > 1:
+        # make an Nx1 index array
+        cycle_inds = np.array([[i] for i in cycle])
+
+        # these are the weights of arcs connecting tokens in the cycle to the
+        # ones outside it. (-1 because we can't take the root now)
+        outgoing_weights = scores[cycle_inds, tokens_outside[1:]]
+
+        # find one outgoing arc for each token outside the cycle
+        max_outgoing_inds = outgoing_weights.argmax(0)
+        max_outgoing_weights = outgoing_weights.max(0)
+
+        # set every outgoing weight to -inf and then restore the highest ones
+        outgoing_weights[:] = -np.Infinity
+        inds_y = np.arange(len(tokens_outside) - 1)
+        outgoing_weights[max_outgoing_inds, inds_y] = max_outgoing_weights
+        scores[cycle_inds, tokens_outside[1:]] = outgoing_weights
+
+    # now, adjust incoming arcs. Each arc from a token v (outside the cycle)
+    # to v' (inside) is reweighted as:
+    # s(v, v') = s(v, v') - s(head(v'), v')
+    # and then we pick the highest arc for each outside token
+    token_inds = np.array([[i] for i in tokens_outside])
+    incoming_weights = scores[token_inds, cycle]
+
+    for i, token in enumerate(cycle):
+        head_to_t = scores[heads[token], token]
+        incoming_weights[:, i] -= head_to_t
+
+    max_incoming_inds = incoming_weights.argmax(1)
+    max_incoming_weights = incoming_weights.max(1)
+    # we leave the + s(c) to the end
+    # max_incoming_weights += cycle_score
+
+    # the token with the maximum weighted incoming edge now changes
+    # its head, thus breaking the cycle
+    new_head_ind = max_incoming_weights.argmax()
+    token_leaving_cycle_ind = max_incoming_inds[new_head_ind]
+
+    # new_head = tokens_outside[new_head_ind]
+    token_leaving_cycle = cycle[token_leaving_cycle_ind]
+    old_head = heads[token_leaving_cycle]
+    # heads[token_leaving_cycle] = new_head
+    scores[old_head, token_leaving_cycle] = -np.Infinity
+
+    # analogous to the outgoing weights
+    incoming_weights[:] = -np.Infinity
+    incoming_weights[np.arange(len(tokens_outside)),
+                     max_incoming_inds] = max_incoming_weights
+    scores[token_inds, cycle] = incoming_weights
 
 
 def _check_gold_arc(instance, head, modifier):

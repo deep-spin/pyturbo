@@ -20,5 +20,6 @@ class DependencyWriter(Writer):
                                        instance.input.tags[i],
                                        '_',
                                        str(instance.output.heads[i]),
-                                       instance.output.relations[i]]) + '\n')
+                                       instance.output.relations[i],
+                                       '_', '_'],) + '\n')
         self.file.write('\n')

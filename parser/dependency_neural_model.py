@@ -341,7 +341,10 @@ class DependencyNeuralModel(nn.Module):
     def _get_embeddings(self, instances, batch_size, max_length,
                         word_or_tag):
         """
-        Get the word or tag embeddings for all tokens in the instance.
+        Get the word or tag embeddings for all tokens in the instances.
+
+        This function takes care of padding.
+
         :param word_or_tag: either 'word' or 'tag'
         """
         index_matrix = torch.full((batch_size, max_length), self.padding,
