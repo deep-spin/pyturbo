@@ -651,6 +651,7 @@ class TurboParser(StructuredClassifier):
                     if root != -1:
                         if score > root_score:
                             # this token is better scored for root
+                            # attach the previous root candidate to it
                             instance.output.heads[root] = m
                         else:
                             # attach it to the other root
@@ -682,6 +683,13 @@ class TurboParser(StructuredClassifier):
                         root_score = output[r]
         if root == -1:
             logging.info('Sentence without root')
+
+        num_roots = instance.output.heads.count(0)
+        if num_roots > 1:
+            print('more than 1 root!')
+            print(instance.output.heads)
+        elif num_roots == 0:
+            print('no root!')
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):
@@ -725,6 +733,9 @@ def chu_liu_edmonds(score_matrix):
         if cycle is None:
             break
         solve_cycle(heads, cycle, score_matrix)
+
+    # set the head of the root pseudo token to -1
+    heads[0] = -1
 
     return heads
 
