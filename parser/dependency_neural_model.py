@@ -342,8 +342,7 @@ class DependencyNeuralModel(nn.Module):
         offset, size = parts.get_offset(DependencyPartGrandSibling)
         scores[offset:offset + size] = gsib_scores.view(-1)
 
-    def _get_embeddings(self, instances, batch_size, max_length,
-                        word_or_tag):
+    def _get_embeddings(self, instances, max_length, word_or_tag):
         """
         Get the word or tag embeddings for all tokens in the instances.
 
@@ -351,7 +350,7 @@ class DependencyNeuralModel(nn.Module):
 
         :param word_or_tag: either 'word' or 'tag'
         """
-        index_matrix = torch.full((batch_size, max_length), self.padding,
+        index_matrix = torch.full((len(instances), max_length), self.padding,
                                   dtype=torch.long)
         for i, instance in enumerate(instances):
             if word_or_tag == 'word':
@@ -379,26 +378,43 @@ class DependencyNeuralModel(nn.Module):
         :return: a score matrix with shape (num_instances, longest_length)
         """
         batch_size = len(instances)
-        max_length = max(len(instance) for instance in instances)
+        lengths = torch.tensor([len(instance) for instance in instances],
+                              dtype=torch.long)
+        # packed sequences must be sorted by decreasing length
+        lengths, inds = lengths.sort(descending=True)
+        if self.on_gpu:
+            lengths = lengths.cuda()
+
+        instances = [instances[i] for i in inds]
+        max_length = lengths[0].item()
         max_num_parts = max(len(p) for p in parts)
         batch_scores = torch.zeros(batch_size, max_num_parts)
 
-        embeddings = self._get_embeddings(instances, batch_size, max_length,
-                                          'word')
+        embeddings = self._get_embeddings(instances, max_length, 'word')
         if self.tag_embeddings is not None:
-            tag_embeddings = self._get_embeddings(instances, batch_size,
-                                                  max_length, 'tag')
+            tag_embeddings = self._get_embeddings(instances, max_length, 'tag')
+
             # each embedding tensor is (batch, num_tokens, embedding_size)
             embeddings = torch.cat([embeddings, tag_embeddings], dim=2)
 
+        # pack to account for variable lengths
+        sorted_embeddings = embeddings[inds]
+        packed_embeddings = nn.utils.rnn.pack_padded_sequence(
+            sorted_embeddings, lengths, batch_first=True)
+
         # batch_states is (batch, num_tokens, hidden_size)
-        batch_states, _ = self.rnn(embeddings)
+        batch_packed_states, _ = self.rnn(packed_embeddings)
+        batch_states, _ = nn.utils.rnn.pad_packed_sequence(
+            batch_packed_states, batch_first=True)
 
         # now go through each batch item and treat it
         for i in range(batch_size):
-            states = batch_states[i]
-            scores = batch_scores[i]
-            sent_parts = parts[i]
+            # i points to positions in the inputs data
+            # inds[i] points to the corresponding position in the RNN output
+            length = lengths[i].item()
+            states = batch_states[i, :length]
+            scores = batch_scores[inds[i]]
+            sent_parts = parts[inds[i]]
 
             self._compute_first_order_scores(states, sent_parts, scores)
 
