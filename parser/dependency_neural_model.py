@@ -148,10 +148,14 @@ class DependencyNeuralModel(nn.Module):
         return projection
 
     def save(self, file):
-        pickle.dump(self.state_dict(), file)
+        torch.save(self.state_dict(), file)
 
     def load(self, file):
-        state_dict = pickle.load(file)
+        if self.on_gpu:
+            state_dict = torch.load(file)
+        else:
+            state_dict = torch.load(file, map_location='cpu')
+
         self.load_state_dict(state_dict)
 
     def _compute_first_order_scores(self, states, parts, scores):
