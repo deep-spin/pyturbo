@@ -2,3 +2,11 @@
 *.pickle
 *.txt
 *.conll
+
+dist
+models
+build
+.idea
+*egg-info
+notebooks
+.ipynb_*
