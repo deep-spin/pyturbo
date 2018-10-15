@@ -202,7 +202,7 @@ class DependencyNeuralModel(nn.Module):
             distances = self.distance_embeddings(distance_indices)
             distance_projections = self.distance_projection(distances)
             distance_projections = distance_projections.view(
-                -1, 1, self.mlp_size)
+                -1, self.mlp_size)
 
         else:
             distance_projections = 0
