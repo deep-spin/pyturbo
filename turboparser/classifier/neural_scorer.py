@@ -15,6 +15,10 @@ class NeuralScorer(object):
 
     def compute_scores(self, instances, parts):
         # Run the forward pass.
+        if not isinstance(instances, list):
+            instances = [instances]
+            parts = [parts]
+
         self.scores = self.model(instances, parts)
         return self.scores.detach().numpy()
 
