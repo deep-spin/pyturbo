@@ -69,7 +69,7 @@ class TurboParser(StructuredClassifier):
                 pickle.dump(self.neural_scorer.model.rnn_size, f)
                 pickle.dump(self.neural_scorer.model.mlp_size, f)
                 pickle.dump(self.neural_scorer.model.num_layers, f)
-                pickle.dump(self.neural_scorer.model.dropout, f)
+                pickle.dump(self.neural_scorer.model.dropout_rate, f)
                 self.neural_scorer.model.save(f)
 
     def load(self, model_path=None):

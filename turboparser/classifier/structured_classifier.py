@@ -574,7 +574,7 @@ class StructuredClassifier(object):
         Set the neural scorer to eval mode.
         """
         if self.options.neural:
-            self.neural_scorer.eval()
+            self.neural_scorer.eval_mode()
 
     def should_save(self, validation_loss):
         """

@@ -30,7 +30,7 @@ class DependencyNeuralModel(nn.Module):
         self.rnn_size = rnn_size
         self.mlp_size = mlp_size
         self.num_layers = num_layers
-        self.dropout = dropout
+        self.dropout_rate = dropout
         self.padding = token_dictionary.token_padding
         self.on_gpu = torch.cuda.is_available()
 
@@ -61,6 +61,7 @@ class DependencyNeuralModel(nn.Module):
             bidirectional=True,
             batch_first=True)
         self.tanh = nn.Tanh()
+        self.dropout = nn.Dropout(dropout)
 
         # first order
         self.head_projection = self._create_projection()
@@ -127,7 +128,8 @@ class DependencyNeuralModel(nn.Module):
         """
         if input_size is None:
             input_size = self.mlp_size
-        scorer = nn.Linear(input_size, 1, bias=False)
+        linear = nn.Linear(input_size, 1, bias=False)
+        scorer = nn.Sequential(self.dropout, linear)
 
         return scorer
 
@@ -139,11 +141,9 @@ class DependencyNeuralModel(nn.Module):
         :return: an nn.Linear object, mapping an input with 2*hidden_units
             to hidden_units.
         """
-        projection = nn.Linear(
-            self.rnn_size * 2,
-            self.mlp_size,
-            bias=False
-        )
+        linear = nn.Linear(self.rnn_size * 2, self.mlp_size, bias=False)
+        projection = nn.Sequential(self.dropout, linear)
+
         return projection
 
     def save(self, file):
@@ -378,7 +378,7 @@ class DependencyNeuralModel(nn.Module):
         """
         batch_size = len(instances)
         lengths = torch.tensor([len(instance) for instance in instances],
-                              dtype=torch.long)
+                               dtype=torch.long)
         # packed sequences must be sorted by decreasing length
         lengths, inds = lengths.sort(descending=True)
         if self.on_gpu:
