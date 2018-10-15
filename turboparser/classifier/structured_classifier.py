@@ -427,6 +427,8 @@ class StructuredClassifier(object):
 
         # if running a neural model, run a whole batch at once
         if self.options.neural:
+            self.neural_scorer.train_mode()
+
             start_time = time.time()
             scores = self.neural_scorer.compute_scores(instance_data.instances,
                                                        instance_data.parts)
@@ -532,6 +534,7 @@ class StructuredClassifier(object):
         end = time.time()
 
         valid_start = time.time()
+        self.eval_mode()
         _, validation_losses = self._run_batches(valid_data, 128,
                                                  return_loss=True)
         valid_end = time.time()
@@ -565,6 +568,13 @@ class StructuredClassifier(object):
                                     'Total Loss+Reg: %f' %
                                     (train_loss + regularization_value),
                                     'Squared norm: %f' % sq_norm]))
+
+    def eval_mode(self):
+        """
+        Set the neural scorer to eval mode.
+        """
+        if self.options.neural:
+            self.neural_scorer.eval()
 
     def should_save(self, validation_loss):
         """

@@ -22,6 +22,18 @@ class NeuralScorer(object):
         self.scores = self.model(instances, parts)
         return self.scores.detach().numpy()
 
+    def train_mode(self):
+        """
+        Set the neural model to training mode
+        """
+        self.model.train()
+
+    def eval_mode(self):
+        """
+        Set the neural model to eval mode
+        """
+        self.model.eval()
+
     def compute_gradients(self, gold_output, predicted_output):
         """
         Compute the error gradient.
