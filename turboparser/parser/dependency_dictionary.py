@@ -1,8 +1,8 @@
-from classifier.alphabet import Alphabet
-from classifier.dictionary import Dictionary
-import numpy as np
+from ..classifier.alphabet import Alphabet
+from ..classifier.dictionary import Dictionary
 import pickle
 import logging
+
 
 class DependencyDictionary(Dictionary):
     '''An abstract dictionary.'''

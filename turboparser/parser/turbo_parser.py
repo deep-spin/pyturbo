@@ -1,18 +1,18 @@
-from classifier.structured_classifier import StructuredClassifier
-from classifier.neural_scorer import NeuralScorer
-from parser.dependency_options import DependencyOptions
-from parser.dependency_reader import DependencyReader
-from parser.dependency_writer import DependencyWriter
-from parser.dependency_decoder import DependencyDecoder
-from parser.dependency_dictionary import DependencyDictionary
-from parser.dependency_instance import DependencyInstanceOutput
-from parser.dependency_instance_numeric import DependencyInstanceNumeric
-from parser.token_dictionary import TokenDictionary
-from parser.dependency_parts import DependencyParts, \
+from ..classifier.structured_classifier import StructuredClassifier
+from ..classifier.neural_scorer import NeuralScorer
+from .dependency_options import DependencyOptions
+from .dependency_reader import DependencyReader
+from .dependency_writer import DependencyWriter
+from .dependency_decoder import DependencyDecoder
+from .dependency_dictionary import DependencyDictionary
+from .dependency_instance import DependencyInstanceOutput
+from .dependency_instance_numeric import DependencyInstanceNumeric
+from .token_dictionary import TokenDictionary
+from .dependency_parts import DependencyParts, \
     DependencyPartArc, DependencyPartLabeledArc, DependencyPartGrandparent, \
     DependencyPartNextSibling, DependencyPartGrandSibling
-from parser.dependency_features import DependencyFeatures
-from parser.dependency_neural_model import DependencyNeuralModel, special_tokens
+from .dependency_features import DependencyFeatures
+from .dependency_neural_model import DependencyNeuralModel, special_tokens
 import numpy as np
 import pickle
 import logging

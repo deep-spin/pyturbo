@@ -1,6 +1,6 @@
-from classifier.instance import Instance
-from parser.dependency_instance import DependencyInstance, \
+from .dependency_instance import DependencyInstance, \
     DependencyInstanceInput, DependencyInstanceOutput
+
 
 class DependencyInstanceNumericInput(DependencyInstanceInput):
     def __init__(self, input, dictionary):

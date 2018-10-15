@@ -4,9 +4,9 @@ from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
     decode_matrix_tree, PFactorGrandparentHeadAutomaton
 import numpy as np
 
-from classifier.structured_decoder import StructuredDecoder
-from parser.dependency_instance import DependencyInstance
-from parser.dependency_parts import DependencyPartArc, \
+from ..classifier.structured_decoder import StructuredDecoder
+from .dependency_instance import DependencyInstance
+from .dependency_parts import DependencyPartArc, \
     DependencyPartLabeledArc, DependencyPartNextSibling, \
     DependencyParts, DependencyPartGrandparent, DependencyPartGrandSibling
 

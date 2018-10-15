@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
-from parser.dependency_parts import DependencyPartArc, DependencyParts, \
+from .dependency_parts import DependencyPartArc, DependencyParts, \
     DependencyPartNextSibling, DependencyPartGrandparent, \
     DependencyPartGrandSibling
 import numpy as np
-import pickle
 
 #TODO: maybe this should be elsewhere?
 # special pseudo-tokens to index embeddings

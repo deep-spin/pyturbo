@@ -1,5 +1,5 @@
-from classifier.writer import Writer
-from parser.dependency_instance import DependencyInstance
+from ..classifier.writer import Writer
+
 
 class DependencyWriter(Writer):
     def __init__(self):

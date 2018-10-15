@@ -1,10 +1,11 @@
-from classifier.features import FeatureEncoder
-import numpy as np
+from ..classifier.features import FeatureEncoder
+
 
 class DependencyFeatureTypes(object):
     # Constants for feature template parts.
     ARC, NEXTSIBL, ALLSIBL, GRANDPAR, NONPROJARC, PATH, BIGRAM, NEXTSIBL_M_S, \
         ALLSIBL_M_S, GRANDPAR_G_M, GRANDSIBL, TRISIBL, GRANDSIBL_G_S = range(13)
+
 
 class DependencyFeatureArc(object):
     # There is a cross-product between these and direction, distance,

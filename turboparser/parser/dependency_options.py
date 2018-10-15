@@ -1,4 +1,5 @@
-from classifier.options import Options
+from ..classifier.options import Options
+
 
 class DependencyOptions(Options):
     '''Options for the dependency parser.'''

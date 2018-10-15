@@ -1,6 +1,7 @@
-from classifier.reader import Reader
-from parser.dependency_instance import DependencyInstance, \
+from ..classifier.reader import Reader
+from .dependency_instance import DependencyInstance, \
     DependencyInstanceInput, DependencyInstanceOutput
+
 
 class DependencyReader(Reader):
     def __init__(self):

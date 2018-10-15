@@ -1,5 +1,5 @@
-from classifier.alphabet import Alphabet
-from classifier.dictionary import Dictionary
+from ..classifier.alphabet import Alphabet
+from ..classifier.dictionary import Dictionary
 import pickle
 import logging
 

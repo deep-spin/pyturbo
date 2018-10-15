@@ -2,10 +2,10 @@
 
 import numpy as np
 import torch
-from classifier.parameters import Parameters, FeatureVector
-from classifier.neural_scorer import NeuralScorer
-from classifier.utils import nearly_eq_tol
-from classifier.instance import InstanceData
+from .parameters import Parameters, FeatureVector
+from .neural_scorer import NeuralScorer
+from .utils import nearly_eq_tol
+from .instance import InstanceData
 import logging
 import time
 

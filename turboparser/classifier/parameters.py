@@ -1,5 +1,5 @@
 '''A generic implementation of a parameter vector.'''
-from classifier.sparse_parameter_vectors import SparseParameterVector, \
+from .sparse_parameter_vectors import SparseParameterVector, \
     SparseLabeledParameterVector
 import logging
 
