@@ -1,6 +1,5 @@
 from ..classifier.structured_classifier import StructuredClassifier
 from ..classifier.neural_scorer import NeuralScorer
-from .dependency_options import DependencyOptions
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder
@@ -903,38 +902,3 @@ def _check_gold_arc(instance, head, modifier):
     if instance.get_head(modifier) == head:
         return True
     return False
-
-
-def main():
-    '''Main function for the dependency parser.'''
-    # Parse arguments.
-    import argparse
-    parser = argparse. \
-        ArgumentParser(prog='Turbo parser.',
-                       description='Trains/test a dependency parser.')
-    options = DependencyOptions(parser)
-    args = vars(parser.parse_args())
-    options.parse_args(args)
-
-    if options.train:
-        train_parser(options)
-    elif options.test:
-        test_parser(options)
-
-
-def train_parser(options):
-    logging.info('Training the parser...')
-    dependency_parser = TurboParser(options)
-    dependency_parser.train()
-    dependency_parser.save()
-
-
-def test_parser(options):
-    logging.info('Running the parser...')
-    dependency_parser = TurboParser(options)
-    dependency_parser.load()
-    dependency_parser.run()
-
-
-if __name__ == "__main__":
-    main()
