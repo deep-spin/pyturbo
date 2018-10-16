@@ -357,7 +357,7 @@ class DependencyNeuralModel(nn.Module):
             else:
                 getter = instance.get_tag
 
-            indices = [getter(i) for i in range(len(instance))]
+            indices = [getter(j) for j in range(len(instance))]
             index_matrix[i, :len(instance)] = torch.tensor(indices)
 
         if self.on_gpu:
@@ -384,7 +384,7 @@ class DependencyNeuralModel(nn.Module):
         if self.on_gpu:
             lengths = lengths.cuda()
 
-        instances = [instances[i] for i in inds]
+        # instances = [instances[i] for i in inds]
         max_length = lengths[0].item()
         max_num_parts = max(len(p) for p in parts)
         batch_scores = torch.zeros(batch_size, max_num_parts)
@@ -396,8 +396,9 @@ class DependencyNeuralModel(nn.Module):
             # each embedding tensor is (batch, num_tokens, embedding_size)
             embeddings = torch.cat([embeddings, tag_embeddings], dim=2)
 
-        # pack to account for variable lengths
         sorted_embeddings = embeddings[inds]
+
+        # pack to account for variable lengths
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
             sorted_embeddings, lengths, batch_first=True)
 
@@ -406,14 +407,19 @@ class DependencyNeuralModel(nn.Module):
         batch_states, _ = nn.utils.rnn.pad_packed_sequence(
             batch_packed_states, batch_first=True)
 
-        # now go through each batch item and treat it
+        # now go through each batch item
         for i in range(batch_size):
-            # i points to positions in the inputs data
+            # i points to positions in the original instances and parts
             # inds[i] points to the corresponding position in the RNN output
+            rnn_ind = inds[i]
+
+            # we will set the scores corresponding to the i-th item in the
+            # batch, or the rnn_ind-th item in the instances
+
             length = lengths[i].item()
             states = batch_states[i, :length]
-            scores = batch_scores[inds[i]]
-            sent_parts = parts[inds[i]]
+            scores = batch_scores[rnn_ind]
+            sent_parts = parts[rnn_ind]
 
             self._compute_first_order_scores(states, sent_parts, scores)
 

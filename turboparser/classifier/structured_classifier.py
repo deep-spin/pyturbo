@@ -503,6 +503,7 @@ class StructuredClassifier(object):
         self.time_scores = 0
         self.time_gradient = 0
         start = time.time()
+        self.instance_counter = 0
 
         self.total_loss = 0.
         if self.options.training_algorithm in ['perceptron']:
