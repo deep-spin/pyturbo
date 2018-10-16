@@ -4,14 +4,12 @@ from .dependency_instance import DependencyInstance, \
 
 
 class DependencyReader(Reader):
-    def __init__(self):
-        self.file = None
 
-    def open(self, path):
-        self.file = open(path, encoding='utf-8')
+    def open(self):
+        self.file = open(self.path, encoding='utf-8')
 
     def close(self):
-        self.file.close()
+        return self.file.close()
 
     def next(self):
         sentence_fields = []
