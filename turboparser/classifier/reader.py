@@ -10,7 +10,10 @@ class Reader(object):
     def close(self):
         raise NotImplementedError
 
-    def next(self):
+    def __iter__(self):
+        return self
+
+    def __next__(self):
         raise NotImplementedError
 
     def __enter__(self):

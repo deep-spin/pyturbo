@@ -11,7 +11,7 @@ class DependencyReader(Reader):
     def close(self):
         return self.file.close()
 
-    def next(self):
+    def __next__(self):
         sentence_fields = []
         for line in self.file:
             line = line.strip()
@@ -31,7 +31,7 @@ class DependencyReader(Reader):
             sentence_fields.append(fields)
 
         if not len(sentence_fields):
-            return None
+            raise StopIteration()
 
         # Sentence length (the first token is the root symbol).
         length = 1 + len(sentence_fields)
