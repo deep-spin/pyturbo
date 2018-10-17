@@ -160,61 +160,56 @@ class TokenDictionary(Dictionary):
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
-        reader.open(self.classifier.options.training_path)
-        instance = reader.next()
-        while instance is not None:
-            for i in range(len(instance)):
-                # Add form to alphabet.
-                form = instance.get_form(i)
-                form_lower = form.lower()
-                if not self.classifier.options.form_case_sensitive:
-                    form = form_lower
-                id = self.form_alphabet.insert(form)
-                if id >= len(form_counts):
-                    form_counts.append(1)
-                else:
-                    form_counts[id] += 1
-
-                # Add lower-case form to alphabet.
-                id = self.form_lower_alphabet.insert(form_lower)
-                if id >= len(form_lower_counts):
-                    form_lower_counts.append(1)
-                else:
-                    form_lower_counts[id] += 1
-
-                # Add lemma to alphabet.
-                id = self.lemma_alphabet.insert(instance.get_lemma(i))
-                if id >= len(lemma_counts):
-                    lemma_counts.append(1)
-                else:
-                    lemma_counts[id] += 1
-
-                # Add prefix/suffix to alphabet.
-                # TODO: add varying lengths.
-                prefix = form[:self.classifier.options.prefix_length]
-                id = self.prefix_alphabet.insert(prefix)
-                suffix = form[-self.classifier.options.suffix_length:]
-                id = self.suffix_alphabet.insert(suffix)
-
-                # Add tags to alphabet.
-                id = self.tag_alphabet.insert(instance.get_tag(i))
-                if id >= len(tag_counts):
-                    tag_counts.append(1)
-                else:
-                    tag_counts[id] += 1
-
-                # Add morph tags to alphabet.
-                for j in range(instance.get_num_morph_tags(i)):
-                    id = self.morph_tag_alphabet.insert(
-                        instance.get_morph_tag(i, j))
-                    if id >= len(morph_tag_counts):
-                        morph_tag_counts.append(1)
+        with reader.open(self.classifier.options.training_path) as r:
+            for instance in r:
+                for i in range(len(instance)):
+                    # Add form to alphabet.
+                    form = instance.get_form(i)
+                    form_lower = form.lower()
+                    if not self.classifier.options.form_case_sensitive:
+                        form = form_lower
+                    id = self.form_alphabet.insert(form)
+                    if id >= len(form_counts):
+                        form_counts.append(1)
                     else:
-                        morph_tag_counts[id] += 1
+                        form_counts[id] += 1
 
-            instance = reader.next()
+                    # Add lower-case form to alphabet.
+                    id = self.form_lower_alphabet.insert(form_lower)
+                    if id >= len(form_lower_counts):
+                        form_lower_counts.append(1)
+                    else:
+                        form_lower_counts[id] += 1
 
-        reader.close()
+                    # Add lemma to alphabet.
+                    id = self.lemma_alphabet.insert(instance.get_lemma(i))
+                    if id >= len(lemma_counts):
+                        lemma_counts.append(1)
+                    else:
+                        lemma_counts[id] += 1
+
+                    # Add prefix/suffix to alphabet.
+                    # TODO: add varying lengths.
+                    prefix = form[:self.classifier.options.prefix_length]
+                    id = self.prefix_alphabet.insert(prefix)
+                    suffix = form[-self.classifier.options.suffix_length:]
+                    id = self.suffix_alphabet.insert(suffix)
+
+                    # Add tags to alphabet.
+                    id = self.tag_alphabet.insert(instance.get_tag(i))
+                    if id >= len(tag_counts):
+                        tag_counts.append(1)
+                    else:
+                        tag_counts[id] += 1
+
+                    # Add morph tags to alphabet.
+                    for j in range(instance.get_num_morph_tags(i)):
+                        id = self.morph_tag_alphabet.insert(
+                            instance.get_morph_tag(i, j))
+                        if id >= len(morph_tag_counts):
+                            morph_tag_counts.append(1)
+                        else:
+                            morph_tag_counts[id] += 1
 
         # Now adjust the cutoffs if necessary.
         for label, alphabet, counts, cutoff, max_length in \

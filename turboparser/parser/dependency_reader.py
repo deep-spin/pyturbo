@@ -1,15 +1,9 @@
-from ..classifier.reader import Reader
+from ..classifier.reader import AuxiliaryReader
 from .dependency_instance import DependencyInstance, \
     DependencyInstanceInput, DependencyInstanceOutput
 
 
-class DependencyReader(Reader):
-
-    def open(self):
-        self.file = open(self.path, encoding='utf-8')
-
-    def close(self):
-        return self.file.close()
+class DependencyReader(AuxiliaryReader):
 
     def __next__(self):
         sentence_fields = []

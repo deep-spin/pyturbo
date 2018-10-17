@@ -236,17 +236,13 @@ class StructuredClassifier(object):
         instances = []
         original_instances = []
 
-        self.reader.open(path)
-        instance = self.reader.next()
-        while instance:
-            formatted_instance = self.format_instance(instance)
-            instances.append(formatted_instance)
-            if return_originals:
-                original_instances.append(instance)
+        with self.reader.open(path) as r:
+            for instance in r:
+                formatted_instance = self.format_instance(instance)
+                instances.append(formatted_instance)
+                if return_originals:
+                    original_instances.append(instance)
 
-            instance = self.reader.next()
-
-        self.reader.close()
         if return_originals:
             return instances, original_instances
 
