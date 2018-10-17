@@ -643,11 +643,10 @@ class TurboParser(StructuredClassifier):
             for m, h in enumerate(heads):
                 instance.output.heads[m] = h
                 if h == 0:
-                    # avoid more than one root!
                     index = parts.find_arc_index(h, m)
                     score = output[index]
 
-                    if root != -1:
+                    if self.options.single_root and root != -1:
                         if score > root_score:
                             # this token is better scored for root
                             # attach the previous root candidate to it
@@ -668,8 +667,8 @@ class TurboParser(StructuredClassifier):
                     instance.output.relations[arc.modifier] = \
                         self.dictionary.get_relation_name(arc.label)
                     if arc.head == 0:
-                        # avoid more than one root!
-                        if root != -1:
+
+                        if self.options.single_root and root != -1:
                             if output[r] > root_score:
                                 # this token is better scored for root
                                 instance.output.heads[root] = arc.modifier
@@ -682,13 +681,6 @@ class TurboParser(StructuredClassifier):
                         root_score = output[r]
         if root == -1:
             logging.info('Sentence without root')
-
-        num_roots = instance.output.heads.count(0)
-        if num_roots > 1:
-            print('more than 1 root!')
-            print(instance.output.heads)
-        elif num_roots == 0:
-            print('no root!')
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):

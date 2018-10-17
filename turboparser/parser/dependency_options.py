@@ -52,6 +52,9 @@ class DependencyOptions(Options):
                             default=0, const=1,
                             help="""Force the parser output single-rooted
                             projective trees.""")
+        parser.add_argument('--single_root', action='store_true',
+                            help='When running the parser, enforce that there '
+                                 'is only one root per sentence.')
         parser.add_argument('--prune_relations', type=int, default=1,
                             help="""1 for pruning the set of possible relations
                             taking into account the labels that have occured for
@@ -139,6 +142,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.pruner_path = args['pruner_path']
         self.pruner_posterior_threshold = args['pruner_posterior_threshold']
         self.pruner_max_heads = args['pruner_max_heads']
+        self.single_root = args['single_root']
 
         self.embedding_size = args['embedding_size']
         self.tag_embedding_size = args['tag_embedding_size']
