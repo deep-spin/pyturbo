@@ -586,6 +586,18 @@ class StructuredClassifier(object):
 
         return False
 
+    def _reset_part_counts(self):
+        """
+        Reset counters of some statistics of making parts.
+        """
+        pass
+
+    def _report_make_parts(self):
+        """
+        Log some statistics about the calls to make parts in a dataset.
+        """
+        pass
+
     def make_parts_batch(self, instances):
         """
         Create parts for all instances in the batch.
@@ -599,6 +611,8 @@ class StructuredClassifier(object):
         all_parts = []
         all_gold = []
         all_features = []
+
+        self._reset_part_counts()
         for instance in instances:
             parts, gold_output = self.make_parts(instance)
             if self.options.neural:
@@ -616,6 +630,7 @@ class StructuredClassifier(object):
             all_features.append(features)
             all_gold.append(gold_output)
 
+        self._report_make_parts()
         data = InstanceData(instances, all_parts, all_features, all_gold)
         return data
 

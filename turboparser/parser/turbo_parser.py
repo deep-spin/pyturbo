@@ -29,7 +29,7 @@ class TurboParser(StructuredClassifier):
         self.decoder = DependencyDecoder()
         self.parameters = None
         self.model_type = options.model_type.split('+')
-        self.has_pruner = False
+        self.has_pruner = bool(options.pruner_path)
 
         if options.pruner_path:
             self.pruner = self.load_pruner(options.pruner_path)
@@ -137,16 +137,17 @@ class TurboParser(StructuredClassifier):
         pruner = TurboParser(pruner_options)
         pruner.load(model_path)
         return pruner
-    
+
     def format_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.dictionary)
 
     def prune(self, instance, parts, gold_output):
         """
-        Prune out some arcs according to the the pruner model.
+        Prune out some arcs with the pruner model.
 
         :param instance: a DependencyInstance object
         :param parts: a DependencyParts object with arcs
+        :param gold_output: either None or a 0/1 array indicating gold parts
         :return: a new DependencyParts object contained the kept arcs
         """
         scores = self.pruner.compute_scores(instance, parts)
@@ -155,6 +156,9 @@ class TurboParser(StructuredClassifier):
             self.options.pruner_max_heads,
             self.options.pruner_posterior_threshold)
 
+        diff = len(parts) - len(new_parts)
+        self.total_arcs_pruned += diff
+
         # during training, make sure that the gold parts are included
         if gold_output is not None:
             for m in range(1, len(instance)):
@@ -162,10 +166,42 @@ class TurboParser(StructuredClassifier):
                 if new_parts.find_arc_index(h, m) < 0:
                     new_parts.append(DependencyPartArc(h, m))
                     new_gold.append(1)
+                    self.total_gold_arcs_pruned += 1
 
             new_parts.set_offset(DependencyPartArc, 0, len(new_parts))
 
         return new_parts, new_gold
+
+    def _report_make_parts(self):
+        """
+        Log some statistics about the calls to make parts in a dataset.
+        """
+        msg = 'Created %d candidate arcs' % self.total_arcs
+        if self.total_gold_arcs > 0:
+            ratio = self.total_gold_arcs / self.total_arcs
+            msg += ', of which %d gold (%.2f%%)' % (self.total_gold_arcs, ratio)
+        logging.info(msg)
+
+        if not self.has_pruner:
+            return
+
+        ratio = self.total_arcs_pruned / self.total_arcs
+        msg = 'Pruned %d arcs (%.2f%%)' % (self.total_arcs_pruned, ratio)
+        if self.total_gold_arcs is not None:
+            ratio = self.total_gold_arcs_pruned / self.total_arcs_pruned \
+                if self.total_arcs_pruned > 0 else 0
+            msg += ', of which %d gold (%.2f%%)' % (self.total_gold_arcs_pruned,
+                                                    ratio)
+        logging.info(msg)
+
+    def _reset_part_counts(self):
+        """
+        Reset counters of some statistics.
+        """
+        self.total_arcs = 0
+        self.total_gold_arcs = 0
+        self.total_arcs_pruned = 0
+        self.total_gold_arcs_pruned = 0
 
     def make_parts(self, instance):
         """
@@ -180,6 +216,9 @@ class TurboParser(StructuredClassifier):
 
         self.make_parts_basic(instance, parts, gold_output,
                               add_relation_parts=False)
+        self.total_arcs += len(parts)
+        if gold_output is not None:
+            self.total_gold_arcs += sum(gold_output)
 
         if self.has_pruner:
             parts, gold_output = self.prune(instance, parts, gold_output)
