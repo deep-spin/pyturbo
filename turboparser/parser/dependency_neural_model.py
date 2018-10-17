@@ -258,14 +258,14 @@ class DependencyNeuralModel(nn.Module):
             positions relative to the features are indexed by the parts
             object. It is modified in-place.
         """
-        head_tensors = self.sib_head_projection(states)
-        modifier_tensors = self.sib_modifier_projection(states)
-        word_sibling_tensors = self.sib_sibling_projection(states)
-
         # include the vector for null sibling
         # word_sibling_tensors is (num_words=1, hidden_units)
-        sibling_tensors = torch.cat([word_sibling_tensors,
-                                     self.null_sibling_tensor.view(1, -1)])
+        states_and_sibling = torch.cat([states,
+                                        self.null_sibling_tensor.view(1, -1)])
+
+        head_tensors = self.sib_head_projection(states)
+        modifier_tensors = self.sib_modifier_projection(states)
+        sibling_tensors = self.sib_sibling_projection(states_and_sibling)
 
         head_indices = []
         modifier_indices = []
@@ -304,15 +304,15 @@ class DependencyNeuralModel(nn.Module):
             positions relative to the features are indexed by the parts
             object. It is modified in-place.
         """
-        head_tensors = self.gsib_head_projection(states)
-        modifier_tensors = self.gsib_modifier_projection(states)
-        word_sibling_tensors = self.gsib_sibling_projection(states)
-        grandparent_tensors = self.gsib_grandparent_projection(states)
-
         # include the vector for null sibling
         # word_sibling_tensors is (num_words=1, hidden_units)
-        sibling_tensors = torch.cat([word_sibling_tensors,
-                                    self.null_sibling_tensor.view(1, -1)])
+        states_and_sibling = torch.cat([states,
+                                        self.null_sibling_tensor.view(1, -1)])
+
+        head_tensors = self.gsib_head_projection(states)
+        modifier_tensors = self.gsib_modifier_projection(states)
+        sibling_tensors = self.gsib_sibling_projection(states_and_sibling)
+        grandparent_tensors = self.gsib_grandparent_projection(states)
 
         head_indices = []
         modifier_indices = []
