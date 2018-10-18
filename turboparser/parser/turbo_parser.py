@@ -178,17 +178,17 @@ class TurboParser(StructuredClassifier):
         """
         msg = 'Created %d candidate arcs' % self.total_arcs
         if self.total_gold_arcs > 0:
-            ratio = self.total_gold_arcs / self.total_arcs
+            ratio = 100 * self.total_gold_arcs / self.total_arcs
             msg += ', of which %d gold (%.2f%%)' % (self.total_gold_arcs, ratio)
         logging.info(msg)
 
         if not self.has_pruner:
             return
 
-        ratio = self.total_arcs_pruned / self.total_arcs
+        ratio = 100 * self.total_arcs_pruned / self.total_arcs
         msg = 'Pruned %d arcs (%.2f%%)' % (self.total_arcs_pruned, ratio)
         if self.total_gold_arcs is not None:
-            ratio = self.total_gold_arcs_pruned / self.total_arcs_pruned \
+            ratio = 100 * self.total_gold_arcs_pruned / self.total_arcs_pruned \
                 if self.total_arcs_pruned > 0 else 0
             msg += ', of which %d gold (%.2f%%)' % (self.total_gold_arcs_pruned,
                                                     ratio)
