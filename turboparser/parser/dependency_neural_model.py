@@ -60,6 +60,7 @@ class DependencyNeuralModel(nn.Module):
             dropout=dropout,
             bidirectional=True,
             batch_first=True)
+        self.rnn_hidden_size = 2 * rnn_size
         self.tanh = nn.Tanh()
         self.dropout = nn.Dropout(dropout)
 
@@ -109,7 +110,7 @@ class DependencyNeuralModel(nn.Module):
         If shape is None, it will have shape equal to hidden_size.
         """
         if shape is None:
-            shape = self.mlp_size
+            shape = self.rnn_hidden_size
 
         tensor = torch.randn(shape, requires_grad=True)
         if self.on_gpu:
