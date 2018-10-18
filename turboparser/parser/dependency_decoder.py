@@ -196,7 +196,8 @@ class DependencyDecoder(StructuredDecoder):
 
         for modifier in candidate_heads:
             heads_and_scores = candidate_heads[modifier]
-            sorted(heads_and_scores, key=lambda x: x[1], reverse=True)
+            heads_and_scores.sort(key=lambda x: x[1], reverse=True)
+
             heads_and_scores = heads_and_scores[:max_heads]
             for head, score in heads_and_scores:
                 new_parts.append(DependencyPartArc(head, modifier))
