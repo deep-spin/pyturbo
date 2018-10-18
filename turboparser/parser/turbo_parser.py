@@ -150,7 +150,7 @@ class TurboParser(StructuredClassifier):
         :param gold_output: either None or a 0/1 array indicating gold parts
         :return: a new DependencyParts object contained the kept arcs
         """
-        scores = self.pruner.compute_scores(instance, parts)
+        scores = self.pruner.compute_scores(instance, parts)[0]
         new_parts, new_gold = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores, gold_output,
             self.options.pruner_max_heads,
