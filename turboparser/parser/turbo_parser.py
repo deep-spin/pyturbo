@@ -8,9 +8,8 @@ from .dependency_dictionary import DependencyDictionary
 from .dependency_instance import DependencyInstanceOutput
 from .dependency_instance_numeric import DependencyInstanceNumeric
 from .token_dictionary import TokenDictionary
-from .dependency_parts import DependencyParts, \
-    DependencyPartArc, DependencyPartLabeledArc, DependencyPartGrandparent, \
-    DependencyPartNextSibling, DependencyPartGrandSibling
+from .dependency_parts import DependencyParts, Arc, LabeledArc, Grandparent, \
+    NextSibling, GrandSibling
 from .dependency_features import DependencyFeatures
 from .dependency_neural_model import DependencyNeuralModel, special_tokens
 import numpy as np
@@ -164,11 +163,11 @@ class TurboParser(StructuredClassifier):
             for m in range(1, len(instance)):
                 h = instance.output.heads[m]
                 if new_parts.find_arc_index(h, m) < 0:
-                    new_parts.append(DependencyPartArc(h, m))
+                    new_parts.append(Arc(h, m))
                     new_gold.append(1)
                     self.total_gold_arcs_pruned += 1
 
-            new_parts.set_offset(DependencyPartArc, 0, len(new_parts))
+            new_parts.set_offset(Arc, 0, len(new_parts))
 
         return new_parts, new_gold
 
@@ -296,7 +295,7 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
-                    parts.append(DependencyPartNextSibling(h, m, s))
+                    parts.append(NextSibling(h, m, s))
                     if make_gold:
                         gold_hs = s == len(instance) or \
                                     _check_gold_arc(instance, h, s)
@@ -327,7 +326,7 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
-                    parts.append(DependencyPartNextSibling(h, m, s))
+                    parts.append(NextSibling(h, m, s))
                     if make_gold:
                         gold_hs = s == 0 or _check_gold_arc(instance, h, s)
 
@@ -338,7 +337,7 @@ class TurboParser(StructuredClassifier):
                             value = 0
                         gold_output.append(value)
 
-        parts.set_offset(DependencyPartNextSibling, initial_index,
+        parts.set_offset(NextSibling, initial_index,
                          len(parts) - initial_index)
 
     def make_parts_grandsibling(self, instance, parts, gold_output):
@@ -386,7 +385,7 @@ class TurboParser(StructuredClassifier):
                         gold_hs = s == len(instance) or \
                             _check_gold_arc(instance, h, s)
 
-                        part = DependencyPartGrandSibling(h, m, g, s)
+                        part = GrandSibling(h, m, g, s)
                         parts.append(part)
 
                         if make_gold:
@@ -414,7 +413,7 @@ class TurboParser(StructuredClassifier):
                             continue
 
                         gold_hs = s == 0 or _check_gold_arc(instance, h, s)
-                        part = DependencyPartGrandSibling(h, m, g, s)
+                        part = GrandSibling(h, m, g, s)
                         parts.append(part)
 
                         if make_gold:
@@ -427,7 +426,7 @@ class TurboParser(StructuredClassifier):
 
                             gold_output.append(value)
 
-        parts.set_offset(DependencyPartGrandSibling, initial_index,
+        parts.set_offset(GrandSibling, initial_index,
                          len(parts) - initial_index)
 
     def make_parts_grandparent(self, instance, parts, gold_output):
@@ -469,7 +468,7 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
-                    arc = DependencyPartGrandparent(h, m, g)
+                    arc = Grandparent(h, m, g)
                     parts.append(arc)
                     if make_gold:
                         if gold_gh and instance.get_head(m) == h:
@@ -477,7 +476,7 @@ class TurboParser(StructuredClassifier):
                         else:
                             gold_output.append(0)
 
-        parts.set_offset(DependencyPartGrandparent,
+        parts.set_offset(Grandparent,
                          initial_index, len(parts) - initial_index)
 
     def make_parts_basic(self, instance, parts, gold_output,
@@ -551,7 +550,7 @@ class TurboParser(StructuredClassifier):
                         allowed_relations = range(len(
                             self.dictionary.get_relation_alphabet()))
                     for l in allowed_relations:
-                        part = DependencyPartLabeledArc(h, m, l)
+                        part = LabeledArc(h, m, l)
                         parts.append(part)
                         if make_gold:
                             if instance.get_head(m) == h and \
@@ -560,7 +559,7 @@ class TurboParser(StructuredClassifier):
                             else:
                                 gold_output.append(0.)
                 else:
-                    part = DependencyPartArc(h, m)
+                    part = Arc(h, m)
                     parts.append(part)
                     if make_gold:
                         if instance.get_head(m) == h:
@@ -578,17 +577,17 @@ class TurboParser(StructuredClassifier):
             arcs = parts[num_parts_initial:]
             inserted_arcs = self.enforce_well_formed_graph(instance, arcs)
             for h, m in inserted_arcs:
-                part = DependencyPartArc(h, m)
+                part = Arc(h, m)
                 parts.append(part)
                 if make_gold:
                     if instance.get_head(m) == h:
                         gold_output.append(1.)
                     else:
                         gold_output.append(0.)
-            parts.set_offset(DependencyPartArc,
+            parts.set_offset(Arc,
                              num_parts_initial, len(parts) - num_parts_initial)
         else:
-            parts.set_offset(DependencyPartLabeledArc,
+            parts.set_offset(LabeledArc,
                              num_parts_initial, len(parts) - num_parts_initial)
 
     def enforce_well_formed_graph(self, instance, arcs):
@@ -606,7 +605,7 @@ class TurboParser(StructuredClassifier):
         # Create a list of children for each node.
         children = [[] for i in range(len(instance))]
         for r in range(len(arcs)):
-            assert type(arcs[r]) == DependencyPartArc
+            assert type(arcs[r]) == Arc
             children[arcs[r].head].append(arcs[r].modifier)
 
         # Check if the root is connected to every node.
@@ -652,7 +651,7 @@ class TurboParser(StructuredClassifier):
 
         # Even in the case of labeled parsing, build features for unlabeled arcs
         # only. They will later be conjoined with the labels.
-        offset, size = parts.get_offset(DependencyPartArc)
+        offset, size = parts.get_offset(Arc)
         for r in range(offset, offset + size):
             if not selected_parts[r]:
                 continue
@@ -675,7 +674,7 @@ class TurboParser(StructuredClassifier):
         root_score = -1
 
         if self.options.unlabeled:
-            offset, size = parts.get_offset(DependencyPartArc)
+            offset, size = parts.get_offset(Arc)
             arcs = parts[offset:offset + size]
             scores = output[offset:offset + size]
             score_matrix = _make_score_matrix(len(instance), arcs, scores)
@@ -699,7 +698,7 @@ class TurboParser(StructuredClassifier):
                     root = m
                     root_score = score
         else:
-            offset, size = parts.get_offset(DependencyPartLabeledArc)
+            offset, size = parts.get_offset(LabeledArc)
             for r in range(offset, offset + size):
                 arc = parts[r]
                 if output[r] >= threshold:

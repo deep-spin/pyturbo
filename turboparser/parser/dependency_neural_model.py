@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from .dependency_parts import DependencyPartArc, DependencyParts, \
-    DependencyPartNextSibling, DependencyPartGrandparent, \
-    DependencyPartGrandSibling
+from .dependency_parts import Arc, DependencyParts, \
+    NextSibling, Grandparent, \
+    GrandSibling
 import numpy as np
 
 #TODO: maybe this should be elsewhere?
@@ -172,13 +172,13 @@ class DependencyNeuralModel(nn.Module):
         """
         head_tensors = self.head_projection(states)
         modifier_tensors = self.modifier_projection(states)
-        offset, num_arcs = parts.get_offset(DependencyPartArc)
+        offset, num_arcs = parts.get_offset(Arc)
 
         head_indices = []
         modifier_indices = []
         distance_indices = []
 
-        for part in parts.iterate_over_type(DependencyPartArc):
+        for part in parts.iterate_over_type(Arc):
             head_indices.append(part.head)
             modifier_indices.append(part.modifier)
             if self.distance_embedding_size:
@@ -232,7 +232,7 @@ class DependencyNeuralModel(nn.Module):
         modifier_indices = []
         grandparent_indices = []
 
-        for part in parts.iterate_over_type(DependencyPartGrandparent):
+        for part in parts.iterate_over_type(Grandparent):
             # list all indices, then feed the corresponding tensors to the net
             head_indices.append(part.head)
             modifier_indices.append(part.modifier)
@@ -244,7 +244,7 @@ class DependencyNeuralModel(nn.Module):
         part_states = self.tanh(heads + modifiers + grandparents)
         part_scores = self.grandparent_scorer(part_states)
 
-        offset, size = parts.get_offset(DependencyPartGrandparent)
+        offset, size = parts.get_offset(Grandparent)
         scores[offset:offset + size] = part_scores.view(-1)
 
     def _compute_consecutive_sibling_scores(self, states, parts, scores):
@@ -272,7 +272,7 @@ class DependencyNeuralModel(nn.Module):
         modifier_indices = []
         sibling_indices = []
 
-        for part in parts.iterate_over_type(DependencyPartNextSibling):
+        for part in parts.iterate_over_type(NextSibling):
             # list all indices to the candidate head/modifier/siblings, then
             # process them all at once for faster execution.
             head_indices.append(part.head)
@@ -290,7 +290,7 @@ class DependencyNeuralModel(nn.Module):
         sibling_states = self.tanh(heads + modifiers + siblings)
         sibling_scores = self.sibling_scorer(sibling_states)
 
-        offset, size = parts.get_offset(DependencyPartNextSibling)
+        offset, size = parts.get_offset(NextSibling)
         scores[offset:offset + size] = sibling_scores.view(-1)
 
     def _compute_grandsibling_scores(self, states, parts, scores):
@@ -320,7 +320,7 @@ class DependencyNeuralModel(nn.Module):
         sibling_indices = []
         grandparent_indices = []
 
-        for part in parts.iterate_over_type(DependencyPartGrandSibling):
+        for part in parts.iterate_over_type(GrandSibling):
             # list all indices to the candidate head/mod/sib/grandparent
             head_indices.append(part.head)
             modifier_indices.append(part.modifier)
@@ -339,7 +339,7 @@ class DependencyNeuralModel(nn.Module):
         gsib_states = self.tanh(heads + modifiers + siblings + grandparents)
         gsib_scores = self.grandsibling_scorer(gsib_states)
 
-        offset, size = parts.get_offset(DependencyPartGrandSibling)
+        offset, size = parts.get_offset(GrandSibling)
         scores[offset:offset + size] = gsib_scores.view(-1)
 
     def _get_embeddings(self, instances, max_length, word_or_tag):
@@ -424,14 +424,14 @@ class DependencyNeuralModel(nn.Module):
 
             self._compute_first_order_scores(states, sent_parts, scores)
 
-            if sent_parts.has_type(DependencyPartNextSibling):
+            if sent_parts.has_type(NextSibling):
                 self._compute_consecutive_sibling_scores(states, sent_parts,
                                                          scores)
 
-            if sent_parts.has_type(DependencyPartGrandparent):
+            if sent_parts.has_type(Grandparent):
                 self._compute_grandparent_scores(states, sent_parts, scores)
 
-            if sent_parts.has_type(DependencyPartGrandSibling):
+            if sent_parts.has_type(GrandSibling):
                 self._compute_grandsibling_scores(states, sent_parts, scores)
 
         return batch_scores

@@ -11,40 +11,42 @@ class DependencyPart(object):
             nodes.append(('g', self.grandparent))
         if hasattr(self, 'sibling'):
             nodes.append(('s', self.sibling))
+        if hasattr(self, 'label'):
+            nodes.append(('l', self.label))
 
         nodes_strings = ['{}={}'.format(node[0], node[1]) for node in nodes]
         str_ = self.__class__.__name__ + '(' + ', '.join(nodes_strings) + ')'
         return str_
 
 
-class DependencyPartArc(DependencyPart):
+class Arc(DependencyPart):
     def __init__(self, head=-1, modifier=-1):
         self.head = head
         self.modifier = modifier
 
 
-class DependencyPartLabeledArc(DependencyPart):
+class LabeledArc(DependencyPart):
     def __init__(self, head=-1, modifier=-1, label=-1):
         self.head = head
         self.modifier = modifier
         self.label = label
 
 
-class DependencyPartGrandparent(DependencyPart):
+class Grandparent(DependencyPart):
     def __init__(self, head=-1, modifier=-1, grandparent=-1):
         self.head = head
         self.modifier = modifier
         self.grandparent = grandparent
 
 
-class DependencyPartNextSibling(DependencyPart):
+class NextSibling(DependencyPart):
     def __init__(self, head=-1, modifier=-1, sibling=-1):
         self.head = head
         self.modifier = modifier
         self.sibling = sibling
 
 
-class DependencyPartGrandSibling(DependencyPart):
+class GrandSibling(DependencyPart):
     def __init__(self, head=-1, modifier=-1, grandparent=-1, sibling=-1):
         self.head = head
         self.modifier = modifier
@@ -58,13 +60,14 @@ class DependencyParts(list):
         self.index_labeled = None
         self.offsets = {}
         self.arc_index = {}
+        self.labeled_indices = {}
 
     def has_type(self, type_):
         """
         Return whether this object stores parts of a particular type.
 
-        :param type_: a class such as DependencyPartNextSibling or
-            DependencyPartGrandparent
+        :param type_: a class such as NextSibling or
+            Grandparent
         :return: boolean
         """
         return type_ in self.offsets and self.offsets[type_][1] > 0
@@ -77,11 +80,21 @@ class DependencyParts(list):
         :param part: a DependencyPart
         """
         super(DependencyParts, self).append(part)
-        if isinstance(part, DependencyPartArc):
+        if isinstance(part, Arc):
             if part.head not in self.arc_index:
                 self.arc_index[part.head] = {}
 
             self.arc_index[part.head][part.modifier] = len(self) - 1
+
+        elif isinstance(part, LabeledArc):
+            if part.head not in self.labeled_indices:
+                self.labeled_indices[part.head] = {}
+            head_dict = self.labeled_indices[part.head]
+            if part.modifier not in head_dict:
+                head_dict[part.modifier] = []
+
+            position = len(self) - 1
+            head_dict[part.modifier].append(position)
 
     def iterate_over_type(self, type_, return_index=False):
         """
@@ -116,3 +129,17 @@ class DependencyParts(list):
             return -1
 
         return self.arc_index[head][modifier]
+
+    def find_labeled_arc_indices(self, head, modifier):
+        """
+        Return the list of positions of the labeled arcs connecting `head` and
+        `modifier`. If no such label exists, return an empty list.
+        """
+        if head not in self.labeled_indices:
+            return []
+
+        head_dict = self.labeled_indices[head]
+        if modifier not in head_dict:
+            return []
+
+        return head_dict[modifier]
