@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
-from .dependency_parts import Arc, DependencyParts, \
-    NextSibling, Grandparent, \
-    GrandSibling
+from .dependency_parts import Arc, DependencyParts, NextSibling, Grandparent, \
+    GrandSibling, LabeledArc
 import numpy as np
 
 #TODO: maybe this should be elsewhere?
@@ -31,6 +30,7 @@ class DependencyNeuralModel(nn.Module):
         self.mlp_size = mlp_size
         self.num_layers = num_layers
         self.dropout_rate = dropout
+        self.num_labels = len(dependency_dictionary.relation_alphabet)
         self.padding = token_dictionary.token_padding
         self.on_gpu = torch.cuda.is_available()
 
@@ -96,6 +96,7 @@ class DependencyNeuralModel(nn.Module):
             self.distance_projection = None
 
         self.arc_scorer = self._create_scorer()
+        self.label_scorer = self._create_scorer(output_size=self.num_labels)
         self.sibling_scorer = self._create_scorer()
         self.grandparent_scorer = self._create_scorer()
         self.grandsibling_scorer = self._create_scorer()
@@ -118,7 +119,7 @@ class DependencyNeuralModel(nn.Module):
 
         return tensor
 
-    def _create_scorer(self, input_size=None):
+    def _create_scorer(self, input_size=None, output_size=1):
         """
         Create the weights for scoring a given tensor representation to a
         single number.
@@ -129,7 +130,7 @@ class DependencyNeuralModel(nn.Module):
         """
         if input_size is None:
             input_size = self.mlp_size
-        linear = nn.Linear(input_size, 1, bias=False)
+        linear = nn.Linear(input_size, output_size, bias=False)
         scorer = nn.Sequential(self.dropout, linear)
 
         return scorer
@@ -158,7 +159,7 @@ class DependencyNeuralModel(nn.Module):
 
         self.load_state_dict(state_dict)
 
-    def _compute_first_order_scores(self, states, parts, scores):
+    def _compute_arc_scores(self, states, parts, scores):
         """
         Compute the first order scores and store them in the appropriate
         position in the `scores` tensor.
@@ -211,6 +212,12 @@ class DependencyNeuralModel(nn.Module):
         arc_states = self.tanh(heads + modifiers + distance_projections)
         arc_scores = self.arc_scorer(arc_states)
         scores[offset:offset + num_arcs] = arc_scores.view(-1)
+
+        if parts.has_type(LabeledArc):
+            # compute label scores and place them in the correct position
+            label_scores = self.label_scorer(arc_states)
+            
+
 
     def _compute_grandparent_scores(self, states, parts, scores):
         """
@@ -422,7 +429,7 @@ class DependencyNeuralModel(nn.Module):
             scores = batch_scores[rnn_ind]
             sent_parts = parts[rnn_ind]
 
-            self._compute_first_order_scores(states, sent_parts, scores)
+            self._compute_arc_scores(states, sent_parts, scores)
 
             if sent_parts.has_type(NextSibling):
                 self._compute_consecutive_sibling_scores(states, sent_parts,
