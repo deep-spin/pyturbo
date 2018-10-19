@@ -57,6 +57,8 @@ class DependencyDecoder(StructuredDecoder):
         self.use_grandparents = None
         self.use_siblings = None
 
+        self.best_labels = None
+
     def decode(self, instance, parts, scores):
         """
         Decode the scores to the dependency parts under the necessary
@@ -75,6 +77,9 @@ class DependencyDecoder(StructuredDecoder):
         # parts list stored in additiona_index[i] or arc_index[i]
         self.arc_indices = []
         self.additional_indices = []
+
+        if parts.has_type(LabeledArc):
+            self.decode_labels(parts, scores)
 
         graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores, graph)
@@ -103,6 +108,46 @@ class DependencyDecoder(StructuredDecoder):
                                                      additional_posteriors)
 
         return predicted_output
+
+    def decode_labels(self, parts, scores):
+        """
+        Find the most likely label for each arc.
+
+        :type parts: DependencyParts
+        :param scores: list or array of scores for each part
+        :return:
+        """
+        # store the position of the best label for each arc
+        self.best_labels = []
+
+        for arc in parts.iterate_over_type(Arc):
+            labeled_indices = parts.find_labeled_arc_indices(arc.head,
+                                                             arc.modifier)
+            best_label = -1
+            best_score = -np.inf
+            for index in labeled_indices:
+                score = scores[index]
+
+                if score > best_score:
+                    best_score = score
+                    best_label = index
+
+            assert best_label >= 0
+            self.best_labels.append(best_label)
+
+    def copy_unlabeled_predictions(self, parts, predicted_output):
+        """
+        Copy the (unlabeled) arc prediction values found by the decoder to the
+        labeled part with the highest score.
+
+        :param predicted_output: array of predictions found by the decoder
+        :type parts: DependencyParts
+        """
+        offset_arcs = parts.get_offset(Arc)[0]
+        for i, arc in parts.iterate_over_type(Arc, return_index=True):
+            label_index = i - offset_arcs
+            label = self.best_labels[label_index]
+            predicted_output[label] = predicted_output[i]
 
     def _index_parts_by_head(self, parts, instance, scores):
         """
@@ -196,11 +241,6 @@ class DependencyDecoder(StructuredDecoder):
         for modifier in candidate_heads:
             heads_and_scores = candidate_heads[modifier]
             heads_and_scores.sort(key=lambda x: x[1], reverse=True)
-
-            print('Candidate heads (score above threshold):', len(heads_and_scores))
-            print('Scores:', [x[1] for x in heads_and_scores])
-            print()
-
             heads_and_scores = heads_and_scores[:max_heads]
             for head, score in heads_and_scores:
                 new_parts.append(Arc(head, modifier))
@@ -234,6 +274,15 @@ class DependencyDecoder(StructuredDecoder):
         for value, index in zip(all_posteriors, all_indices):
             predicted_output[index] = value
 
+        # Copy the (unlabeled) arc prediction values found to the
+        # labeled part with the highest score.
+        if self.best_labels:
+            offset_arcs = parts.get_offset(Arc)[0]
+            for i, arc in parts.iterate_over_type(Arc, return_index=True):
+                label_index = i - offset_arcs
+                label = self.best_labels[label_index]
+                predicted_output[label] = predicted_output[i]
+
         return predicted_output
 
     def create_tree_factor(self, instance, parts, scores, graph):
@@ -253,10 +302,17 @@ class DependencyDecoder(StructuredDecoder):
         tree_factor = PFactorTree()
         arcs = []
         variables = []
+        offset_arcs = parts.get_offset(Arc)[0]
         for r, part in parts.iterate_over_type(Arc, True):
             arcs.append((part.head, part.modifier))
             arc_variable = graph.create_binary_variable()
-            arc_variable.set_log_potential(scores[r])
+
+            score = scores[r]
+            if self.best_labels:
+                index = self.best_labels[r - offset_arcs]
+                score += scores[index]
+            arc_variable.set_log_potential(score)
+
             variables.append(arc_variable)
             self.arc_indices.append(r)
 
