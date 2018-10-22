@@ -133,6 +133,7 @@ class TurboParser(StructuredClassifier):
         with open(model_path, 'rb') as f:
             pruner_options = pickle.load(f)
 
+        pruner_options.train = False
         pruner = TurboParser(pruner_options)
         pruner.load(model_path)
         return pruner
