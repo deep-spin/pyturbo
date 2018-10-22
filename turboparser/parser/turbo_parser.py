@@ -176,8 +176,8 @@ class TurboParser(StructuredClassifier):
         """
         Log some statistics about the calls to make parts in a dataset.
 
-        :type instances: list
-        :type parts: DependencyParts
+        :type instances: list[DependencyInstance]
+        :type parts: list[DependencyParts]
         """
         num_arcs = 0
         num_pruner_mistakes = 0
@@ -185,41 +185,34 @@ class TurboParser(StructuredClassifier):
         num_possible_arcs = 0
         output_available = instances[0].output is not None
 
-        for instance in instances:
+        for instance, inst_parts in zip(instances, parts):
             inst_len = len(instance)
-            num_tokens += inst_len
-            num_possible_arcs += inst_len * (inst_len - 1)
+            num_tokens += inst_len - 1  # exclude root
+            num_possible_arcs += (inst_len - 1) ** 2  # exclude root and self
 
             # skip the root symbol
             for m in range(1, inst_len):
-                head = -1
-
                 for h in range(inst_len):
-                    r = parts.find_arc_index(h, m)
+                    r = inst_parts.find_arc_index(h, m)
                     if r < 0:
+                        # pruned
+                        if output_available and instance.output.heads[m] == h:
+                            num_pruner_mistakes += 1
                         continue
-
-                    if output_available and instance.output.heads[m] == h:
-                        head = h
 
                     num_arcs += 1
 
-                if head == -1:
-                    num_pruner_mistakes += 1
-
-        logging.info('Created %d candidate arcs' % num_arcs)
-
-        if output_available:
-            ratio = (num_tokens - num_pruner_mistakes) / num_tokens
-            msg = 'Pruner recall (gold arcs retained after pruning): %d' % ratio
-            logging.info(msg)
-
-        msg = '%d heads per token after pruning' % (num_arcs / num_tokens)
+        msg = '%f heads per token after pruning' % (num_arcs / num_tokens)
         logging.info(msg)
 
         msg = '%d arcs after pruning, out of %d possible (%f)' % \
               (num_arcs, num_possible_arcs, num_arcs / num_possible_arcs)
         logging.info(msg)
+
+        if output_available:
+            ratio = (num_tokens - num_pruner_mistakes) / num_tokens
+            msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
+            logging.info(msg)
 
     def _reset_part_counts(self):
         """
