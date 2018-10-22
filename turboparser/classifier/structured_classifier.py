@@ -592,7 +592,7 @@ class StructuredClassifier(object):
         """
         pass
 
-    def _report_make_parts(self):
+    def _report_make_parts(self, instances, parts):
         """
         Log some statistics about the calls to make parts in a dataset.
         """
@@ -630,7 +630,7 @@ class StructuredClassifier(object):
             all_features.append(features)
             all_gold.append(gold_output)
 
-        self._report_make_parts()
+        self._report_make_parts(instances, parts)
         data = InstanceData(instances, all_parts, all_features, all_gold)
         return data
 

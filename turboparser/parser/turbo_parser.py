@@ -159,7 +159,7 @@ class TurboParser(StructuredClassifier):
         self.total_arcs_pruned += diff
 
         # during training, make sure that the gold parts are included
-        if gold_output is not None:
+        if not self.options.train:
             for m in range(1, len(instance)):
                 h = instance.output.heads[m]
                 if new_parts.find_arc_index(h, m) < 0:
@@ -171,26 +171,53 @@ class TurboParser(StructuredClassifier):
 
         return new_parts, new_gold
 
-    def _report_make_parts(self):
+    def _report_make_parts(self, instances, parts):
         """
         Log some statistics about the calls to make parts in a dataset.
+
+        :type instances: list
+        :type parts: DependencyParts
         """
-        msg = 'Created %d candidate arcs' % self.total_arcs
-        if self.total_gold_arcs > 0:
-            ratio = 100 * self.total_gold_arcs / self.total_arcs
-            msg += ', of which %d gold (%.2f%%)' % (self.total_gold_arcs, ratio)
+        num_arcs = 0
+        num_pruner_mistakes = 0
+        num_tokens = 0
+        num_possible_arcs = 0
+        output_available = instances[0].output is not None
+
+        for instance in instances:
+            inst_len = len(instance)
+            num_tokens += inst_len
+            num_possible_arcs += inst_len * (inst_len - 1)
+
+            # skip the root symbol
+            for m in range(1, inst_len):
+                head = -1
+
+                for h in range(inst_len):
+                    r = parts.find_arc_index(h, m)
+                    if r < 0:
+                        continue
+
+                    if output_available and instance.output.heads[m] == h:
+                        head = h
+
+                    num_arcs += 1
+
+                if head == -1:
+                    num_pruner_mistakes += 1
+
+        logging.info('Created %d candidate arcs' % num_arcs)
+
+        if output_available:
+            ratio = (num_tokens - num_pruner_mistakes) / num_tokens
+            msg = 'Pruner recall (gold arcs retained after pruning): %d' % ratio
+            logging.info(msg)
+
+        msg = '%d heads per token after pruning' % (num_arcs / num_tokens)
         logging.info(msg)
 
-        if not self.has_pruner:
-            return
-
-        ratio = 100 * self.total_arcs_pruned / self.total_arcs
-        msg = 'Pruned %d arcs (%.2f%%)' % (self.total_arcs_pruned, ratio)
-        if self.total_gold_arcs is not None:
-            ratio = 100 * self.total_gold_arcs_pruned / self.total_arcs_pruned \
-                if self.total_arcs_pruned > 0 else 0
-            msg += ', of which %d gold (%.2f%%)' % (self.total_gold_arcs_pruned,
-                                                    ratio)
+        msg = '%d arcs after pruning, out of %d possible (%f)' % \
+              (num_arcs, num_possible_arcs, num_arcs / num_possible_arcs)
         logging.info(msg)
 
     def _reset_part_counts(self):
@@ -224,7 +251,7 @@ class TurboParser(StructuredClassifier):
         assert len(parts) == len(gold_output)
 
         if not self.options.unlabeled:
-            self.make_labeled_parts(instance, parts, gold_output)
+            self.make_parts_labeled(instance, parts, gold_output)
 
         if 'cs' in self.model_type:
             self.make_parts_consecutive_siblings(instance, parts,
@@ -481,7 +508,7 @@ class TurboParser(StructuredClassifier):
         parts.set_offset(Grandparent,
                          initial_index, len(parts) - initial_index)
 
-    def make_labeled_parts(self, instance, parts, gold_output):
+    def make_parts_labeled(self, instance, parts, gold_output):
         """
         Create labeled arcs. This function expects that `make_parts_basic` has
         already been called and populated `parts` with unlabeled arcs.
