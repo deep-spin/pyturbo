@@ -298,10 +298,6 @@ class StructuredClassifier(object):
         inner_loss = self.transform_gold(instance, parts, scores,
                                          gold_output)
 
-        # for part, score in zip(parts, scores):
-        #     print(part, score)
-        # print()
-
         # Do the decoding.
         start_decoding = time.time()
         if algorithm in ['perceptron']:

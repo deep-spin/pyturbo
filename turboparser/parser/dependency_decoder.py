@@ -345,9 +345,6 @@ class DependencyDecoder(StructuredDecoder):
             Create and sets the grandparent head automaton for either or right
             siblings and grandparents.
             """
-            # side = 'right' if decreasing else 'left'
-            # print('Adding gp head automaton in the', side)
-
             for head_structure in structures:
                 siblings_structure = head_structure[0]
                 sib_indices = siblings_structure.indices
