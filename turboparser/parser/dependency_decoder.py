@@ -79,7 +79,7 @@ class DependencyDecoder(StructuredDecoder):
         self.additional_indices = []
 
         if parts.has_type(LabeledArc):
-            self.decode_labels(parts, scores)
+            scores = self.decode_labels(parts, scores)
 
         graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores, graph)
@@ -115,12 +115,16 @@ class DependencyDecoder(StructuredDecoder):
 
         :type parts: DependencyParts
         :param scores: list or array of scores for each part
-        :return:
+        :return: the scores vector modified such that each unlabeled arc has
+            its score increased by the best labeled score
         """
         # store the position of the best label for each arc
         self.best_labels = []
 
-        for arc in parts.iterate_over_type(Arc):
+        # copied scores
+        new_scores = np.array(scores)
+
+        for i, arc in parts.iterate_over_type(Arc, return_index=True):
             labeled_indices = parts.find_labeled_arc_indices(arc.head,
                                                              arc.modifier)
             best_label = -1
@@ -134,6 +138,9 @@ class DependencyDecoder(StructuredDecoder):
 
             assert best_label >= 0
             self.best_labels.append(best_label)
+            new_scores[i] += best_score
+
+        return new_scores
 
     def copy_unlabeled_predictions(self, parts, predicted_output):
         """

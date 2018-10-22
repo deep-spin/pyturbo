@@ -61,6 +61,7 @@ class DependencyParts(list):
         self.offsets = {}
         self.arc_index = {}
         self.labeled_indices = {}
+        self.arc_labels = {}
 
     def has_type(self, type_):
         """
@@ -89,12 +90,21 @@ class DependencyParts(list):
         elif isinstance(part, LabeledArc):
             if part.head not in self.labeled_indices:
                 self.labeled_indices[part.head] = {}
-            head_dict = self.labeled_indices[part.head]
-            if part.modifier not in head_dict:
-                head_dict[part.modifier] = []
+
+            if part.head not in self.arc_labels:
+                self.arc_labels[part.head] = {}
+
+            head_indices = self.labeled_indices[part.head]
+            head_labels = self.arc_labels[part.head]
+            if part.modifier not in head_indices:
+                head_indices[part.modifier] = []
+
+            if part.modifier not in head_labels:
+                head_labels[part.modifier] = []
 
             position = len(self) - 1
-            head_dict[part.modifier].append(position)
+            head_indices[part.modifier].append(position)
+            head_labels[part.modifier].append(part.label)
 
     def iterate_over_type(self, type_, return_index=False):
         """
@@ -139,6 +149,20 @@ class DependencyParts(list):
             return []
 
         head_dict = self.labeled_indices[head]
+        if modifier not in head_dict:
+            return []
+
+        return head_dict[modifier]
+
+    def find_arc_labels(self, head, modifier):
+        """
+        Return a list of all possible labels for the arc between `head` and
+        `modifier`. If there is none, return an empty list.
+        """
+        if head not in self.arc_labels:
+            return []
+
+        head_dict = self.arc_labels[head]
         if modifier not in head_dict:
             return []
 

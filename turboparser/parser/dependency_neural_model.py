@@ -213,11 +213,19 @@ class DependencyNeuralModel(nn.Module):
         arc_scores = self.arc_scorer(arc_states)
         scores[offset:offset + num_arcs] = arc_scores.view(-1)
 
-        if parts.has_type(LabeledArc):
-            # compute label scores and place them in the correct position
-            label_scores = self.label_scorer(arc_states)
-            
+        if not parts.has_type(LabeledArc):
+            return
 
+        j = parts.get_offset(LabeledArc)[0]
+        label_scores = self.label_scorer(arc_states)
+
+        # place the label scores in the correct position in the output
+        for i, arc in enumerate(parts.iterate_over_type(Arc)):
+            labels = parts.find_arc_labels(arc.head, arc.modifier)
+            for label in labels:
+                label_score = label_scores[i, label]
+                scores[j] = label_score
+                j += 1
 
     def _compute_grandparent_scores(self, states, parts, scores):
         """

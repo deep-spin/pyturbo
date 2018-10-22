@@ -213,8 +213,7 @@ class TurboParser(StructuredClassifier):
         parts = DependencyParts()
         gold_output = None if instance.output is None else []
 
-        self.make_parts_basic(instance, parts, gold_output,
-                              add_relation_parts=False)
+        self.make_parts_basic(instance, parts, gold_output)
         self.total_arcs += len(parts)
         if gold_output is not None:
             self.total_gold_arcs += sum(gold_output)
@@ -223,6 +222,9 @@ class TurboParser(StructuredClassifier):
             parts, gold_output = self.prune(instance, parts, gold_output)
 
         assert len(parts) == len(gold_output)
+
+        if not self.options.unlabeled:
+            self.make_labeled_parts(instance, parts, gold_output)
 
         if 'cs' in self.model_type:
             self.make_parts_consecutive_siblings(instance, parts,
@@ -479,8 +481,56 @@ class TurboParser(StructuredClassifier):
         parts.set_offset(Grandparent,
                          initial_index, len(parts) - initial_index)
 
-    def make_parts_basic(self, instance, parts, gold_output,
-                         add_relation_parts=True):
+    def make_labeled_parts(self, instance, parts, gold_output):
+        """
+        Create labeled arcs. This function expects that `make_parts_basic` has
+        already been called and populated `parts` with unlabeled arcs.
+
+        :param instance: DependencyInstance
+        :param parts: DependencyParts
+        :param gold_output: list to be modified in-place
+        """
+        make_gold = instance.output is not None
+
+        num_parts_initial = len(parts)
+        for h in range(len(instance)):
+            for m in range(1, len(instance)):
+                if h == m:
+                    continue
+
+                # If no unlabeled arc is there, just skip it.
+                # This happens if that arc was pruned out.
+                if 0 > parts.find_arc_index(h, m):
+                    continue
+
+                # determine which relations are allowed between h and m
+                modifier_tag = instance.get_tag(m)
+                head_tag = instance.get_tag(h)
+                allowed_relations = self.dictionary.get_existing_relations(
+                    modifier_tag, head_tag)
+
+                # If there is no allowed relation for this arc, but the
+                # unlabeled arc was added, then it was forced to be present
+                # to maintain connectivity of the graph. In that case (which
+                # should be pretty rare) consider all the possible
+                # relations.
+                if not allowed_relations:
+                    allowed_relations = range(len(
+                        self.dictionary.get_relation_alphabet()))
+                for l in allowed_relations:
+                    part = LabeledArc(h, m, l)
+                    parts.append(part)
+                    if make_gold:
+                        if instance.get_head(m) == h and \
+                           instance.get_relation(m) == l:
+                            gold_output.append(1.)
+                        else:
+                            gold_output.append(0.)
+
+        parts.set_offset(LabeledArc,
+                         num_parts_initial, len(parts) - num_parts_initial)
+
+    def make_parts_basic(self, instance, parts, gold_output):
         """
         Create the first-order arcs into which the problem is factored.
 
@@ -490,7 +540,6 @@ class TurboParser(StructuredClassifier):
         :param parts: a DependencyParts object, modified in-place
         :param gold_output: either None or a list with binary values indicating
             the presence of each part.
-        :param add_relation_parts: whether to include label information
         :return: if `instances` have the attribute `output`, return a numpy
             array with 1 signaling the presence of an arc in a combination
             (head, modifier) or (head, modifier, label) and 0 otherwise.
@@ -500,83 +549,35 @@ class TurboParser(StructuredClassifier):
         """
         make_gold = instance.output is not None
 
-        if add_relation_parts and not self.options.prune_relations:
-            allowed_relations = range(len(
-                self.dictionary.get_relation_alphabet()))
-
         num_parts_initial = len(parts)
         for h in range(len(instance)):
             for m in range(1, len(instance)):
                 if h == m:
                     continue
 
-                if add_relation_parts:
-                    # If no unlabeled arc is there, just skip it.
-                    # This happens if that arc was pruned out.
-                    if 0 > parts.find_arc_index(h, m):
-                        continue
-                else:
-                    if h and self.options.prune_distances:
-                        modifier_tag = instance.get_tag(m)
-                        head_tag = instance.get_tag(h)
-                        if h < m:
-                            # Right attachment.
-                            if m - h > \
-                               self.dictionary.get_maximum_right_distance(
-                                   modifier_tag, head_tag):
-                                continue
-                        else:
-                            # Left attachment.
-                            if h - m > \
-                               self.dictionary.get_maximum_left_distance(
-                                   modifier_tag, head_tag):
-                                continue
+                if h and self.options.prune_distances:
+                    modifier_tag = instance.get_tag(m)
+                    head_tag = instance.get_tag(h)
+                    if h < m:
+                        # Right attachment.
+                        if m - h > \
+                           self.dictionary.get_maximum_right_distance(
+                               modifier_tag, head_tag):
+                            continue
+                    else:
+                        # Left attachment.
+                        if h - m > \
+                           self.dictionary.get_maximum_left_distance(
+                               modifier_tag, head_tag):
+                            continue
                 if self.options.prune_relations:
                     modifier_tag = instance.get_tag(m)
                     head_tag = instance.get_tag(h)
                     allowed_relations = self.dictionary.get_existing_relations(
                         modifier_tag, head_tag)
-                    if not add_relation_parts and not allowed_relations:
+                    if not allowed_relations:
                         continue
 
-                # Add parts for labeled/unlabeled arcs.
-                if add_relation_parts:
-                    # If there is no allowed relation for this arc, but the
-                    # unlabeled arc was added, then it was forced to be present
-                    # to maintain connectivity of the graph. In that case (which
-                    # should be pretty rare) consider all the possible
-                    # relations.
-                    if not allowed_relations:
-                        allowed_relations = range(len(
-                            self.dictionary.get_relation_alphabet()))
-                    for l in allowed_relations:
-                        part = LabeledArc(h, m, l)
-                        parts.append(part)
-                        if make_gold:
-                            if instance.get_head(m) == h and \
-                               instance.get_relation(m) == l:
-                                gold_output.append(1.)
-                            else:
-                                gold_output.append(0.)
-                else:
-                    part = Arc(h, m)
-                    parts.append(part)
-                    if make_gold:
-                        if instance.get_head(m) == h:
-                            gold_output.append(1.)
-                        else:
-                            gold_output.append(0.)
-
-        # When adding unlabeled arcs, make sure the graph stays connected.
-        # Otherwise, enforce connectedness by adding some extra arcs
-        # that connect words to the root.
-        # NOTE: if --projective, enforcing connectedness is not enough,
-        # so we add arcs of the form m-1 -> m to make sure the sentence
-        # has a projective parse.
-        if not add_relation_parts:
-            arcs = parts[num_parts_initial:]
-            inserted_arcs = self.enforce_well_formed_graph(instance, arcs)
-            for h, m in inserted_arcs:
                 part = Arc(h, m)
                 parts.append(part)
                 if make_gold:
@@ -584,11 +585,25 @@ class TurboParser(StructuredClassifier):
                         gold_output.append(1.)
                     else:
                         gold_output.append(0.)
-            parts.set_offset(Arc,
-                             num_parts_initial, len(parts) - num_parts_initial)
-        else:
-            parts.set_offset(LabeledArc,
-                             num_parts_initial, len(parts) - num_parts_initial)
+
+        # When adding unlabeled arcs, make sure the graph stays connected.
+        # Otherwise, enforce connectedness by adding some extra arcs
+        # that connect words to the root.
+        # NOTE: if --projective, enforcing connectedness is not enough,
+        # so we add arcs of the form m-1 -> m to make sure the sentence
+        # has a projective parse.
+        arcs = parts[num_parts_initial:]
+        inserted_arcs = self.enforce_well_formed_graph(instance, arcs)
+        for h, m in inserted_arcs:
+            part = Arc(h, m)
+            parts.append(part)
+            if make_gold:
+                if instance.get_head(m) == h:
+                    gold_output.append(1.)
+                else:
+                    gold_output.append(0.)
+        parts.set_offset(Arc,
+                         num_parts_initial, len(parts) - num_parts_initial)
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
