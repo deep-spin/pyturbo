@@ -715,6 +715,7 @@ class TurboParser(StructuredClassifier):
         threshold = .5
         root = -1
         root_score = -1
+        removed_roots = 0
 
         if self.options.unlabeled:
             offset, size = parts.get_offset(Arc)
@@ -729,6 +730,7 @@ class TurboParser(StructuredClassifier):
                     score = output[index]
 
                     if self.options.single_root and root != -1:
+                        removed_roots += 1
                         if score > root_score:
                             # this token is better scored for root
                             # attach the previous root candidate to it
@@ -751,6 +753,7 @@ class TurboParser(StructuredClassifier):
                     if arc.head == 0:
 
                         if self.options.single_root and root != -1:
+                            removed_roots += 1
                             if output[r] > root_score:
                                 # this token is better scored for root
                                 instance.output.heads[root] = arc.modifier
@@ -763,6 +766,9 @@ class TurboParser(StructuredClassifier):
                         root_score = output[r]
         if root == -1:
             logging.info('Sentence without root')
+
+        if removed_roots > 0:
+            logging.info('%d tokens reassigned to root' % removed_roots)
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):
