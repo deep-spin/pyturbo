@@ -8,9 +8,9 @@ class Alphabet(dict):
         dict.__init__(self)
         self.locked = False
         self.names = []
-        if label_names != None:
+        if label_names is not None:
             for name in label_names:
-                self.add(name)
+                self.insert(name)
 
     def clear(self):
         dict.clear(self)
@@ -44,10 +44,6 @@ class Alphabet(dict):
     def get_label_name(self, label_id):
         '''Get label name from id.'''
         return self.names[label_id]
-
-    #def get_label_id(self, name):
-    #    '''Get label id from name.'''
-    #    return self[name]
 
     def save(self, label_file):
         '''Save labels to a file.'''

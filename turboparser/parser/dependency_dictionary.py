@@ -104,7 +104,7 @@ class DependencyDictionary(Dictionary):
         logging.info('Number of relations: %d' % len(self.relation_alphabet))
 
     def get_relation_name(self, relation):
-        return self.relation_alphabet.get_relation_name(relation)
+        return self.relation_alphabet.get_label_name(relation)
 
     def get_existing_relations(self, modifier_tag, head_tag):
         return self.existing_relations[modifier_tag][head_tag]

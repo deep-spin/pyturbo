@@ -630,7 +630,7 @@ class StructuredClassifier(object):
             all_features.append(features)
             all_gold.append(gold_output)
 
-        self._report_make_parts(instances, parts)
+        self._report_make_parts(instances, all_parts)
         data = InstanceData(instances, all_parts, all_features, all_gold)
         return data
 
