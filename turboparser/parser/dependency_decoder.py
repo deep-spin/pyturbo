@@ -57,7 +57,7 @@ class DependencyDecoder(StructuredDecoder):
         self.use_grandparents = None
         self.use_siblings = None
 
-        self.best_labels = None
+        self.best_label_indices = None
 
     def decode(self, instance, parts, scores):
         """
@@ -119,7 +119,7 @@ class DependencyDecoder(StructuredDecoder):
             its score increased by the best labeled score
         """
         # store the position of the best label for each arc
-        self.best_labels = []
+        self.best_label_indices = []
 
         # copied scores
         new_scores = np.array(scores)
@@ -127,18 +127,23 @@ class DependencyDecoder(StructuredDecoder):
         for i, arc in parts.iterate_over_type(Arc, return_index=True):
             labeled_indices = parts.find_labeled_arc_indices(arc.head,
                                                              arc.modifier)
+            labels = parts.find_arc_labels(arc.head, arc.modifier)
+
+            best_label_index = -1
             best_label = -1
             best_score = -np.inf
-            for index in labeled_indices:
+            for index, label in zip(labeled_indices, labels):
                 score = scores[index]
 
                 if score > best_score:
                     best_score = score
-                    best_label = index
+                    best_label_index = index
+                    best_label = label
 
-            assert best_label >= 0
-            self.best_labels.append(best_label)
+            assert best_label_index >= 0
+            self.best_label_indices.append(best_label_index)
             new_scores[i] += best_score
+            parts.best_labels.append(best_label)
 
         return new_scores
 
@@ -153,7 +158,7 @@ class DependencyDecoder(StructuredDecoder):
         offset_arcs = parts.get_offset(Arc)[0]
         for i, arc in parts.iterate_over_type(Arc, return_index=True):
             label_index = i - offset_arcs
-            label = self.best_labels[label_index]
+            label = self.best_label_indices[label_index]
             predicted_output[label] = predicted_output[i]
 
     def _index_parts_by_head(self, parts, instance, scores):
@@ -283,11 +288,11 @@ class DependencyDecoder(StructuredDecoder):
 
         # Copy the (unlabeled) arc prediction values found to the
         # labeled part with the highest score.
-        if self.best_labels:
+        if self.best_label_indices:
             offset_arcs = parts.get_offset(Arc)[0]
             for i, arc in parts.iterate_over_type(Arc, return_index=True):
                 label_index = i - offset_arcs
-                label = self.best_labels[label_index]
+                label = self.best_label_indices[label_index]
                 predicted_output[label] = predicted_output[i]
 
         return predicted_output
@@ -315,8 +320,8 @@ class DependencyDecoder(StructuredDecoder):
             arc_variable = graph.create_binary_variable()
 
             score = scores[r]
-            if self.best_labels:
-                index = self.best_labels[r - offset_arcs]
+            if self.best_label_indices:
+                index = self.best_label_indices[r - offset_arcs]
                 score += scores[index]
             arc_variable.set_log_potential(score)
 

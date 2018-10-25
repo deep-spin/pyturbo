@@ -156,9 +156,6 @@ class TurboParser(StructuredClassifier):
             self.options.pruner_max_heads,
             self.options.pruner_posterior_threshold)
 
-        diff = len(parts) - len(new_parts)
-        self.total_arcs_pruned += diff
-
         # during training, make sure that the gold parts are included
         if not self.options.train:
             for m in range(1, len(instance)):
@@ -166,7 +163,6 @@ class TurboParser(StructuredClassifier):
                 if new_parts.find_arc_index(h, m) < 0:
                     new_parts.append(Arc(h, m))
                     new_gold.append(1)
-                    self.total_gold_arcs_pruned += 1
 
             new_parts.set_offset(Arc, 0, len(new_parts))
 
@@ -214,15 +210,6 @@ class TurboParser(StructuredClassifier):
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
 
-    def _reset_part_counts(self):
-        """
-        Reset counters of some statistics.
-        """
-        self.total_arcs = 0
-        self.total_gold_arcs = 0
-        self.total_arcs_pruned = 0
-        self.total_gold_arcs_pruned = 0
-
     def make_parts(self, instance):
         """
         Create the parts (arcs) into which the problem is factored.
@@ -235,10 +222,6 @@ class TurboParser(StructuredClassifier):
         gold_output = None if instance.output is None else []
 
         self.make_parts_basic(instance, parts, gold_output)
-        self.total_arcs += len(parts)
-        if gold_output is not None:
-            self.total_gold_arcs += sum(gold_output)
-
         if self.has_pruner:
             parts, gold_output = self.prune(instance, parts, gold_output)
 
@@ -710,55 +693,38 @@ class TurboParser(StructuredClassifier):
         root_score = -1
         removed_roots = 0
 
-        if self.options.unlabeled:
-            offset, size = parts.get_offset(Arc)
-            arcs = parts[offset:offset + size]
-            scores = output[offset:offset + size]
-            score_matrix = _make_score_matrix(len(instance), arcs, scores)
-            heads = chu_liu_edmonds(score_matrix)
-            for m, h in enumerate(heads):
-                instance.output.heads[m] = h
-                if h == 0:
-                    index = parts.find_arc_index(h, m)
-                    score = output[index]
+        offset, size = parts.get_offset(Arc)
+        arcs = parts[offset:offset + size]
+        scores = output[offset:offset + size]
+        score_matrix = _make_score_matrix(len(instance), arcs, scores)
+        heads = chu_liu_edmonds(score_matrix)
 
-                    if self.options.single_root and root != -1:
-                        removed_roots += 1
-                        if score > root_score:
-                            # this token is better scored for root
-                            # attach the previous root candidate to it
-                            instance.output.heads[root] = m
-                        else:
-                            # attach it to the other root
-                            instance.output.heads[m] = root
-                            continue
+        for m, h in enumerate(heads):
+            instance.output.heads[m] = h
+            if h == 0:
+                index = parts.find_arc_index(h, m)
+                score = output[index]
 
+                if self.options.single_root and root != -1:
+                    removed_roots += 1
+                    if score > root_score:
+                        # this token is better scored for root
+                        # attach the previous root candidate to it
+                        instance.output.heads[root] = m
+                        root = m
+                        root_score = score
+                    else:
+                        # attach it to the other root
+                        instance.output.heads[m] = root
+                else:
                     root = m
                     root_score = score
-        else:
-            offset, size = parts.get_offset(LabeledArc)
-            for r in range(offset, offset + size):
-                arc = parts[r]
-                if output[r] >= threshold:
-                    instance.output.heads[arc.modifier] = arc.head
-                    instance.output.relations[arc.modifier] = \
-                        self.dictionary.get_relation_name(arc.label)
-                    if arc.head == 0:
 
-                        if self.options.single_root and root != -1:
-                            removed_roots += 1
-                            if output[r] > root_score:
-                                # this token is better scored for root
-                                instance.output.heads[root] = arc.modifier
-                            else:
-                                # attach it to the other root
-                                instance.output.heads[arc.modifier] = root
-                                continue
-
-                        root = arc.modifier
-                        root_score = output[r]
-        if root == -1:
-            logging.info('Sentence without root')
+            if not self.options.unlabeled:
+                index = parts.find_arc_index(h, m) - offset
+                label = parts.best_labels[index]
+                label_name = self.dictionary.get_relation_name(label)
+                instance.output.relations[m] = label_name
 
         if removed_roots > 0:
             logging.info('%d tokens reassigned to root' % removed_roots)
@@ -899,7 +865,7 @@ def solve_cycle(heads, cycle, scores):
     """
     num_tokens = len(heads)
 
-    # tokens outside this cycle
+    # tokens outside this cycle. 0 (root) is always outside
     tokens_outside = np.array([x for x in range(num_tokens) if x not in cycle])
 
     cycle = np.array(list(cycle))
@@ -926,36 +892,32 @@ def solve_cycle(heads, cycle, scores):
 
     # now, adjust incoming arcs. Each arc from a token v (outside the cycle)
     # to v' (inside) is reweighted as:
-    # s(v, v') = s(v, v') - s(head(v'), v')
+    # s(v, v') = s(v, v') + s(head(v'), v')
     # and then we pick the highest arc for each outside token
     token_inds = np.array([[i] for i in tokens_outside])
     incoming_weights = scores[token_inds, cycle]
 
     for i, token in enumerate(cycle):
         head_to_t = scores[heads[token], token]
-        incoming_weights[:, i] -= head_to_t
+        incoming_weights[:, i] += head_to_t
 
     max_incoming_inds = incoming_weights.argmax(1)
     max_incoming_weights = incoming_weights.max(1)
-    # we leave the + s(c) to the end
-    # max_incoming_weights += cycle_score
-
-    # the token with the maximum weighted incoming edge now changes
-    # its head, thus breaking the cycle
-    new_head_ind = max_incoming_weights.argmax()
-    token_leaving_cycle_ind = max_incoming_inds[new_head_ind]
-
-    # new_head = tokens_outside[new_head_ind]
-    token_leaving_cycle = cycle[token_leaving_cycle_ind]
-    old_head = heads[token_leaving_cycle]
-    # heads[token_leaving_cycle] = new_head
-    scores[old_head, token_leaving_cycle] = -np.Infinity
 
     # analogous to the outgoing weights
     incoming_weights[:] = -np.Infinity
     incoming_weights[np.arange(len(tokens_outside)),
                      max_incoming_inds] = max_incoming_weights
     scores[token_inds, cycle] = incoming_weights
+
+    # the token with the maximum weighted incoming edge now changes
+    # its head, thus breaking the cycle
+    new_head_ind = max_incoming_weights.argmax()
+    token_leaving_cycle_ind = max_incoming_inds[new_head_ind]
+
+    token_leaving_cycle = cycle[token_leaving_cycle_ind]
+    old_head = heads[token_leaving_cycle]
+    scores[old_head, token_leaving_cycle] = -np.Infinity
 
 
 def _check_gold_arc(instance, head, modifier):

@@ -499,7 +499,6 @@ class StructuredClassifier(object):
         self.time_scores = 0
         self.time_gradient = 0
         start = time.time()
-        self.instance_counter = 0
 
         self.total_loss = 0.
         if self.options.training_algorithm in ['perceptron']:
@@ -586,12 +585,6 @@ class StructuredClassifier(object):
 
         return False
 
-    def _reset_part_counts(self):
-        """
-        Reset counters of some statistics of making parts.
-        """
-        pass
-
     def _report_make_parts(self, instances, parts):
         """
         Log some statistics about the calls to make parts in a dataset.
@@ -612,7 +605,6 @@ class StructuredClassifier(object):
         all_gold = []
         all_features = []
 
-        self._reset_part_counts()
         for instance in instances:
             parts, gold_output = self.make_parts(instance)
             if self.options.neural:

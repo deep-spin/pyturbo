@@ -63,6 +63,9 @@ class DependencyParts(list):
         self.labeled_indices = {}
         self.arc_labels = {}
 
+        # the i-th position stores the best label found for arc i
+        self.best_labels = []
+
     def has_type(self, type_):
         """
         Return whether this object stores parts of a particular type.
