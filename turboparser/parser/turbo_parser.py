@@ -27,13 +27,6 @@ class TurboParser(StructuredClassifier):
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.parameters = None
-        self.model_type = options.model_type.split('+')
-        self.has_pruner = bool(options.pruner_path)
-
-        if options.pruner_path:
-            self.pruner = self.load_pruner(options.pruner_path)
-        else:
-            self.pruner = None
 
         if self.options.train:
             for token in special_tokens:
@@ -52,6 +45,19 @@ class TurboParser(StructuredClassifier):
                     num_layers=self.options.num_layers,
                     dropout=self.options.dropout)
                 self.neural_scorer.initialize(model, self.options.learning_rate)
+
+    def _set_options(self):
+        """
+        Set some parameters of the parser determined from its `options`
+        attribute.
+        """
+        self.model_type = self.options.model_type.split('+')
+        self.has_pruner = bool(self.options.pruner_path)
+
+        if self.has_pruner:
+            self.pruner = self.load_pruner(self.options.pruner_path)
+        else:
+            self.pruner = None
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -81,8 +87,6 @@ class TurboParser(StructuredClassifier):
             self.token_dictionary.load(f)
             self.dictionary.load(f)
             self.parameters = pickle.load(f)
-            if model_options.pruner_path:
-                self.pruner = self.load_pruner(model_options.pruner_path)
             if model_options.neural:
                 word_embedding_size = pickle.load(f)
                 tag_embedding_size = pickle.load(f)
@@ -121,6 +125,7 @@ class TurboParser(StructuredClassifier):
 
         # maximum candidate heads per word in the basic pruner, if used
         self.options.pruner_max_heads = model_options.pruner_max_heads
+        self._set_options()
 
     def load_pruner(self, model_path):
         """
