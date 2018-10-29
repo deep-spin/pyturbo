@@ -27,6 +27,7 @@ class TurboParser(StructuredClassifier):
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.parameters = None
+        self._set_options()        
 
         if self.options.train:
             for token in special_tokens:
