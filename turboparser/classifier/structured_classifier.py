@@ -636,6 +636,7 @@ class StructuredClassifier(object):
         :return: a list of arrays with the predicted outputs if return_loss is
             False. If it's True, a tuple with predictions and losses.
         """
+        self.eval_mode()
         if self.options.neural:
             scores = self.neural_scorer.compute_scores(instance_data.instances,
                                                        instance_data.parts)
