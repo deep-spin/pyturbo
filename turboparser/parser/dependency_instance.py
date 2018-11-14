@@ -1,12 +1,35 @@
 from ..classifier.instance import Instance
 
 
+class MultiwordSpan(object):
+    """
+    Class for storing a multiword token, including its text form and text span.
+    """
+    def __init__(self, first, last, form):
+        """
+        Create a multiword token representation. For example, a token as
+
+        9-10	ao	_
+
+        should be instantiated as MultiwordSpan(9, 10, 'ao')
+
+        :param first: The first position of the words included in the multiword
+            token
+        :param last: Same as above, for the last position
+        :param form: The token form as appears in the text
+        """
+        self.first = first
+        self.last = last
+        self.form = form
+
+
 class DependencyInstanceInput(object):
-    def __init__(self, forms, lemmas, tags, morph_tags):
+    def __init__(self, forms, lemmas, tags, morph_tags, multiwords):
         self.forms = forms
         self.lemmas = lemmas
         self.tags = tags
         self.morph_tags = morph_tags
+        self.multiwords = multiwords
 
 
 class DependencyInstanceOutput(object):
