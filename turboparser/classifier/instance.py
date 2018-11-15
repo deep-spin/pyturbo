@@ -17,8 +17,10 @@ class InstanceData(object):
         self.gold_labels = gold_labels
 
     def __getitem__(self, item):
+        features = None if self.features is None else self.features[item]
+        labels = None if self.gold_labels is None else self.gold_labels[item]
         return InstanceData(self.instances[item], self.parts[item],
-                            self.features[item], self.gold_labels[item])
+                            features, labels)
 
     def __len__(self):
         return len(self.instances)
