@@ -204,6 +204,13 @@ class StructuredClassifier(object):
         loss_inner = 0.
         return loss_inner
 
+    def _reset_best_validation_metric(self):
+        """
+        Reset some internal metric to keep track of the best validation
+        performance.
+        """
+        self.best_loss = np.inf
+
     def train(self):
         '''Train with a general online algorithm.'''
         self.preprocess_data()
@@ -211,11 +218,7 @@ class StructuredClassifier(object):
         train_data = self.make_parts_batch(train_instances)
         valid_data = self.make_parts_batch(valid_instances)
         self.parameters = Parameters(use_average=self.options.use_averaging)
-
-        # if self.options.only_supported_features:
-        #     self.make_supported_parameters()
-
-        self.best_loss = np.inf
+        self._reset_best_validation_metric()
         self.lambda_coeff = 1.0 / (self.options.regularization_constant *
                                    float(len(train_instances)))
         for epoch in range(self.options.training_epochs):
@@ -262,25 +265,6 @@ class StructuredClassifier(object):
         toc = time.time()
         logging.info('Time: %f' % (toc - tic))
         return train_instances, valid_instances
-
-    # def make_supported_parameters(self):
-    #     '''Create parameters using only those supported in the gold outputs.
-    #     Build and lock a parameter vector with only supported parameters, by
-    #     looking at the gold outputs in the training data. This is a
-    #     preprocessing stage for training with supported features (flag
-    #     --only_supported_features).'''
-    #     logging.info('Building supported feature set...')
-    #     self.dictionary.stop_growth()
-    #     self.parameters.allow_growth()
-    #     for instance in instances:
-    #         parts, gold_outputs = self.make_parts(instance)
-    #         selected_parts = [True if gold_outputs[r] > 0.5 else False
-    #                           for r in range(len(parts))]
-    #         features = self.make_selected_features(instance, parts,
-    #                                                selected_parts)
-    #         self.touch_parameters(parts, features, selected_parts)
-    #     self.parameters.stop_growth()
-    #     logging.info('Number of features: %d', len(self.parameters))
 
     def _decode_train(self, instance, parts, scores, gold_output,
                       features=None, t=None):
@@ -384,12 +368,19 @@ class StructuredClassifier(object):
 
         return predicted_output, eta
 
+    def _update_task_metrics(self, predicted, gold, instance, parts):
+        """
+        Update task-specific metrics during training.
+        """
+        return
+
     def train_batch(self, instance_data, t):
         '''
         Run one batch of a learning algorithm. If it is an online one, just
         run through each instance.
 
-        :param instance_data: InstanceData object
+        :param instance_data: InstanceData object containing the instances of
+            the batch
         :param t: integer indicating that the batch starts with the t-th
             instance in the dataset
         '''
@@ -443,7 +434,8 @@ class StructuredClassifier(object):
 
                 predicted_output, _ = self._decode_train(
                     instance, parts, instance_scores, gold_output)
-
+                self._update_task_metrics(predicted_output, gold_output,
+                                          instance, parts)
                 all_predictions.append(predicted_output)
 
             # run the gradient step for the whole batch
@@ -487,6 +479,12 @@ class StructuredClassifier(object):
 
         return predictions
 
+    def _reset_task_metrics(self):
+        """
+        Reset counters relative to task-specific training metrics
+        """
+        return
+
     def train_epoch(self, epoch, train_data, valid_data):
         '''Run one epoch of an online algorithm.
 
@@ -501,6 +499,7 @@ class StructuredClassifier(object):
         start = time.time()
 
         self.total_loss = 0.
+        self._reset_task_metrics()
         if self.options.training_algorithm in ['perceptron']:
             self.num_mistakes = 0
             self.num_total = 0
@@ -531,12 +530,13 @@ class StructuredClassifier(object):
 
         valid_start = time.time()
         self.eval_mode()
-        _, validation_losses = self._run_batches(valid_data, 128,
-                                                 return_loss=True)
+        valid_pred, valid_losses = self._run_batches(valid_data, 128,
+                                                     return_loss=True)
+        self._get_task_validation_metrics(valid_data, valid_pred)
         valid_end = time.time()
         time_validation = valid_end - valid_start
         train_loss = self.total_loss / len(train_data)
-        validation_loss = np.array(validation_losses).mean()
+        validation_loss = np.array(valid_losses).mean()
 
         logging.info('Time: %f' % (end - start))
         logging.info('Time to score: %f' % self.time_scores)
@@ -559,11 +559,38 @@ class StructuredClassifier(object):
                 float(len(train_data)) * sq_norm
             logging.info('\t'.join(['Total Train Loss (cost augmented): %f'
                                     % train_loss,
+                                    self._get_task_train_report(),
                                     'Validation Loss: %f' % validation_loss,
+                                    self._get_task_valid_report(),
                                     'Total Reg: %f' % regularization_value,
                                     'Total Loss+Reg: %f' %
                                     (train_loss + regularization_value),
                                     'Squared norm: %f' % sq_norm]))
+
+    def _get_task_train_report(self):
+        """
+        Return task-specific metrics on training data.
+
+        :return: empty string
+        """
+        return ''
+
+    def _get_task_valid_report(self):
+        """
+        Return task-specific metrics on validation data.
+
+        :return: empty string
+        """
+        return ''
+
+    def _get_task_validation_metrics(self, valid_data, valid_pred):
+        """
+        Compute and store internally task-specific validation metrics.
+
+        :param valid_data: InstanceData
+        :param valid_pred: Predicted output
+        """
+        pass
 
     def eval_mode(self):
         """

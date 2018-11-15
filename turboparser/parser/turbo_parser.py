@@ -12,9 +12,11 @@ from .dependency_parts import DependencyParts, Arc, LabeledArc, Grandparent, \
     NextSibling, GrandSibling
 from .dependency_features import DependencyFeatures
 from .dependency_neural_model import DependencyNeuralModel, special_tokens
+
 import numpy as np
 import pickle
 import logging
+from collections import defaultdict
 
 
 class TurboParser(StructuredClassifier):
@@ -127,6 +129,60 @@ class TurboParser(StructuredClassifier):
         # maximum candidate heads per word in the basic pruner, if used
         self.options.pruner_max_heads = model_options.pruner_max_heads
         self._set_options()
+
+    def should_save(self, validation_loss):
+        """
+        Return a bool for whether the model should be saved. This function
+        should be called after running on validation data.
+
+        It returns True if validation UAS increased in the last epoch, False
+        otherwise.
+        """
+        return self._should_save
+
+    def _reset_best_validation_metric(self):
+        """
+        Set the best validation UAS score to 0
+        """
+        self.best_validation_uas = 0
+        self._should_save = False
+
+    def _reset_task_metrics(self):
+        """
+        Reset the accumulated UAS counter
+        """
+        self.accumulated_uas = 0.
+        self.total_tokens = 0
+        self.validation_uas = 0.
+
+    def _get_task_train_report(self):
+        """
+        Return task-specific metrics on training data.
+
+        :return: a string describing naive UAS on training data
+        """
+        uas = self.accumulated_uas / self.total_tokens
+        return 'Naive train UAS: %f' % uas
+
+    def _get_task_valid_report(self):
+        """
+        Return task-specific metrics on validation data.
+
+        :return: a string describing naive UAS on validation data
+        """
+        return 'Naive validation UAS: %f' % self.validation_uas
+
+    def _update_task_metrics(self, predicted, gold, instance, parts):
+        """
+        Update the accumulated UAS count. It sums the UAS for each sentence
+        scaled by its number of tokens; when reporting performance, this value
+        is divided by the total number of tokens seen in all sentences combined.
+        """
+        # UAS doesn't consider the root
+        length = len(instance) - 1
+        uas = get_naive_uas(predicted, gold, parts, length)
+        self.accumulated_uas += length * uas
+        self.total_tokens += length
 
     def load_pruner(self, model_path):
         """
@@ -241,6 +297,9 @@ class TurboParser(StructuredClassifier):
                                                  gold_output)
         if 'gp' in self.model_type:
             self.make_parts_grandparent(instance, parts, gold_output)
+
+        if 'gs' in self.model_type:
+            self.make_parts_grandsibling(instance, parts, gold_output)
 
         if instance.output is not None:
             gold_output = np.array(gold_output)
@@ -615,6 +674,34 @@ class TurboParser(StructuredClassifier):
         parts.set_offset(Arc,
                          num_parts_initial, len(parts) - num_parts_initial)
 
+    def _get_task_validation_metrics(self, valid_data, valid_pred):
+        """
+        Compute and store internally validation UAS.
+
+        :param valid_data: InstanceData
+        :param valid_pred: Predicted output
+        """
+        accumulated_uas = 0.
+        total_tokens = 0
+
+        for i in range(len(valid_data)):
+            instance = valid_data.instances[i]
+            parts = valid_data.parts[i]
+            gold = valid_data.gold_labels[i]
+
+            # exclude root
+            length = len(instance) - 1
+            uas = get_naive_uas(valid_pred[i], gold, parts, length)
+            accumulated_uas += uas * length
+            total_tokens += length
+
+        self.validation_uas = accumulated_uas / total_tokens
+        if self.validation_uas > self.best_validation_uas:
+            self.best_validation_uas = self.validation_uas
+            self._should_save = True
+        else:
+            self._should_save = False
+
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
             return self.enforce_projective_graph(instance, arcs)
@@ -943,3 +1030,38 @@ def _check_gold_arc(instance, head, modifier):
     if instance.get_head(modifier) == head:
         return True
     return False
+
+
+def get_naive_uas(predicted, gold_output, parts, length):
+    """
+    Compute the UAS (unlabeled accuracy score) naively, without considering tree
+    constraints. It just takes the highest scoring head for each token.
+
+    :param predicted: numpy array with scores for each part (can also be the
+        decoder output)
+    :param gold_output: same as predicted, with gold data. This
+    :param parts: DependencyParts
+    :param length: length of the sentence, excluding root
+    :return:
+    """
+    # length + 1 to match the modifier indices
+    head_per_modifier = np.zeros(length + 1, np.int)
+    max_per_modifier = np.zeros(length + 1, np.float)
+    hits = np.zeros(length + 1, np.float)
+
+    for i, arc in parts.iterate_over_type(Arc, return_index=True):
+        m = arc.modifier
+        score = predicted[i]
+        if score < max_per_modifier[m]:
+            continue
+
+        max_per_modifier[m] = score
+        head_per_modifier[m] = arc.head
+        if gold_output[i] == 1:
+            hits[m] = 1
+        else:
+            hits[m] = 0
+
+    # exclude root
+    uas = hits[1:].mean()
+    return uas

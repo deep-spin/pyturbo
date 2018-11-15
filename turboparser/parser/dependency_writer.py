@@ -31,7 +31,7 @@ class DependencyWriter(Writer):
                     multiword = None
                 else:
                     multiword = multiwords[multiword_idx]
-            
+
             line = '\t'.join([str(i),
                               instance.input.forms[i],
                               instance.input.lemmas[i],
