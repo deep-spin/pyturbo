@@ -130,9 +130,13 @@ class TokenDictionary(Dictionary):
     def get_shape_id(self, shape):
         return self.shape_alphabet.lookup(shape)
 
-    def initialize(self, reader):
+    def initialize(self, reader, word_dict=None):
         """
         Initializes the dictionary with indices for word forms and tags.
+
+        :param reader: a subclass of Reader
+        :param word_dict: optional dictionary mapping words to indices, in case
+            pre-trained embeddings are used.
         """
         logging.info('Creating token dictionary...')
 
@@ -142,27 +146,12 @@ class TokenDictionary(Dictionary):
         tag_counts = []
         morph_tag_counts = []
 
-        for name in self.special_symbols.names:
-            for alphabet in [self.form_alphabet,
-                             self.form_lower_alphabet,
-                             self.lemma_alphabet,
-                             self.prefix_alphabet,
-                             self.suffix_alphabet,
-                             self.tag_alphabet,
-                             self.morph_tag_alphabet]:
-                alphabet.insert(name)
-            for counts in [form_counts,
-                           form_lower_counts,
-                           lemma_counts,
-                           tag_counts,
-                           morph_tag_counts]:
-                counts.append(-1)
-
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
         with reader.open(self.classifier.options.training_path) as r:
             for instance in r:
                 for i in range(len(instance)):
+
                     # Add form to alphabet.
                     form = instance.get_form(i)
                     form_lower = form.lower()
@@ -210,6 +199,22 @@ class TokenDictionary(Dictionary):
                             morph_tag_counts.append(1)
                         else:
                             morph_tag_counts[id] += 1
+
+        for name in self.special_symbols.names:
+            for alphabet in [self.form_alphabet,
+                             self.form_lower_alphabet,
+                             self.lemma_alphabet,
+                             self.prefix_alphabet,
+                             self.suffix_alphabet,
+                             self.tag_alphabet,
+                             self.morph_tag_alphabet]:
+                alphabet.insert(name)
+            for counts in [form_counts,
+                           form_lower_counts,
+                           lemma_counts,
+                           tag_counts,
+                           morph_tag_counts]:
+                counts.append(-1)
 
         # Now adjust the cutoffs if necessary.
         for label, alphabet, counts, cutoff, max_length in \

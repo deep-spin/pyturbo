@@ -15,7 +15,7 @@ class DependencyNeuralModel(nn.Module):
     def __init__(self,
                  token_dictionary,
                  dependency_dictionary,
-                 word_embedding_size,
+                 word_embeddings,
                  tag_embedding_size,
                  distance_embedding_size,
                  rnn_size,
@@ -23,7 +23,7 @@ class DependencyNeuralModel(nn.Module):
                  num_layers,
                  dropout):
         super(DependencyNeuralModel, self).__init__()
-        self.word_embedding_size = word_embedding_size
+        # self.word_embedding_size = word_embedding_size
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
@@ -34,8 +34,9 @@ class DependencyNeuralModel(nn.Module):
         self.padding = token_dictionary.token_padding
         self.on_gpu = torch.cuda.is_available()
 
-        self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
-                                            word_embedding_size)
+        # self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
+        #                                     word_embedding_size)
+        self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings)
 
         if self.tag_embedding_size:
             self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
@@ -52,6 +53,7 @@ class DependencyNeuralModel(nn.Module):
             self.distance_bins = None
             self.distance_embeddings = None
 
+        word_embedding_size = word_embeddings.shape[1]
         input_size = word_embedding_size + tag_embedding_size
         self.rnn = nn.LSTM(
             input_size=input_size,

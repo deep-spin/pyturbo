@@ -78,8 +78,11 @@ class DependencyOptions(Options):
                             default=10,
                             help="""Maximum number of possible head words for a
                             given word, in basic pruning.""")
-        parser.add_argument('--embedding_size', type=int, default=100,
-                            help='Size of word embeddings')
+        parser.add_argument('--embeddings', help="""File with text embeddings,
+                            optionally xzipped.  
+                            First line must have number of words and number 
+                            of dimensions; each other line must have a word
+                            followed by the values of its vector.""")
         parser.add_argument('--tag_embedding_size', type=int, default=20,
                             help='Size of tag embeddings')
         parser.add_argument('--distance_embedding_size', type=int, default=20,
@@ -144,7 +147,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.pruner_max_heads = args['pruner_max_heads']
         self.single_root = args['single_root']
 
-        self.embedding_size = args['embedding_size']
+        self.embeddings = args['embeddings']
         self.tag_embedding_size = args['tag_embedding_size']
         self.distance_embedding_size = args['distance_embedding_size']
         self.rnn_size = args['rnn_size']
