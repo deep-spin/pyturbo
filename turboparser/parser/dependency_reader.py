@@ -1,9 +1,17 @@
-from ..classifier.reader import AuxiliaryReader
+from ..classifier.reader import AuxiliaryReader, Reader
 from .dependency_instance import DependencyInstance, \
     DependencyInstanceInput, DependencyInstanceOutput, MultiwordSpan
 
 
-class DependencyReader(AuxiliaryReader):
+class DependencyReader(Reader):
+    """
+    Reader class for reading dependency trees from conllu files.
+    """
+    def __init__(self):
+        super(DependencyReader, self).__init__(AuxiliaryDependencyReader)
+
+
+class AuxiliaryDependencyReader(AuxiliaryReader):
 
     def __next__(self):
         sentence_fields = []

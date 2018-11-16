@@ -1,6 +1,5 @@
 from ..classifier.structured_classifier import StructuredClassifier
 from ..classifier.neural_scorer import NeuralScorer
-from ..classifier.reader import Reader
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder
@@ -16,7 +15,6 @@ from .dependency_neural_model import DependencyNeuralModel, special_tokens
 import numpy as np
 import pickle
 import logging
-from collections import defaultdict
 
 
 class TurboParser(StructuredClassifier):
@@ -25,7 +23,7 @@ class TurboParser(StructuredClassifier):
         StructuredClassifier.__init__(self, options)
         self.token_dictionary = TokenDictionary(self)
         self.dictionary = DependencyDictionary(self)
-        self.reader = Reader(DependencyReader)
+        self.reader = DependencyReader()
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.parameters = None
