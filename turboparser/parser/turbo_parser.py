@@ -1,5 +1,6 @@
 from ..classifier.structured_classifier import StructuredClassifier
 from ..classifier.neural_scorer import NeuralScorer
+from ..classifier import utils
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder
@@ -10,7 +11,7 @@ from .token_dictionary import TokenDictionary
 from .dependency_parts import DependencyParts, Arc, LabeledArc, Grandparent, \
     NextSibling, GrandSibling
 from .dependency_features import DependencyFeatures
-from .dependency_neural_model import DependencyNeuralModel, special_tokens
+from .dependency_neural_model import DependencyNeuralModel
 
 import numpy as np
 import pickle
@@ -30,14 +31,15 @@ class TurboParser(StructuredClassifier):
         self._set_options()        
 
         if self.options.train:
-            for token in special_tokens:
-                self.token_dictionary.add_special_symbol(token)
-            self.token_dictionary.initialize(self.reader)
+            word_indices, embeddings = self._load_embeddings()
+            self.token_dictionary.initialize(
+                self.reader, self.options.form_case_sensitive, word_indices)
+            embeddings = self._update_embeddings(embeddings)
             self.dictionary.create_relation_dictionary(self.reader)
+
             if self.options.neural:
                 model = DependencyNeuralModel(
-                    self.token_dictionary, self.dictionary,
-                    word_embedding_size=self.options.embedding_size,
+                    self.token_dictionary, self.dictionary, embeddings,
                     tag_embedding_size=self.options.tag_embedding_size,
                     distance_embedding_size=self.options.
                     distance_embedding_size,
@@ -46,6 +48,36 @@ class TurboParser(StructuredClassifier):
                     num_layers=self.options.num_layers,
                     dropout=self.options.dropout)
                 self.neural_scorer.initialize(model, self.options.learning_rate)
+
+    def _load_embeddings(self):
+        """
+        Load word embeddings and dictionary. If they are not used, return both
+        as None.
+
+        :return: word dictionary, numpy embedings
+        """
+        if self.options.embeddings is not None:
+            words, embeddings = utils.read_embeddings(self.options.embeddings)
+        else:
+            words = None
+            embeddings = None
+
+        return words, embeddings
+
+    def _update_embeddings(self, embeddings):
+        """
+        Update the embedding matrix creating new ones if needed by the token
+        dictionary.
+        """
+        if embeddings is not None:
+            num_new_words = self.token_dictionary.get_num_forms() - \
+                            len(embeddings)
+            dim = embeddings.shape[1]
+            new_vectors = np.random.normal(embeddings.mean(), embeddings.std(),
+                                           [num_new_words, dim])
+            embeddings = np.concatenate([embeddings, new_vectors])
+
+        return embeddings
 
     def _set_options(self):
         """

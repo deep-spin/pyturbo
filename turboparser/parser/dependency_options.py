@@ -23,8 +23,7 @@ class DependencyOptions(Options):
                             help='Length of prefixes')
         parser.add_argument('--suffix_length', type=int, default=4,
                             help='Length of suffixes')
-        parser.add_argument('--form_case_sensitive', action='store_const',
-                            default=0, const=1,
+        parser.add_argument('--form_case_sensitive', action='store_true',
                             help='Distinguish upper/lower case of word forms.')
 
         # Parser options.
@@ -135,7 +134,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.morph_tag_cutoff = args['morph_tag_cutoff']
         self.prefix_length = args['prefix_length']
         self.suffix_length = args['suffix_length']
-        self.form_case_sensitive = bool(args['form_case_sensitive'])
+        self.form_case_sensitive = args['form_case_sensitive']
 
         self.model_type = args['model_type']
         self.unlabeled = bool(args['unlabeled'])

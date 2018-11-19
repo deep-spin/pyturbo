@@ -26,40 +26,42 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
             if not token_dictionary.classifier.options.form_case_sensitive:
                 form = form_lower
             id = token_dictionary.get_form_id(form)
-            assert id < 0xffff
+            # assert id < 0xffff
             if id < 0:
                 id = token_dictionary.token_unknown
             self.forms[i] = id
 
             id = token_dictionary.get_form_lower_id(form_lower)
-            assert id < 0xffff
+            # assert id < 0xffff
             if id < 0:
                 id = token_dictionary.token_unknown
             self.forms_lower[i] = id
 
-            # Lemma.
-            lemma = input.lemmas[i]
-            id = token_dictionary.get_form_id(form)
-            assert id < 0xffff
-            if id < 0:
-                id = token_dictionary.token_unknown
-            self.lemmas[i] = id
+            embedding_id
 
-            # Prefix.
-            prefix = form[:token_dictionary.classifier.options.prefix_length]
-            id = token_dictionary.get_prefix_id(prefix)
-            assert id < 0xffff
-            if id < 0:
-                id = token_dictionary.token_unknown
-            self.prefixes[i] = id
-
-            # Suffix.
-            suffix = form[-token_dictionary.classifier.options.suffix_length:]
-            id = token_dictionary.get_suffix_id(suffix)
-            assert id < 0xffff
-            if id < 0:
-                id = token_dictionary.token_unknown
-            self.suffixes[i] = id
+            # # Lemma.
+            # lemma = input.lemmas[i]
+            # id = token_dictionary.get_form_id(form)
+            # assert id < 0xffff
+            # if id < 0:
+            #     id = token_dictionary.token_unknown
+            # self.lemmas[i] = id
+            #
+            # # Prefix.
+            # prefix = form[:token_dictionary.classifier.options.prefix_length]
+            # id = token_dictionary.get_prefix_id(prefix)
+            # assert id < 0xffff
+            # if id < 0:
+            #     id = token_dictionary.token_unknown
+            # self.prefixes[i] = id
+            #
+            # # Suffix.
+            # suffix = form[-token_dictionary.classifier.options.suffix_length:]
+            # id = token_dictionary.get_suffix_id(suffix)
+            # assert id < 0xffff
+            # if id < 0:
+            #     id = token_dictionary.token_unknown
+            # self.suffixes[i] = id
 
             # POS tag.
             tag = input.tags[i]

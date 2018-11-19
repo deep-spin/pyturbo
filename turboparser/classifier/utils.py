@@ -53,5 +53,5 @@ def read_embeddings(path):
             vector = np.array([float(field) for field in fields[1:]])
             vectors.append(vector)
 
-    embeddings = np.array(vectors)
+    embeddings = np.array(vectors, dtype=np.float32)
     return words, embeddings

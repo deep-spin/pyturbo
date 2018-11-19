@@ -36,6 +36,7 @@ class DependencyNeuralModel(nn.Module):
 
         # self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
         #                                     word_embedding_size)
+        word_embeddings = torch.tensor(word_embeddings, dtype=torch.float32)
         self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings)
 
         if self.tag_embedding_size:

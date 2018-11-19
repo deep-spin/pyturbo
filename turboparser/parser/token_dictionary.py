@@ -8,6 +8,7 @@ START = '<s>'
 STOP = '</s>'
 PADDING = '_PADDING_'
 
+
 class TokenDictionary(Dictionary):
     '''A dictionary for storing token information.'''
     def __init__(self, classifier=None):
@@ -135,7 +136,7 @@ class TokenDictionary(Dictionary):
     def get_shape_id(self, shape):
         return self.shape_alphabet.lookup(shape)
 
-    def initialize(self, reader, word_dict=None):
+    def initialize(self, reader, case_sensitive, word_dict=None):
         """
         Initializes the dictionary with indices for word forms and tags.
 
@@ -160,24 +161,26 @@ class TokenDictionary(Dictionary):
             for instance in r:
                 for i in range(len(instance)):
 
-                    if word_dict is None:
-                        # Add form to alphabet.
-                        form = instance.get_form(i)
-                        form_lower = form.lower()
-                        if not self.classifier.options.form_case_sensitive:
-                            form = form_lower
-                        id = self.form_alphabet.insert(form)
-                        if id >= len(form_counts):
-                            form_counts.append(1)
-                        else:
-                            form_counts[id] += 1
+                    # even if word_dict is provided, we add words that may be
+                    # absent in it
 
-                        # Add lower-case form to alphabet.
-                        id = self.form_lower_alphabet.insert(form_lower)
-                        if id >= len(form_lower_counts):
-                            form_lower_counts.append(1)
-                        else:
-                            form_lower_counts[id] += 1
+                    # Add form to alphabet.
+                    form = instance.get_form(i)
+                    form_lower = form.lower()
+                    if not case_sensitive:
+                        form = form_lower
+                    id = self.form_alphabet.insert(form)
+                    if id >= len(form_counts):
+                        form_counts.append(1)
+                    else:
+                        form_counts[id] += 1
+
+                    # Add lower-case form to alphabet.
+                    id = self.form_lower_alphabet.insert(form_lower)
+                    if id >= len(form_lower_counts):
+                        form_lower_counts.append(1)
+                    else:
+                        form_lower_counts[id] += 1
 
                     # Add lemma to alphabet.
                     id = self.lemma_alphabet.insert(instance.get_lemma(i))
@@ -225,34 +228,34 @@ class TokenDictionary(Dictionary):
                            morph_tag_counts]:
                 counts.append(-1)
 
-        # Now adjust the cutoffs if necessary.
-        for label, alphabet, counts, cutoff, max_length in \
-            zip(['form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
-                [self.form_alphabet, self.form_lower_alphabet,
-                 self.lemma_alphabet, self.tag_alphabet,
-                 self.morph_tag_alphabet],
-                [form_counts, form_lower_counts, lemma_counts, tag_counts,
-                 morph_tag_counts],
-                [self.classifier.options.form_cutoff,
-                 self.classifier.options.form_cutoff,
-                 self.classifier.options.lemma_cutoff,
-                 self.classifier.options.tag_cutoff,
-                 self.classifier.options.morph_tag_cutoff],
-                [self.max_forms, self.max_forms, self.max_lemmas,
-                 self.max_tags, self.max_morph_tags]):
-            names = alphabet.names.copy()
-            while True:
-                alphabet.clear()
-                for name in self.special_symbols.names:
-                    alphabet.insert(name)
-                for name, count in zip(names, counts):
-                    if count > cutoff:
-                        alphabet.insert(name)
-                if len(alphabet) < max_length:
-                    break
-                cutoff += 1
-                logging.info('Incrementing %s cutoff to %d...' % (label, cutoff))
-            alphabet.stop_growth()
+        # # Now adjust the cutoffs if necessary.
+        # for label, alphabet, counts, cutoff, max_length in \
+        #     zip(['form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
+        #         [self.form_alphabet, self.form_lower_alphabet,
+        #          self.lemma_alphabet, self.tag_alphabet,
+        #          self.morph_tag_alphabet],
+        #         [form_counts, form_lower_counts, lemma_counts, tag_counts,
+        #          morph_tag_counts],
+        #         [self.classifier.options.form_cutoff,
+        #          self.classifier.options.form_cutoff,
+        #          self.classifier.options.lemma_cutoff,
+        #          self.classifier.options.tag_cutoff,
+        #          self.classifier.options.morph_tag_cutoff],
+        #         [self.max_forms, self.max_forms, self.max_lemmas,
+        #          self.max_tags, self.max_morph_tags]):
+        #     names = alphabet.names.copy()
+        #     while True:
+        #         alphabet.clear()
+        #         for name in self.special_symbols.names:
+        #             alphabet.insert(name)
+        #         for name, count in zip(names, counts):
+        #             if count > cutoff:
+        #                 alphabet.insert(name)
+        #         if len(alphabet) < max_length:
+        #             break
+        #         cutoff += 1
+        #         logging.info('Incrementing %s cutoff to %d...' % (label, cutoff))
+        #     alphabet.stop_growth()
 
         logging.info('Number of forms: %d' % len(self.form_alphabet))
         logging.info('Number of lower-case forms: %d' %
