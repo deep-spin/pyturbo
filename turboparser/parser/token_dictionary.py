@@ -3,6 +3,11 @@ from ..classifier.dictionary import Dictionary
 import pickle
 import logging
 
+UNKNOWN = '_UNKNOWN_'
+START = '<s>'
+STOP = '</s>'
+PADDING = '_PADDING_'
+
 class TokenDictionary(Dictionary):
     '''A dictionary for storing token information.'''
     def __init__(self, classifier=None):
@@ -19,10 +24,10 @@ class TokenDictionary(Dictionary):
 
         # Special symbols.
         self.special_symbols = Alphabet()
-        self.token_unknown = self.special_symbols.insert('_UNKNOWN_')
-        self.token_start = self.special_symbols.insert('_START_')
-        self.token_stop = self.special_symbols.insert('_STOP_')
-        self.token_padding = self.special_symbols.insert('_PADDING_')
+        self.token_unknown = self.special_symbols.insert(UNKNOWN)
+        self.token_start = self.special_symbols.insert(START)
+        self.token_stop = self.special_symbols.insert(STOP)
+        self.token_padding = self.special_symbols.insert(PADDING)
 
         # Maximum alphabet sizes.
         self.max_forms = 0xffff
@@ -146,29 +151,33 @@ class TokenDictionary(Dictionary):
         tag_counts = []
         morph_tag_counts = []
 
+        if word_dict is not None:
+            self.form_alphabet.update(word_dict)
+
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
         with reader.open(self.classifier.options.training_path) as r:
             for instance in r:
                 for i in range(len(instance)):
 
-                    # Add form to alphabet.
-                    form = instance.get_form(i)
-                    form_lower = form.lower()
-                    if not self.classifier.options.form_case_sensitive:
-                        form = form_lower
-                    id = self.form_alphabet.insert(form)
-                    if id >= len(form_counts):
-                        form_counts.append(1)
-                    else:
-                        form_counts[id] += 1
+                    if word_dict is None:
+                        # Add form to alphabet.
+                        form = instance.get_form(i)
+                        form_lower = form.lower()
+                        if not self.classifier.options.form_case_sensitive:
+                            form = form_lower
+                        id = self.form_alphabet.insert(form)
+                        if id >= len(form_counts):
+                            form_counts.append(1)
+                        else:
+                            form_counts[id] += 1
 
-                    # Add lower-case form to alphabet.
-                    id = self.form_lower_alphabet.insert(form_lower)
-                    if id >= len(form_lower_counts):
-                        form_lower_counts.append(1)
-                    else:
-                        form_lower_counts[id] += 1
+                        # Add lower-case form to alphabet.
+                        id = self.form_lower_alphabet.insert(form_lower)
+                        if id >= len(form_lower_counts):
+                            form_lower_counts.append(1)
+                        else:
+                            form_lower_counts[id] += 1
 
                     # Add lemma to alphabet.
                     id = self.lemma_alphabet.insert(instance.get_lemma(i))
