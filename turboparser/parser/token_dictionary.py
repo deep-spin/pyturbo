@@ -120,6 +120,12 @@ class TokenDictionary(Dictionary):
     def get_num_tags(self):
         return len(self.tag_alphabet)
 
+    def get_embedding_id(self, form):
+        id_ = self.embedding_alphabet.lookup(form)
+        if id_ >= 0:
+            return id_
+        return self.embedding_alphabet.lookup(UNKNOWN)
+
     def get_form_id(self, form):
         id_ = self.form_alphabet.lookup(form)
         if id_ >= 0:
