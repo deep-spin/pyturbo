@@ -289,7 +289,9 @@ class TokenDictionary(Dictionary):
             alphabet.stop_growth()
 
         if word_dict is not None:
-            self.embedding_alphabet.update(word_dict)
+            word_list = sorted(word_dict, key=lambda w: word_dict[w])
+            for word in word_list:
+                self.embedding_alphabet.insert(word)
 
         # update the embedding vocabulary with new words found in training data
         dataset_words = self.form_alphabet.keys()
