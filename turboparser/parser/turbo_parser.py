@@ -38,6 +38,9 @@ class TurboParser(StructuredClassifier):
             self.dictionary.create_relation_dictionary(self.reader)
 
             if self.options.neural:
+                if embeddings is None:
+                    embeddings = self._create_random_embeddings()
+
                 model = DependencyNeuralModel(
                     self.token_dictionary, self.dictionary, embeddings,
                     tag_embedding_size=self.options.tag_embedding_size,
@@ -48,6 +51,15 @@ class TurboParser(StructuredClassifier):
                     num_layers=self.options.num_layers,
                     dropout=self.options.dropout)
                 self.neural_scorer.initialize(model, self.options.learning_rate)
+
+    def _create_random_embeddings(self):
+        """
+        Create random embeddings for the vocabulary of the token dict.
+        """
+        num_words = self.token_dictionary.get_num_embeddings()
+        dim = self.options.embedding_size
+        embeddings = np.random.normal(0, 0.1, [num_words, dim])
+        return embeddings
 
     def _load_embeddings(self):
         """
@@ -70,7 +82,7 @@ class TurboParser(StructuredClassifier):
         dictionary.
         """
         if embeddings is not None:
-            num_new_words = self.token_dictionary.get_num_forms() - \
+            num_new_words = self.token_dictionary.get_num_embeddings() - \
                             len(embeddings)
             dim = embeddings.shape[1]
             new_vectors = np.random.normal(embeddings.mean(), embeddings.std(),

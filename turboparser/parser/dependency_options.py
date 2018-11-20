@@ -82,6 +82,9 @@ class DependencyOptions(Options):
                             First line must have number of words and number 
                             of dimensions; each other line must have a word
                             followed by the values of its vector.""")
+        parser.add_argument('--embedding_size', help="""If an embeddings file is
+                            not given, specify the size of randomly generated 
+                            embeddings.""", default=100, type=int)
         parser.add_argument('--tag_embedding_size', type=int, default=20,
                             help='Size of tag embeddings')
         parser.add_argument('--distance_embedding_size', type=int, default=20,
@@ -147,6 +150,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         self.single_root = args['single_root']
 
         self.embeddings = args['embeddings']
+        self.embedding_size = args['embedding_size']
         self.tag_embedding_size = args['tag_embedding_size']
         self.distance_embedding_size = args['distance_embedding_size']
         self.rnn_size = args['rnn_size']

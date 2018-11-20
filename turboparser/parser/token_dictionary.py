@@ -14,6 +14,7 @@ class TokenDictionary(Dictionary):
     def __init__(self, classifier=None):
         Dictionary.__init__(self)
         self.classifier = classifier
+        self.embedding_alphabet = Alphabet()
         self.form_alphabet = Alphabet()
         self.form_lower_alphabet = Alphabet()
         self.lemma_alphabet = Alphabet()
@@ -46,6 +47,7 @@ class TokenDictionary(Dictionary):
         self.special_symbols.insert(symbol)
 
     def save(self, file):
+        pickle.dump(self.embedding_alphabet, file)
         pickle.dump(self.form_alphabet, file)
         pickle.dump(self.form_lower_alphabet, file)
         pickle.dump(self.lemma_alphabet, file)
@@ -65,6 +67,7 @@ class TokenDictionary(Dictionary):
         pickle.dump(self.max_morph_tags, file)
 
     def load(self, file):
+        self.embedding_alphabet = pickle.load(file)
         self.form_alphabet = pickle.load(file)
         self.form_lower_alphabet = pickle.load(file)
         self.lemma_alphabet = pickle.load(file)
@@ -84,6 +87,7 @@ class TokenDictionary(Dictionary):
         self.max_morph_tags = pickle.load(file)
 
     def allow_growth(self):
+        self.embedding_alphabet.allow_growth()
         self.form_alphabet.allow_growth()
         self.form_lower_alphabet.allow_growth()
         self.lemma_alphabet.allow_growth()
@@ -94,6 +98,7 @@ class TokenDictionary(Dictionary):
         self.shape_alphabet.allow_growth()
 
     def stop_growth(self):
+        self.embedding_alphabet.stop_growth()
         self.form_alphabet.stop_growth()
         self.form_lower_alphabet.stop_growth()
         self.lemma_alphabet.stop_growth()
@@ -102,6 +107,9 @@ class TokenDictionary(Dictionary):
         self.morph_tag_alphabet.stop_growth()
         self.tag_alphabet.stop_growth()
         self.shape_alphabet.stop_growth()
+
+    def get_num_embeddings(self):
+        return len(self.embedding_alphabet)
 
     def get_num_forms(self):
         return len(self.form_alphabet)
@@ -113,28 +121,52 @@ class TokenDictionary(Dictionary):
         return len(self.tag_alphabet)
 
     def get_form_id(self, form):
-        return self.form_alphabet.lookup(form)
+        id_ = self.form_alphabet.lookup(form)
+        if id_ >= 0:
+            return id_
+        return self.form_alphabet.lookup(UNKNOWN)
 
     def get_form_lower_id(self, form_lower):
-        return self.form_lower_alphabet.lookup(form_lower)
+        id_ = self.form_lower_alphabet.lookup(form_lower)
+        if id_ >= 0:
+            return id_
+        return self.form_lower_alphabet.lookup(UNKNOWN)
 
     def get_lemma_id(self, lemma):
-        return self.lemma_alphabet.lookup(lemma)
+        id_ = self.lemma_alphabet.lookup(lemma)
+        if id_ >= 0:
+            return id_
+        return self.lemma_alphabet.lookup(UNKNOWN)
 
     def get_prefix_id(self, prefix):
-        return self.prefix_alphabet.lookup(prefix)
+        id_ = self.prefix_alphabet.lookup(prefix)
+        if id_ >= 0:
+            return id_
+        return self.prefix_alphabet.lookup(UNKNOWN)
 
     def get_suffix_id(self, suffix):
-        return self.suffix_alphabet.lookup(suffix)
+        id_ = self.suffix_alphabet.lookup(suffix)
+        if id_ >= 0:
+            return id_
+        return self.suffix_alphabet.lookup(UNKNOWN)
 
     def get_tag_id(self, tag):
-        return self.tag_alphabet.lookup(tag)
+        id_ = self.tag_alphabet.lookup(tag)
+        if id_ >= 0:
+            return id_
+        return self.tag_alphabet.lookup(UNKNOWN)
 
     def get_morph_tag_id(self, morph_tag):
-        return self.morph_tag_alphabet.lookup(morph_tag)
+        id_ = self.morph_tag_alphabet.lookup(morph_tag)
+        if id_ >= 0:
+            return id_
+        return self.morph_tag_alphabet.lookup(UNKNOWN)
 
     def get_shape_id(self, shape):
-        return self.shape_alphabet.lookup(shape)
+        id_ = self.shape_alphabet.lookup(shape)
+        if id_ >= 0:
+            return id_
+        return self.shape_alphabet.lookup(UNKNOWN)
 
     def initialize(self, reader, case_sensitive, word_dict=None):
         """
@@ -152,18 +184,27 @@ class TokenDictionary(Dictionary):
         tag_counts = []
         morph_tag_counts = []
 
-        if word_dict is not None:
-            self.form_alphabet.update(word_dict)
+        for name in self.special_symbols.names:
+            for alphabet in [self.form_alphabet,
+                             self.form_lower_alphabet,
+                             self.lemma_alphabet,
+                             self.prefix_alphabet,
+                             self.suffix_alphabet,
+                             self.tag_alphabet,
+                             self.morph_tag_alphabet]:
+                alphabet.insert(name)
+            for counts in [form_counts,
+                           form_lower_counts,
+                           lemma_counts,
+                           tag_counts,
+                           morph_tag_counts]:
+                counts.append(-1)
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
         with reader.open(self.classifier.options.training_path) as r:
             for instance in r:
                 for i in range(len(instance)):
-
-                    # even if word_dict is provided, we add words that may be
-                    # absent in it
-
                     # Add form to alphabet.
                     form = instance.get_form(i)
                     form_lower = form.lower()
@@ -212,51 +253,48 @@ class TokenDictionary(Dictionary):
                         else:
                             morph_tag_counts[id] += 1
 
-        for name in self.special_symbols.names:
-            for alphabet in [self.form_alphabet,
-                             self.form_lower_alphabet,
-                             self.lemma_alphabet,
-                             self.prefix_alphabet,
-                             self.suffix_alphabet,
-                             self.tag_alphabet,
-                             self.morph_tag_alphabet]:
-                alphabet.insert(name)
-            for counts in [form_counts,
-                           form_lower_counts,
-                           lemma_counts,
-                           tag_counts,
-                           morph_tag_counts]:
-                counts.append(-1)
+        # Now adjust the cutoffs if necessary.
+        for label, alphabet, counts, cutoff, max_length in \
+            zip(['form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
+                [self.form_alphabet, self.form_lower_alphabet,
+                 self.lemma_alphabet, self.tag_alphabet,
+                 self.morph_tag_alphabet],
+                [form_counts, form_lower_counts, lemma_counts, tag_counts,
+                 morph_tag_counts],
+                [self.classifier.options.form_cutoff,
+                 self.classifier.options.form_cutoff,
+                 self.classifier.options.lemma_cutoff,
+                 self.classifier.options.tag_cutoff,
+                 self.classifier.options.morph_tag_cutoff],
+                [self.max_forms, self.max_forms, self.max_lemmas,
+                 self.max_tags, self.max_morph_tags]):
+            names = alphabet.names.copy()
+            while True:
+                alphabet.clear()
+                for name in self.special_symbols.names:
+                    alphabet.insert(name)
+                for name, count in zip(names, counts):
+                    if count >= cutoff:
+                        alphabet.insert(name)
+                if len(alphabet) < max_length:
+                    break
+                cutoff += 1
+                logging.info('Incrementing %s cutoff to %d...' % (label, cutoff))
+            alphabet.stop_growth()
 
-        # # Now adjust the cutoffs if necessary.
-        # for label, alphabet, counts, cutoff, max_length in \
-        #     zip(['form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
-        #         [self.form_alphabet, self.form_lower_alphabet,
-        #          self.lemma_alphabet, self.tag_alphabet,
-        #          self.morph_tag_alphabet],
-        #         [form_counts, form_lower_counts, lemma_counts, tag_counts,
-        #          morph_tag_counts],
-        #         [self.classifier.options.form_cutoff,
-        #          self.classifier.options.form_cutoff,
-        #          self.classifier.options.lemma_cutoff,
-        #          self.classifier.options.tag_cutoff,
-        #          self.classifier.options.morph_tag_cutoff],
-        #         [self.max_forms, self.max_forms, self.max_lemmas,
-        #          self.max_tags, self.max_morph_tags]):
-        #     names = alphabet.names.copy()
-        #     while True:
-        #         alphabet.clear()
-        #         for name in self.special_symbols.names:
-        #             alphabet.insert(name)
-        #         for name, count in zip(names, counts):
-        #             if count > cutoff:
-        #                 alphabet.insert(name)
-        #         if len(alphabet) < max_length:
-        #             break
-        #         cutoff += 1
-        #         logging.info('Incrementing %s cutoff to %d...' % (label, cutoff))
-        #     alphabet.stop_growth()
+        if word_dict is not None:
+            self.embedding_alphabet.update(word_dict)
 
+        # update the embedding vocabulary with new words found in training data
+        dataset_words = self.form_alphabet.keys()
+        embedding_words = self.embedding_alphabet.keys()
+        new_words = dataset_words - embedding_words
+        for new_word in new_words:
+            self.embedding_alphabet.insert(new_word)
+        self.embedding_alphabet.stop_growth()
+
+        logging.info('Number of embedding forms: %d' %
+                     len(self.embedding_alphabet))
         logging.info('Number of forms: %d' % len(self.form_alphabet))
         logging.info('Number of lower-case forms: %d' %
                      len(self.form_lower_alphabet))

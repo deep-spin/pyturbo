@@ -1,9 +1,11 @@
 from .dependency_instance import DependencyInstance, \
     DependencyInstanceInput, DependencyInstanceOutput
+from .token_dictionary import UNKNOWN
 
 
 class DependencyInstanceNumericInput(DependencyInstanceInput):
     def __init__(self, input, dictionary):
+        self.embedding_ids = [-1] * len(input.forms)
         self.forms = [-1] * len(input.forms)
         self.forms_lower = [-1] * len(input.forms)
         self.lemmas = [-1] * len(input.lemmas)
@@ -26,49 +28,38 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
             if not token_dictionary.classifier.options.form_case_sensitive:
                 form = form_lower
             id = token_dictionary.get_form_id(form)
-            # assert id < 0xffff
-            if id < 0:
-                id = token_dictionary.token_unknown
+            assert id < 0xffff
             self.forms[i] = id
 
             id = token_dictionary.get_form_lower_id(form_lower)
-            # assert id < 0xffff
-            if id < 0:
-                id = token_dictionary.token_unknown
+            assert id < 0xffff
             self.forms_lower[i] = id
 
-            embedding_id
+            id = token_dictionary.get_embedding_id(form)
+            self.embedding_ids[i] = id
 
-            # # Lemma.
-            # lemma = input.lemmas[i]
-            # id = token_dictionary.get_form_id(form)
-            # assert id < 0xffff
-            # if id < 0:
-            #     id = token_dictionary.token_unknown
-            # self.lemmas[i] = id
-            #
-            # # Prefix.
-            # prefix = form[:token_dictionary.classifier.options.prefix_length]
-            # id = token_dictionary.get_prefix_id(prefix)
-            # assert id < 0xffff
-            # if id < 0:
-            #     id = token_dictionary.token_unknown
-            # self.prefixes[i] = id
-            #
-            # # Suffix.
-            # suffix = form[-token_dictionary.classifier.options.suffix_length:]
-            # id = token_dictionary.get_suffix_id(suffix)
-            # assert id < 0xffff
-            # if id < 0:
-            #     id = token_dictionary.token_unknown
-            # self.suffixes[i] = id
+            # Lemma.
+            lemma = input.lemmas[i]
+            id = token_dictionary.get_form_id(form)
+            assert id < 0xffff
+            self.lemmas[i] = id
+
+            # Prefix.
+            prefix = form[:token_dictionary.classifier.options.prefix_length]
+            id = token_dictionary.get_prefix_id(prefix)
+            assert id < 0xffff
+            self.prefixes[i] = id
+
+            # Suffix.
+            suffix = form[-token_dictionary.classifier.options.suffix_length:]
+            id = token_dictionary.get_suffix_id(suffix)
+            assert id < 0xffff
+            self.suffixes[i] = id
 
             # POS tag.
             tag = input.tags[i]
             id = token_dictionary.get_tag_id(tag)
             assert id < 0xff
-            if id < 0:
-                id = token_dictionary.token_unknown
             self.tags[i] = id
 
             # Morphological tags.
@@ -77,8 +68,6 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
                 morph_tag = morph_tags[j]
                 id = token_dictionary.get_morph_tag_id(morph_tag)
                 assert id < 0xffff
-                if id < 0:
-                    id = token_dictionary.token_unknown
                 self.morph_tags[i][j] = id
 
             # Check whether the word is a noun, verb, punctuation or
