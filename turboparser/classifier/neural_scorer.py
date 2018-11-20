@@ -11,7 +11,8 @@ class NeuralScorer(object):
         self.model = model
         if torch.cuda.is_available():
             self.model.cuda()
-        self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        params = [p for p in model.parameters() if p.requires_grad]
+        self.optimizer = optim.Adam(params, lr=learning_rate)
 
     def compute_scores(self, instances, parts):
         # Run the forward pass.

@@ -114,6 +114,7 @@ class TurboParser(StructuredClassifier):
             self.dictionary.save(f)
             pickle.dump(self.parameters, f)
             if self.options.neural:
+                pickle.dump(self.neural_scorer.model.embedding_vocab_size, f)
                 pickle.dump(self.neural_scorer.model.word_embedding_size, f)
                 pickle.dump(self.neural_scorer.model.tag_embedding_size, f)
                 pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
@@ -133,6 +134,7 @@ class TurboParser(StructuredClassifier):
             self.dictionary.load(f)
             self.parameters = pickle.load(f)
             if model_options.neural:
+                embedding_vocab_size = pickle.load(f)
                 word_embedding_size = pickle.load(f)
                 tag_embedding_size = pickle.load(f)
                 distance_embedding_size = pickle.load(f)
@@ -140,10 +142,11 @@ class TurboParser(StructuredClassifier):
                 mlp_size = pickle.load(f)
                 num_layers = pickle.load(f)
                 dropout = pickle.load(f)
+                dummy_embeddings = np.empty([embedding_vocab_size,
+                                             word_embedding_size], np.float32)
                 neural_model = DependencyNeuralModel(
                     self.token_dictionary,
-                    self.dictionary,
-                    word_embedding_size=word_embedding_size,
+                    self.dictionary, dummy_embeddings,
                     tag_embedding_size=tag_embedding_size,
                     distance_embedding_size=distance_embedding_size,
                     rnn_size=rnn_size,
