@@ -16,7 +16,7 @@ def extract_data(filename):
     expecting_best_value = False
     loss = None
     uas = None
-    epoch = 0
+    best_epoch = 0
 
     with open(filename, 'r') as f:
         config_line = next(f)
@@ -38,9 +38,11 @@ def extract_data(filename):
 
                 match = re.search('validation UAS: ([\d.]+)\s', line)
                 uas = float(match.group(1))
+
+                best_epoch = epoch
                 expecting_best_value = False
 
-    return config_data, uas, loss, epoch
+    return config_data, uas, loss, best_epoch
 
 
 def create_output_line(config_data, uas, loss, epoch):
