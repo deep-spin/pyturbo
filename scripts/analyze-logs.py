@@ -11,11 +11,12 @@ def extract_data(filename):
     """
     Extract the best validation loss from the log file
 
-    :return: tuple (config dictionary, best UAS, loss at best UAS)
+    :return: tuple (config dictionary, best UAS, loss at best UAS, epoch)
     """
     expecting_best_value = False
     loss = None
     uas = None
+    epoch = 0
 
     with open(filename, 'r') as f:
         config_line = next(f)
@@ -24,6 +25,10 @@ def extract_data(filename):
         config_data = json.loads(config_line)
 
         for line in f:
+            if 'Iteration #' in line:
+                match = re.seach('Iteration #(\d+)', line)
+                epoch = int(match.group(1))
+
             if 'Saved model' in line:
                 expecting_best_value = True
 
@@ -35,10 +40,10 @@ def extract_data(filename):
                 uas = float(match.group(1))
                 expecting_best_value = False
 
-    return config_data, uas, loss
+    return config_data, uas, loss, epoch
 
 
-def create_output_line(config_data, uas, loss):
+def create_output_line(config_data, uas, loss, epoch):
     """
     Write a TSV line for the output with the model configuration and loss
     """
@@ -53,6 +58,7 @@ def create_output_line(config_data, uas, loss):
                   config_data['num_layers']]
     fields.append(uas)
     fields.append(loss)
+    fields.append(epoch)
     line = '\t'.join(str(field) for field in fields)
     return line
 
@@ -66,8 +72,8 @@ if __name__ == '__main__':
 
     output_lines = []
     for name in args.logs:
-        config, dev_uas, loss = extract_data(name)
+        config, dev_uas, loss, epoch = extract_data(name)
         if not args.config:
             config = None
 
-        print(create_output_line(config, dev_uas, loss))
+        print(create_output_line(config, dev_uas, loss, epoch))
