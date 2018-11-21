@@ -26,7 +26,7 @@ def extract_data(filename):
 
         for line in f:
             if 'Iteration #' in line:
-                match = re.seach('Iteration #(\d+)', line)
+                match = re.search('Iteration #(\d+)', line)
                 epoch = int(match.group(1))
 
             if 'Saved model' in line:
