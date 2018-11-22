@@ -71,11 +71,14 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
                 morph_tags[i] = []
             else:
                 morph_tags[i] = morph.split('|')
-            heads[i] = int(info[6])
-            if heads[i] < 0 or heads[i] >= length:
-                raise ValueError(
-                    'Invalid value of head (%d) not in range [0..%d]'
-                    % (heads[i], length-1))
+
+            head = info[6]
+            if head != '_':
+                heads[i] = int(info[6])
+                if heads[i] < 0 or heads[i] >= length:
+                    raise ValueError(
+                        'Invalid value of head (%d) not in range [1..%d]'
+                        % (heads[i], length))
             relations[i] = info[7]
         input_ = DependencyInstanceInput(forms, lemmas, tags, morph_tags,
                                          multiwords)
