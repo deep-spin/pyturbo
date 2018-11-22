@@ -65,7 +65,8 @@ class DependencyOptions(Options):
                             training data.""")
         parser.add_argument('--pruner_path',
                             help="""Path to a pretrained model to be used as
-                            pruner.""")
+                            pruner. This is independent from the main model; it
+                            should be called at inference time again.""")
         parser.add_argument('--pruner_posterior_threshold', type=float,
                             default=0.0001,
                             help="""Posterior probability threshold for an arc
