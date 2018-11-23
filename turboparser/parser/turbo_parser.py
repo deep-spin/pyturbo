@@ -263,16 +263,18 @@ class TurboParser(StructuredClassifier):
             self.options.pruner_max_heads,
             self.options.pruner_posterior_threshold)
 
-        # during training, make sure that the gold parts are included
-        if not self.options.train:
+        if self.options.train:
             for m in range(1, len(instance)):
                 h = instance.output.heads[m]
                 if new_parts.find_arc_index(h, m) < 0:
                     new_parts.append(Arc(h, m))
                     new_gold.append(1)
 
-            new_parts.set_offset(Arc, 0, len(new_parts))
+                    # accumulate pruner mistakes here instead of later, because
+                    # it is simpler to keep `parts` with only arcs
+                    self.pruner_mistakes += 1
 
+        new_parts.set_offset(Arc, 0, len(new_parts))
         return new_parts, new_gold
 
     def _report_make_parts(self, instances, parts):
@@ -283,7 +285,6 @@ class TurboParser(StructuredClassifier):
         :type parts: list[DependencyParts]
         """
         num_arcs = 0
-        num_pruner_mistakes = 0
         num_tokens = 0
         num_possible_arcs = 0
         output_available = instances[0].output is not None
@@ -300,7 +301,7 @@ class TurboParser(StructuredClassifier):
                     if r < 0:
                         # pruned
                         if output_available and instance.output.heads[m] == h:
-                            num_pruner_mistakes += 1
+                            self.pruner_mistakes += 1
                         continue
 
                     num_arcs += 1
@@ -313,7 +314,7 @@ class TurboParser(StructuredClassifier):
         logging.info(msg)
 
         if output_available:
-            ratio = (num_tokens - num_pruner_mistakes) / num_tokens
+            ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
 
@@ -327,12 +328,11 @@ class TurboParser(StructuredClassifier):
         """
         parts = DependencyParts()
         gold_output = None if instance.output is None else []
+        self.pruner_mistakes = 0
 
         self.make_parts_basic(instance, parts, gold_output)
         if self.has_pruner:
             parts, gold_output = self.prune(instance, parts, gold_output)
-
-        assert len(parts) == len(gold_output)
 
         if not self.options.unlabeled:
             self.make_parts_labeled(instance, parts, gold_output)
@@ -826,7 +826,6 @@ class TurboParser(StructuredClassifier):
         heads = [-1 for i in range(len(instance))]
         relations = ['NULL' for i in range(len(instance))]
         instance.output = DependencyInstanceOutput(heads, relations)
-        threshold = .5
         root = -1
         root_score = -1
         removed_roots = 0

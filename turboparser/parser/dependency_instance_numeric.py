@@ -100,10 +100,14 @@ class DependencyInstanceNumericOutput(DependencyInstanceOutput):
 class DependencyInstanceNumeric(DependencyInstance):
     '''An dependency parsing instance with numeric fields.'''
     def __init__(self, instance, dictionary):
+        if instance.output is None:
+            output = None
+        else:
+            output = DependencyInstanceNumericOutput(instance.output,
+                                                     dictionary)
         DependencyInstance.__init__(
-            self,
-            DependencyInstanceNumericInput(instance.input, dictionary),
-            DependencyInstanceNumericOutput(instance.output, dictionary))
+            self, DependencyInstanceNumericInput(instance.input, dictionary),
+            output)
 
     def __len__(self):
         return len(self.input.forms)
