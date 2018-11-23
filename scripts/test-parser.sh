@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 INPUT=$1
 GOLD=$2
 MODEL=$3
