@@ -16,6 +16,7 @@ class DependencyNeuralModel(nn.Module):
                  token_dictionary,
                  dependency_dictionary,
                  word_embeddings,
+                 char_embedding_size,
                  tag_embedding_size,
                  distance_embedding_size,
                  rnn_size,
@@ -41,6 +42,19 @@ class DependencyNeuralModel(nn.Module):
         self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings,
                                                             freeze=False)
 
+        if self.char_embeddings_size:
+            char_vocab = token_dictionary.get_num_chars()
+            self.char_embeddings = nn.Embedding(char_vocab, char_embedding_size)
+
+            self.char_rnn = nn.LSTM(
+                input_size=char_embedding_size, hidden_size=char_embedding_size,
+                bidirectional=True, batch_first=True)
+            char_based_embedding_size = char_embedding_size
+        else:
+            self.char_embeddings = None
+            self.char_rnn = None
+            char_based_embedding_size = 0
+
         if self.tag_embedding_size:
             self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
                                                tag_embedding_size)
@@ -56,7 +70,8 @@ class DependencyNeuralModel(nn.Module):
             self.distance_bins = None
             self.distance_embeddings = None
 
-        input_size = self.word_embedding_size + tag_embedding_size
+        input_size = self.word_embedding_size + tag_embedding_size + \
+            char_based_embedding_size
         self.rnn = nn.LSTM(
             input_size=input_size,
             hidden_size=rnn_size,
@@ -372,6 +387,7 @@ class DependencyNeuralModel(nn.Module):
         This function takes care of padding.
 
         :param word_or_tag: either 'word' or 'tag'
+        :return: a tensor with shape (batch, sequence, embedding size)
         """
         index_matrix = torch.full((len(instances), max_length), self.padding,
                                   dtype=torch.long)
@@ -394,7 +410,46 @@ class DependencyNeuralModel(nn.Module):
 
         return embedding_matrix(index_matrix)
 
-    def forward(self, instances, parts):
+    def _run_char_rnn(self, instances, max_sentence_length):
+        """
+        Run a RNN over characters in all words in the batch instances.
+
+        :param instances:
+        :return: a tensor with shape (batch, sequence, embedding size)
+        """
+        token_lengths_ = [[len(inst.get_characters(i))
+                           for i in range(len(inst))]
+                          for inst in instances]
+        max_token_length = max(max(inst_lengths)
+                               for inst_lengths in token_lengths_)
+
+        shape = [len(instances), max_sentence_length]
+        token_lenghts = torch.zeros(shape, dtype=torch.long)
+
+        shape = [len(instances), max_sentence_length, max_token_length]
+        token_indices = torch.full(shape, self.padding, dtype=torch.long)
+
+        for i, instance in enumerate(instances):
+            token_lenghts[i, :len(instance)] = torch.tensor(token_lengths_[i])
+
+            for j in range(len(instance)):
+                # each j is a token
+                chars = instance.get_characters(i)
+                token_indices[i, j, :len(chars)] = torch.tensor(chars)
+
+        # now we have a 3d matrix with token indices. let's reshape it to 2d,
+        # stacking all tokens with no sentence separation
+        new_shape = [len(instances) * max_sentence_length, max_token_length]
+        token_indices = token_indices.view(new_shape)
+        lengths1d = token_lenghts.view(-1)
+
+        # now order by descending length and keep track of the originals
+        sorted_lenghts, inds = lengths1d.sort(descending=True)
+        sorted_token_inds = token_indices[inds]
+        
+
+
+def forward(self, instances, parts):
         """
         :param instances: a list of DependencyInstance objects
         :param parts: a list of DependencyParts objects

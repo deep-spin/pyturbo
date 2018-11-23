@@ -14,6 +14,7 @@ class TokenDictionary(Dictionary):
     def __init__(self, classifier=None):
         Dictionary.__init__(self)
         self.classifier = classifier
+        self.character_alphabet = Alphabet()
         self.embedding_alphabet = Alphabet()
         self.form_alphabet = Alphabet()
         self.form_lower_alphabet = Alphabet()
@@ -23,6 +24,18 @@ class TokenDictionary(Dictionary):
         self.morph_tag_alphabet = Alphabet()
         self.tag_alphabet = Alphabet()
         self.shape_alphabet = Alphabet()
+
+        # keep all alphabets ordered
+        self.alphabets = [self.character_alphabet,
+                          self.embedding_alphabet,
+                          self.form_alphabet,
+                          self.form_lower_alphabet,
+                          self.lemma_alphabet,
+                          self.prefix_alphabet,
+                          self.suffix_alphabet,
+                          self.morph_tag_alphabet,
+                          self.tag_alphabet,
+                          self.shape_alphabet]
 
         # Special symbols.
         self.special_symbols = Alphabet()
@@ -47,15 +60,8 @@ class TokenDictionary(Dictionary):
         self.special_symbols.insert(symbol)
 
     def save(self, file):
-        pickle.dump(self.embedding_alphabet, file)
-        pickle.dump(self.form_alphabet, file)
-        pickle.dump(self.form_lower_alphabet, file)
-        pickle.dump(self.lemma_alphabet, file)
-        pickle.dump(self.prefix_alphabet, file)
-        pickle.dump(self.suffix_alphabet, file)
-        pickle.dump(self.morph_tag_alphabet, file)
-        pickle.dump(self.tag_alphabet, file)
-        pickle.dump(self.shape_alphabet, file)
+        for alphabet in self.alphabets:
+            pickle.dump(alphabet, file)
         pickle.dump(self.special_symbols, file)
         pickle.dump(self.token_unknown, file)
         pickle.dump(self.token_start, file)
@@ -67,6 +73,8 @@ class TokenDictionary(Dictionary):
         pickle.dump(self.max_morph_tags, file)
 
     def load(self, file):
+        # TODO: avoid repeating code somehow
+        self.character_alphabet = pickle.load(file)
         self.embedding_alphabet = pickle.load(file)
         self.form_alphabet = pickle.load(file)
         self.form_lower_alphabet = pickle.load(file)
@@ -87,26 +95,15 @@ class TokenDictionary(Dictionary):
         self.max_morph_tags = pickle.load(file)
 
     def allow_growth(self):
-        self.embedding_alphabet.allow_growth()
-        self.form_alphabet.allow_growth()
-        self.form_lower_alphabet.allow_growth()
-        self.lemma_alphabet.allow_growth()
-        self.prefix_alphabet.allow_growth()
-        self.suffix_alphabet.allow_growth()
-        self.morph_tag_alphabet.allow_growth()
-        self.tag_alphabet.allow_growth()
-        self.shape_alphabet.allow_growth()
+        for alphabet in self.alphabets:
+            alphabet.allow_growth()
 
     def stop_growth(self):
-        self.embedding_alphabet.stop_growth()
-        self.form_alphabet.stop_growth()
-        self.form_lower_alphabet.stop_growth()
-        self.lemma_alphabet.stop_growth()
-        self.prefix_alphabet.stop_growth()
-        self.suffix_alphabet.stop_growth()
-        self.morph_tag_alphabet.stop_growth()
-        self.tag_alphabet.stop_growth()
-        self.shape_alphabet.stop_growth()
+        for alphabet in self.alphabets:
+            alphabet.stop_growth()
+
+    def get_num_characters(self):
+        return len(self.character_alphabet)
 
     def get_num_embeddings(self):
         return len(self.embedding_alphabet)
@@ -125,6 +122,12 @@ class TokenDictionary(Dictionary):
         if id_ >= 0:
             return id_
         return self.embedding_alphabet.lookup(UNKNOWN)
+
+    def get_character_id(self, character):
+        id_ = self.character_alphabet.lookup(character)
+        if id_ >= 0:
+            return id_
+        return self.character_alphabet.lookup(UNKNOWN)
 
     def get_form_id(self, form):
         id_ = self.form_alphabet.lookup(form)
@@ -184,6 +187,7 @@ class TokenDictionary(Dictionary):
         """
         logging.info('Creating token dictionary...')
 
+        char_counts = []
         form_counts = []
         form_lower_counts = []
         lemma_counts = []
@@ -221,6 +225,13 @@ class TokenDictionary(Dictionary):
                         form_counts.append(1)
                     else:
                         form_counts[id] += 1
+
+                    for char in form:
+                        id_ = self.character_alphabet.insert(char)
+                        if id >= len(char_counts):
+                            char_counts.append(1)
+                        else:
+                            char_counts[id_] += 1
 
                     # Add lower-case form to alphabet.
                     id = self.form_lower_alphabet.insert(form_lower)
@@ -261,18 +272,19 @@ class TokenDictionary(Dictionary):
 
         # Now adjust the cutoffs if necessary.
         for label, alphabet, counts, cutoff, max_length in \
-            zip(['form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
-                [self.form_alphabet, self.form_lower_alphabet,
-                 self.lemma_alphabet, self.tag_alphabet,
-                 self.morph_tag_alphabet],
-                [form_counts, form_lower_counts, lemma_counts, tag_counts,
-                 morph_tag_counts],
-                [self.classifier.options.form_cutoff,
+            zip(['char', 'form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
+                [self.character_alphabet, self.form_alphabet,
+                 self.form_lower_alphabet, self.lemma_alphabet,
+                 self.tag_alphabet, self.morph_tag_alphabet],
+                [char_counts, form_counts, form_lower_counts, lemma_counts,
+                 tag_counts, morph_tag_counts],
+                [self.classifier.options.char_cutoff,
+                 self.classifier.options.form_cutoff,
                  self.classifier.options.form_cutoff,
                  self.classifier.options.lemma_cutoff,
                  self.classifier.options.tag_cutoff,
                  self.classifier.options.morph_tag_cutoff],
-                [self.max_forms, self.max_forms, self.max_lemmas,
+                [10e5, self.max_forms, self.max_forms, self.max_lemmas,
                  self.max_tags, self.max_morph_tags]):
             names = alphabet.names.copy()
             while True:
@@ -301,6 +313,7 @@ class TokenDictionary(Dictionary):
             self.embedding_alphabet.insert(new_word)
         self.embedding_alphabet.stop_growth()
 
+        logging.info('Number of characters: %d' % len(self.character_alphabet))
         logging.info('Number of embedding forms: %d' %
                      len(self.embedding_alphabet))
         logging.info('Number of forms: %d' % len(self.form_alphabet))

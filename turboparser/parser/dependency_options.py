@@ -7,16 +7,19 @@ class DependencyOptions(Options):
         Options.__init__(self, parser)
 
         # Token options.
-        parser.add_argument('--form_cutoff', type=int, default=0,
+        parser.add_argument('--char_cutoff', type=int, default=5,
+                            help="""Ignore characters whose frequency is less
+                            than this, when using char level embeddings.""")
+        parser.add_argument('--form_cutoff', type=int, default=2,
                             help="""Ignore word forms whose frequency is less
                             than this.""")
-        parser.add_argument('--lemma_cutoff', type=int, default=0,
+        parser.add_argument('--lemma_cutoff', type=int, default=2,
                             help="""Ignore word lemmas whose frequency is less
                             than this.""")
-        parser.add_argument('--tag_cutoff', type=int, default=0,
+        parser.add_argument('--tag_cutoff', type=int, default=2,
                             help="""Ignore POS tags whose frequency is less
                             than this.""")
-        parser.add_argument('--morph_tag_cutoff', type=int, default=0,
+        parser.add_argument('--morph_tag_cutoff', type=int, default=2,
                             help="""Ignore morph tags whose frequency is less
                             than this.""")
         parser.add_argument('--prefix_length', type=int, default=4,
@@ -132,6 +135,7 @@ DEFINE_bool(pruner_large_feature_set, false,
     def parse_args(self, args):
         Options.parse_args(self, args)
 
+        self.char_cutoff = args['char_cutoff']
         self.form_cutoff = args['form_cutoff']
         self.lemma_cutoff = args['lemma_cutoff']
         self.tag_cutoff = args['tag_cutoff']

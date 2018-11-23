@@ -1,10 +1,10 @@
 from .dependency_instance import DependencyInstance, \
     DependencyInstanceInput, DependencyInstanceOutput
-from .token_dictionary import UNKNOWN
 
 
 class DependencyInstanceNumericInput(DependencyInstanceInput):
     def __init__(self, input, dictionary):
+        self.characters = [[] * len(input.forms)]
         self.embedding_ids = [-1] * len(input.forms)
         self.forms = [-1] * len(input.forms)
         self.forms_lower = [-1] * len(input.forms)
@@ -38,9 +38,13 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
             id = token_dictionary.get_embedding_id(form)
             self.embedding_ids[i] = id
 
+            # characters
+            self.characters[i] = [token_dictionary.get_character_id(c)
+                                  for c in form]
+
             # Lemma.
             lemma = input.lemmas[i]
-            id = token_dictionary.get_form_id(form)
+            id = token_dictionary.get_lemma_id(lemma)
             assert id < 0xffff
             self.lemmas[i] = id
 
@@ -111,6 +115,9 @@ class DependencyInstanceNumeric(DependencyInstance):
 
     def __len__(self):
         return len(self.input.forms)
+
+    def get_characters(self, i):
+        return self.input.characters[i]
 
     def get_form_lower(self, i):
         return self.input.forms_lower[i]
