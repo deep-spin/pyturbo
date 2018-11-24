@@ -72,7 +72,7 @@ class DependencyNeuralModel(nn.Module):
             self.distance_embeddings = None
 
         input_size = self.word_embedding_size + tag_embedding_size + \
-            char_based_embedding_size
+            (2 * char_based_embedding_size)
         self.rnn = nn.LSTM(
             input_size=input_size,
             hidden_size=rnn_size,
@@ -480,13 +480,18 @@ class DependencyNeuralModel(nn.Module):
         packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lenghts,
                                                    batch_first=True)
         outputs, (last_output, cell) = self.char_rnn(packed)
+
+        # concatenate the last outputs of both directions
+        last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
         shape = [len(instances) * max_sentence_length,
-                 self.char_rnn.hidden_size]
+                 2 * self.char_rnn.hidden_size]
         char_representation = torch.zeros(shape)
-        char_representation[sorted_inds] = last_output[0]
+        if self.on_gpu:
+            char_representation = char_representation.cuda()
+        char_representation[sorted_inds] = last_output_bi
 
         return char_representation.view([len(instances), max_sentence_length,
-                                         self.char_rnn.hidden_size])
+                                         -1])
 
     def forward(self, instances, parts):
         """
