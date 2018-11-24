@@ -472,17 +472,14 @@ class DependencyNeuralModel(nn.Module):
         sorted_inds = sorted_inds[nonzero]
 
         sorted_token_inds = token_indices[sorted_inds]
+        if self.on_gpu:
+            sorted_token_inds = sorted_token_inds.cuda()
 
         # embedded is [batch * max_sentence_len, max_token_len, char_embedding]
         embedded = self.char_embeddings(sorted_token_inds)
-        # print('number of non zero:', nonzero.shape[0] - nonzero.sum())
-        # print('max sentence len', max_sentence_length)
-        # print('max word len', max_token_length)
-        # print('embedded shape:', embedded.shape)
         packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lenghts,
                                                    batch_first=True)
         outputs, (last_output, cell) = self.char_rnn(packed)
-        # print('last output shape:', last_output.shape)
         shape = [len(instances) * max_sentence_length,
                  self.char_rnn.hidden_size]
         char_representation = torch.zeros(shape)
