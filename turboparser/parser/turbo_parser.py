@@ -43,6 +43,7 @@ class TurboParser(StructuredClassifier):
 
                 model = DependencyNeuralModel(
                     self.token_dictionary, self.dictionary, embeddings,
+                    char_embedding_size=self.options.char_embedding_size,
                     tag_embedding_size=self.options.tag_embedding_size,
                     distance_embedding_size=self.options.
                     distance_embedding_size,

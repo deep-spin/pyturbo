@@ -4,7 +4,7 @@ from .dependency_instance import DependencyInstance, \
 
 class DependencyInstanceNumericInput(DependencyInstanceInput):
     def __init__(self, input, dictionary):
-        self.characters = [[] * len(input.forms)]
+        self.characters = [None for _ in range(len(input.forms))]
         self.embedding_ids = [-1] * len(input.forms)
         self.forms = [-1] * len(input.forms)
         self.forms_lower = [-1] * len(input.forms)

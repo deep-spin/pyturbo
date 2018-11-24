@@ -26,6 +26,7 @@ class DependencyNeuralModel(nn.Module):
         super(DependencyNeuralModel, self).__init__()
         self.embedding_vocab_size = word_embeddings.shape[0]
         self.word_embedding_size = word_embeddings.shape[1]
+        self.char_embedding_size = char_embedding_size
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
@@ -42,8 +43,8 @@ class DependencyNeuralModel(nn.Module):
         self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings,
                                                             freeze=False)
 
-        if self.char_embeddings_size:
-            char_vocab = token_dictionary.get_num_chars()
+        if self.char_embedding_size:
+            char_vocab = token_dictionary.get_num_characters()
             self.char_embeddings = nn.Embedding(char_vocab, char_embedding_size)
 
             self.char_rnn = nn.LSTM(
@@ -380,6 +381,24 @@ class DependencyNeuralModel(nn.Module):
         offset, size = parts.get_offset(GrandSibling)
         scores[offset:offset + size] = gsib_scores.view(-1)
 
+    def get_word_representation(self, instances, max_length):
+        """
+        Get the full embedding representation of a word, including word type
+        embeddings, char level and POS tag embeddings.
+        """
+        embeddings = self._get_embeddings(instances, max_length, 'word')
+        if self.tag_embeddings is not None:
+            tag_embeddings = self._get_embeddings(instances, max_length, 'tag')
+
+            # each embedding tensor is (batch, num_tokens, embedding_size)
+            embeddings = torch.cat([embeddings, tag_embeddings], dim=2)
+
+        if self.char_rnn is not None:
+            char_embeddings = self._run_char_rnn(instances, max_length)
+            embeddings = torch.cat([embeddings, char_embeddings], dim=2)
+
+        return embeddings
+
     def _get_embeddings(self, instances, max_length, word_or_tag):
         """
         Get the word or tag embeddings for all tokens in the instances.
@@ -391,6 +410,7 @@ class DependencyNeuralModel(nn.Module):
         """
         index_matrix = torch.full((len(instances), max_length), self.padding,
                                   dtype=torch.long)
+
         for i, instance in enumerate(instances):
             if word_or_tag == 'word':
                 getter = instance.get_form
@@ -434,7 +454,7 @@ class DependencyNeuralModel(nn.Module):
 
             for j in range(len(instance)):
                 # each j is a token
-                chars = instance.get_characters(i)
+                chars = instance.get_characters(j)
                 token_indices[i, j, :len(chars)] = torch.tensor(chars)
 
         # now we have a 3d matrix with token indices. let's reshape it to 2d,
@@ -444,12 +464,34 @@ class DependencyNeuralModel(nn.Module):
         lengths1d = token_lenghts.view(-1)
 
         # now order by descending length and keep track of the originals
-        sorted_lenghts, inds = lengths1d.sort(descending=True)
-        sorted_token_inds = token_indices[inds]
-        
+        sorted_lengths, sorted_inds = lengths1d.sort(descending=True)
 
+        # we can't pass 0-length tensors to the LSTM
+        nonzero = sorted_lengths > 0
+        sorted_lenghts = sorted_lengths[nonzero]
+        sorted_inds = sorted_inds[nonzero]
 
-def forward(self, instances, parts):
+        sorted_token_inds = token_indices[sorted_inds]
+
+        # embedded is [batch * max_sentence_len, max_token_len, char_embedding]
+        embedded = self.char_embeddings(sorted_token_inds)
+        # print('number of non zero:', nonzero.shape[0] - nonzero.sum())
+        # print('max sentence len', max_sentence_length)
+        # print('max word len', max_token_length)
+        # print('embedded shape:', embedded.shape)
+        packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lenghts,
+                                                   batch_first=True)
+        outputs, (last_output, cell) = self.char_rnn(packed)
+        # print('last output shape:', last_output.shape)
+        shape = [len(instances) * max_sentence_length,
+                 self.char_rnn.hidden_size]
+        char_representation = torch.zeros(shape)
+        char_representation[sorted_inds] = last_output[0]
+
+        return char_representation.view([len(instances), max_sentence_length,
+                                         self.char_rnn.hidden_size])
+
+    def forward(self, instances, parts):
         """
         :param instances: a list of DependencyInstance objects
         :param parts: a list of DependencyParts objects
@@ -467,14 +509,7 @@ def forward(self, instances, parts):
         max_length = lengths[0].item()
         max_num_parts = max(len(p) for p in parts)
         batch_scores = torch.zeros(batch_size, max_num_parts)
-
-        embeddings = self._get_embeddings(instances, max_length, 'word')
-        if self.tag_embeddings is not None:
-            tag_embeddings = self._get_embeddings(instances, max_length, 'tag')
-
-            # each embedding tensor is (batch, num_tokens, embedding_size)
-            embeddings = torch.cat([embeddings, tag_embeddings], dim=2)
-
+        embeddings = self.get_word_representation(instances, max_length)
         sorted_embeddings = embeddings[inds]
 
         # pack to account for variable lengths

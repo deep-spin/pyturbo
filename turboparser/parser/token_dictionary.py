@@ -2,6 +2,7 @@ from ..classifier.alphabet import Alphabet
 from ..classifier.dictionary import Dictionary
 import pickle
 import logging
+from collections import Counter
 
 UNKNOWN = '_UNKNOWN_'
 START = '<s>'
@@ -187,12 +188,12 @@ class TokenDictionary(Dictionary):
         """
         logging.info('Creating token dictionary...')
 
-        char_counts = []
-        form_counts = []
-        form_lower_counts = []
-        lemma_counts = []
-        tag_counts = []
-        morph_tag_counts = []
+        char_counts = Counter()
+        form_counts = Counter()
+        form_lower_counts = Counter()
+        lemma_counts = Counter()
+        tag_counts = Counter()
+        morph_tag_counts = Counter()
 
         for name in self.special_symbols.names:
             for alphabet in [self.form_alphabet,
@@ -203,12 +204,12 @@ class TokenDictionary(Dictionary):
                              self.tag_alphabet,
                              self.morph_tag_alphabet]:
                 alphabet.insert(name)
-            for counts in [form_counts,
-                           form_lower_counts,
-                           lemma_counts,
-                           tag_counts,
-                           morph_tag_counts]:
-                counts.append(-1)
+            # for counts in [form_counts,
+            #                form_lower_counts,
+            #                lemma_counts,
+            #                tag_counts,
+            #                morph_tag_counts]:
+            #     counts.append(-1)
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
@@ -220,58 +221,34 @@ class TokenDictionary(Dictionary):
                     form_lower = form.lower()
                     if not case_sensitive:
                         form = form_lower
-                    id = self.form_alphabet.insert(form)
-                    if id >= len(form_counts):
-                        form_counts.append(1)
-                    else:
-                        form_counts[id] += 1
+                    form_counts[form] += 1
 
                     for char in form:
-                        id_ = self.character_alphabet.insert(char)
-                        if id >= len(char_counts):
-                            char_counts.append(1)
-                        else:
-                            char_counts[id_] += 1
+                        char_counts[char] += 1
 
                     # Add lower-case form to alphabet.
-                    id = self.form_lower_alphabet.insert(form_lower)
-                    if id >= len(form_lower_counts):
-                        form_lower_counts.append(1)
-                    else:
-                        form_lower_counts[id] += 1
+                    form_lower_counts[form_lower] += 1
 
                     # Add lemma to alphabet.
-                    id = self.lemma_alphabet.insert(instance.get_lemma(i))
-                    if id >= len(lemma_counts):
-                        lemma_counts.append(1)
-                    else:
-                        lemma_counts[id] += 1
+                    lemma = instance.get_lemma(i)
+                    lemma_counts[lemma] += 1
 
                     # Add prefix/suffix to alphabet.
                     # TODO: add varying lengths.
                     prefix = form[:self.classifier.options.prefix_length]
-                    id = self.prefix_alphabet.insert(prefix)
                     suffix = form[-self.classifier.options.suffix_length:]
-                    id = self.suffix_alphabet.insert(suffix)
 
                     # Add tags to alphabet.
-                    id = self.tag_alphabet.insert(instance.get_tag(i))
-                    if id >= len(tag_counts):
-                        tag_counts.append(1)
-                    else:
-                        tag_counts[id] += 1
+                    tag = instance.get_tag(i)
+                    tag_counts[tag] += 1
 
                     # Add morph tags to alphabet.
                     for j in range(instance.get_num_morph_tags(i)):
-                        id = self.morph_tag_alphabet.insert(
-                            instance.get_morph_tag(i, j))
-                        if id >= len(morph_tag_counts):
-                            morph_tag_counts.append(1)
-                        else:
-                            morph_tag_counts[id] += 1
+                        morph_tag = instance.get_morph_tag(i, j)
+                        morph_tag_counts[morph_tag] += 1
 
         # Now adjust the cutoffs if necessary.
-        for label, alphabet, counts, cutoff, max_length in \
+        for label, alphabet, counter, cutoff, max_length in \
             zip(['char', 'form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
                 [self.character_alphabet, self.form_alphabet,
                  self.form_lower_alphabet, self.lemma_alphabet,
@@ -284,20 +261,15 @@ class TokenDictionary(Dictionary):
                  self.classifier.options.lemma_cutoff,
                  self.classifier.options.tag_cutoff,
                  self.classifier.options.morph_tag_cutoff],
-                [10e5, self.max_forms, self.max_forms, self.max_lemmas,
+                [int(10e6), self.max_forms, self.max_forms, self.max_lemmas,
                  self.max_tags, self.max_morph_tags]):
-            names = alphabet.names.copy()
-            while True:
-                alphabet.clear()
-                for name in self.special_symbols.names:
+
+            alphabet.clear()
+            for name in self.special_symbols.names:
+                alphabet.insert(name)
+            for name, count in counter.most_common(max_length):
+                if count >= cutoff:
                     alphabet.insert(name)
-                for name, count in zip(names, counts):
-                    if count >= cutoff:
-                        alphabet.insert(name)
-                if len(alphabet) < max_length:
-                    break
-                cutoff += 1
-                logging.info('Incrementing %s cutoff to %d...' % (label, cutoff))
             alphabet.stop_growth()
 
         if word_dict is not None:
