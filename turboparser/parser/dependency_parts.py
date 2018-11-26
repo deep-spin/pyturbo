@@ -123,6 +123,13 @@ class DependencyParts(list):
             else:
                 yield self[i]
 
+    def get_parts_of_type(self, type_):
+        """
+        Return a sublist of this object containing parts of the requested type.
+        """
+        offset, size = self.get_offset(type_)
+        return self[offset:size]
+
     def get_offset(self, type_):
         return self.offsets[type_]
 

@@ -728,7 +728,8 @@ class TurboParser(StructuredClassifier):
         Compute and store internally validation UAS.
 
         :param valid_data: InstanceData
-        :param valid_pred: Predicted output
+        :param valid_pred: list with predicted outputs (decoded) for each item
+            in the data.
         """
         accumulated_uas = 0.
         total_tokens = 0
@@ -736,13 +737,22 @@ class TurboParser(StructuredClassifier):
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
             parts = valid_data.parts[i]
-            gold = valid_data.gold_labels[i]
+            # gold = valid_data.gold_labels[i]
+            predictions = valid_pred[i]
 
-            # exclude root
-            length = len(instance) - 1
-            uas = get_naive_uas(valid_pred[i], gold, parts, length)
-            accumulated_uas += uas * length
-            total_tokens += length
+            offset, size = parts.get_offset(Arc)
+            arcs = parts[offset:offset + size]
+            arc_scores = predictions[offset:offset + size]
+            gold_heads = instance.output.heads[1:]
+
+            score_matrix = _make_score_matrix(len(instance), arcs, arc_scores)
+            pred_heads = chu_liu_edmonds(score_matrix)[1:]
+            # uas = get_naive_uas(valid_pred[i], gold, parts, length)
+            real_length = len(instance) - 1
+
+            # scale UAS by sentence length; it is normalized later
+            accumulated_uas += np.sum(gold_heads == pred_heads)
+            total_tokens += real_length
 
         self.validation_uas = accumulated_uas / total_tokens
         if self.validation_uas > self.best_validation_uas:
@@ -885,6 +895,11 @@ def _make_score_matrix(length, arcs, scores):
     Makes a score matrix from an array of scores ordered in the same way as a
     list of DependencyPartArcs. Positions [h, m] corresponding to non-existing
     arcs have score of -inf.
+
+    :param length: length of the sentence, including the root pseudo-token
+    :param arcs: list of candidate Arc parts
+    :param scores: array with score of each arc (ordered in the same way as arcs
+    :return: a 2d numpy array
     """
     score_matrix = np.full([length, length], -np.inf, np.float32)
     for arc, score in zip(arcs, scores):
@@ -901,6 +916,8 @@ def chu_liu_edmonds(score_matrix):
 
     :param score_matrix: a matrix such that cell [h, m] has the score for the
         arc (h, m).
+    :return: an array heads, such that heads[m] contains the head of token m.
+        The root is in position 0 and has head -1.
     """
     while True:
         # pick the highest score head for each modifier
