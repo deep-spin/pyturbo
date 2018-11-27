@@ -444,13 +444,13 @@ class DependencyNeuralModel(nn.Module):
                                for inst_lengths in token_lengths_)
 
         shape = [len(instances), max_sentence_length]
-        token_lenghts = torch.zeros(shape, dtype=torch.long)
+        token_lengths = torch.zeros(shape, dtype=torch.long)
 
         shape = [len(instances), max_sentence_length, max_token_length]
         token_indices = torch.full(shape, self.padding, dtype=torch.long)
 
         for i, instance in enumerate(instances):
-            token_lenghts[i, :len(instance)] = torch.tensor(token_lengths_[i])
+            token_lengths[i, :len(instance)] = torch.tensor(token_lengths_[i])
 
             for j in range(len(instance)):
                 # each j is a token
@@ -461,14 +461,14 @@ class DependencyNeuralModel(nn.Module):
         # stacking all tokens with no sentence separation
         new_shape = [len(instances) * max_sentence_length, max_token_length]
         token_indices = token_indices.view(new_shape)
-        lengths1d = token_lenghts.view(-1)
+        lengths1d = token_lengths.view(-1)
 
         # now order by descending length and keep track of the originals
         sorted_lengths, sorted_inds = lengths1d.sort(descending=True)
 
         # we can't pass 0-length tensors to the LSTM
         nonzero = sorted_lengths > 0
-        sorted_lenghts = sorted_lengths[nonzero]
+        sorted_lengths = sorted_lengths[nonzero]
         sorted_inds = sorted_inds[nonzero]
 
         sorted_token_inds = token_indices[sorted_inds]
@@ -477,7 +477,7 @@ class DependencyNeuralModel(nn.Module):
 
         # embedded is [batch * max_sentence_len, max_token_len, char_embedding]
         embedded = self.char_embeddings(sorted_token_inds)
-        packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lenghts,
+        packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lengths,
                                                    batch_first=True)
         outputs, (last_output, cell) = self.char_rnn(packed)
 
