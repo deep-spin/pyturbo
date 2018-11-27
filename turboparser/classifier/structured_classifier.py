@@ -726,7 +726,7 @@ class StructuredClassifier(object):
         logging.info('Time: %f' % (toc - tic))
 
         if self.options.evaluate:
-            self.end_evaluation()
+            self.end_evaluation(len(instances))
 
     def classify_instance(self, instance):
         '''Run the structured classifier on a single instance.'''
@@ -759,7 +759,7 @@ class StructuredClassifier(object):
                 self.num_mistakes += 1
             self.num_total_parts += 1
 
-    def end_evaluation(self):
+    def end_evaluation(self, num_instances):
         logging.info('Accuracy (parts): %f' %
                      (float(self.num_total_parts - self.num_mistakes) /
                       float(self.num_total_parts)))

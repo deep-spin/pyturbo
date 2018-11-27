@@ -836,13 +836,24 @@ class TurboParser(StructuredClassifier):
 
         return features
 
+    def begin_evaluation(self):
+        super(TurboParser, self).begin_evaluation()
+        self.reassigned_roots = 0
+
+    def end_evaluation(self, num_instances):
+        super(TurboParser, self).end_evaluation()
+        if self.options.single_root:
+            ratio = self.reassigned_roots / num_instances
+            msg = '%d reassgined roots (sentence had more than one), %f per ' \
+                  'sentence' % (self.reassigned_roots, ratio)
+            logging.info(msg)
+
     def label_instance(self, instance, parts, output):
         heads = [-1 for i in range(len(instance))]
         relations = ['NULL' for i in range(len(instance))]
         instance.output = DependencyInstanceOutput(heads, relations)
         root = -1
         root_score = -1
-        removed_roots = 0
 
         offset, size = parts.get_offset(Arc)
         arcs = parts[offset:offset + size]
@@ -857,7 +868,7 @@ class TurboParser(StructuredClassifier):
                 score = output[index]
 
                 if self.options.single_root and root != -1:
-                    removed_roots += 1
+                    self.reassigned_roots += 1
                     if score > root_score:
                         # this token is better scored for root
                         # attach the previous root candidate to it
@@ -876,9 +887,6 @@ class TurboParser(StructuredClassifier):
                 label = parts.best_labels[index]
                 label_name = self.dictionary.get_relation_name(label)
                 instance.output.relations[m] = label_name
-
-        if removed_roots > 0:
-            logging.info('%d tokens reassigned to root' % removed_roots)
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):
