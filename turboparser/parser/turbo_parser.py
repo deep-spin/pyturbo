@@ -841,7 +841,7 @@ class TurboParser(StructuredClassifier):
         self.reassigned_roots = 0
 
     def end_evaluation(self, num_instances):
-        super(TurboParser, self).end_evaluation()
+        super(TurboParser, self).end_evaluation(num_instances)
         if self.options.single_root:
             ratio = self.reassigned_roots / num_instances
             msg = '%d reassgined roots (sentence had more than one), %f per ' \
