@@ -99,7 +99,7 @@ class DependencyNeuralModel(nn.Module):
         self.sib_head_projection = self._create_projection()
         self.sib_modifier_projection = self._create_projection()
         self.sib_sibling_projection = self._create_projection()
-        self.null_sibling_tensor = self._create_special_tensor()
+        self.null_sibling_tensor = self._create_parameter_tensor()
 
         # third order -- grandsiblings (consecutive)
         self.gsib_head_projection = self._create_projection()
@@ -124,9 +124,10 @@ class DependencyNeuralModel(nn.Module):
         # Clear out the gradients before the next batch.
         self.zero_grad()
 
-    def _create_special_tensor(self, shape=None):
+    def _create_parameter_tensor(self, shape=None):
         """
-        Create a tensor for representing some special token.
+        Create a tensor for representing some special token. It is included in
+        the model parameters.
 
         If shape is None, it will have shape equal to hidden_size.
         """
@@ -134,6 +135,7 @@ class DependencyNeuralModel(nn.Module):
             shape = self.rnn_hidden_size
 
         tensor = torch.randn(shape, requires_grad=True)
+        tensor = nn.Parameter(tensor)
         if self.on_gpu:
             tensor = tensor.cuda()
 
