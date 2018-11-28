@@ -1,6 +1,7 @@
 class Options(object):
     '''Options for a general structured classifier.'''
     def __init__(self, parser):
+        self.parser = parser
         parser.add_argument('--train', action='store_const',
                             default=0, const=1,
                             help='1 for training the classifier.')
@@ -52,8 +53,11 @@ class Options(object):
         parser.add_argument('--batch_size', type=int, default=16,
                             help='Batch size for neural models')
 
-    def parse_args(self, args):
+    def parse_args(self):
         import sys
+        args = self.parser.parse_args()
+        args = vars(args)
+        self.args = args
         print(args, file=sys.stderr)
         self.train = bool(args['train'])
         self.test = bool(args['test'])

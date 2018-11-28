@@ -1,9 +1,14 @@
 from ..classifier.options import Options
 
+import argparse
+
 
 class DependencyOptions(Options):
     '''Options for the dependency parser.'''
-    def __init__(self, parser):
+    def __init__(self):
+        parser = argparse. \
+            ArgumentParser(prog='Turbo parser.',
+                           description='Trains/test a dependency parser.')
         Options.__init__(self, parser)
 
         # Token options.
@@ -133,8 +138,9 @@ DEFINE_bool(pruner_large_feature_set, false,
             "True for using a large feature set in the pruner.");
         """
 
-    def parse_args(self, args):
-        Options.parse_args(self, args)
+    def parse_args(self):
+        Options.parse_args(self)
+        args = self.args
 
         self.char_cutoff = args['char_cutoff']
         self.form_cutoff = args['form_cutoff']

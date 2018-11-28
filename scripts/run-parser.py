@@ -6,11 +6,7 @@ from turboparser.parser import DependencyOptions, TurboParser
 def main():
     """Main function for the dependency parser."""
     # Parse arguments.
-    import argparse
-    parser = argparse. \
-        ArgumentParser(prog='Turbo parser.',
-                       description='Trains/test a dependency parser.')
-    options = DependencyOptions(parser)
+    options = DependencyOptions()
     args = vars(parser.parse_args())
     options.parse_args(args)
 
