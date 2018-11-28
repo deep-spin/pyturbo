@@ -7,8 +7,7 @@ def main():
     """Main function for the dependency parser."""
     # Parse arguments.
     options = DependencyOptions()
-    args = vars(parser.parse_args())
-    options.parse_args(args)
+    options.parse_args()
 
     if options.train:
         train_parser(options)
