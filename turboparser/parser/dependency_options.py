@@ -1,16 +1,14 @@
-from ..classifier.options import Options
-
-import argparse
+from ..classifier.options import OptionParser
 
 
-class DependencyOptions(Options):
+class DependencyOptionParser(OptionParser):
     '''Options for the dependency parser.'''
     def __init__(self):
-        parser = argparse. \
-            ArgumentParser(prog='Turbo parser.',
-                           description='Trains/test a dependency parser.')
-        Options.__init__(self, parser)
-
+        super(DependencyOptionParser, self).__init__(
+            prog='Turbo parser.',
+            description='Trains/test a dependency parser.')
+        parser = self.parser
+        
         # Token options.
         parser.add_argument('--char_cutoff', type=int, default=5,
                             help="""Ignore characters whose frequency is less
@@ -139,43 +137,44 @@ DEFINE_bool(pruner_large_feature_set, false,
         """
 
     def parse_args(self):
-        Options.parse_args(self)
+        options = super(DependencyOptionParser, self).parse_args()
         args = self.args
 
-        self.char_cutoff = args['char_cutoff']
-        self.form_cutoff = args['form_cutoff']
-        self.lemma_cutoff = args['lemma_cutoff']
-        self.tag_cutoff = args['tag_cutoff']
-        self.morph_tag_cutoff = args['morph_tag_cutoff']
-        self.prefix_length = args['prefix_length']
-        self.suffix_length = args['suffix_length']
-        self.form_case_sensitive = args['form_case_sensitive']
+        options.char_cutoff = args['char_cutoff']
+        options.form_cutoff = args['form_cutoff']
+        options.lemma_cutoff = args['lemma_cutoff']
+        options.tag_cutoff = args['tag_cutoff']
+        options.morph_tag_cutoff = args['morph_tag_cutoff']
+        options.prefix_length = args['prefix_length']
+        options.suffix_length = args['suffix_length']
+        options.form_case_sensitive = args['form_case_sensitive']
 
-        self.model_type = args['model_type']
-        self.unlabeled = bool(args['unlabeled'])
-        self.projective = bool(args['projective'])
-        self.prune_relations = bool(args['prune_relations'])
-        self.prune_distances = bool(args['prune_distances'])
-        self.pruner_path = args['pruner_path']
-        self.pruner_posterior_threshold = args['pruner_posterior_threshold']
-        self.pruner_max_heads = args['pruner_max_heads']
-        self.single_root = args['single_root']
+        options.model_type = args['model_type']
+        options.unlabeled = bool(args['unlabeled'])
+        options.projective = bool(args['projective'])
+        options.prune_relations = bool(args['prune_relations'])
+        options.prune_distances = bool(args['prune_distances'])
+        options.pruner_path = args['pruner_path']
+        options.pruner_posterior_threshold = args['pruner_posterior_threshold']
+        options.pruner_max_heads = args['pruner_max_heads']
+        options.single_root = args['single_root']
 
-        self.embeddings = args['embeddings']
-        self.embedding_size = args['embedding_size']
-        self.char_embedding_size = args['char_embedding_size']
-        self.tag_embedding_size = args['tag_embedding_size']
-        self.distance_embedding_size = args['distance_embedding_size']
-        self.rnn_size = args['rnn_size']
-        self.mlp_size = args['mlp_size']
-        self.num_layers = args['num_layers']
-        self.dropout = args['dropout']
-        self.learning_rate = args['learning_rate']
+        options.embeddings = args['embeddings']
+        options.embedding_size = args['embedding_size']
+        options.char_embedding_size = args['char_embedding_size']
+        options.tag_embedding_size = args['tag_embedding_size']
+        options.distance_embedding_size = args['distance_embedding_size']
+        options.rnn_size = args['rnn_size']
+        options.mlp_size = args['mlp_size']
+        options.num_layers = args['num_layers']
+        options.dropout = args['dropout']
+        options.learning_rate = args['learning_rate']
 
-        if self.model_type == 'basic':
-            self.model_type = 'af'
-        elif self.model_type == 'standard':
-            self.model_type = 'af+cs+gp'
-        elif self.model_type == 'full':
-            self.model_type = 'af+cs+gp+as+hb+gs+ts'
+        if options.model_type == 'basic':
+            options.model_type = 'af'
+        elif options.model_type == 'standard':
+            options.model_type = 'af+cs+gp'
+        elif options.model_type == 'full':
+            options.model_type = 'af+cs+gp+as+hb+gs+ts'
 
+        return options

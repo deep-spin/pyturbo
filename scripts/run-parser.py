@@ -1,13 +1,13 @@
 import logging
 
-from turboparser.parser import DependencyOptions, TurboParser
+from turboparser.parser import DependencyOptionParser, TurboParser
 
 
 def main():
     """Main function for the dependency parser."""
     # Parse arguments.
-    options = DependencyOptions()
-    options.parse_args()
+    parser = DependencyOptionParser()
+    options = parser.parse_args()
 
     if options.train:
         train_parser(options)

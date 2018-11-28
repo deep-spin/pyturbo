@@ -4,7 +4,7 @@ from .dependency_dictionary import DependencyDictionary
 from .dependency_instance import DependencyInstance
 from .dependency_instance_numeric import *
 from .dependency_neural_model import DependencyNeuralModel
-from .dependency_options import DependencyOptions
+from .dependency_options import DependencyOptionParser
 from .dependency_parts import *
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter

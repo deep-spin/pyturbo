@@ -1,7 +1,21 @@
+import argparse
+
+
 class Options(object):
-    '''Options for a general structured classifier.'''
-    def __init__(self, parser):
-        self.parser = parser
+    """
+    Class for holding hyperparameters and setup options for structured
+    classifiers.
+    """
+    pass
+
+
+class OptionParser(object):
+    '''Parser for the command line arguments used in structured classifiers.'''
+    def __init__(self, prog=None, description=None):
+        """
+        `prog` and `description` are arguments for the argparse parser.
+        """
+        parser = argparse.ArgumentParser(prog=prog, description=description)
         parser.add_argument('--train', action='store_const',
                             default=0, const=1,
                             help='1 for training the classifier.')
@@ -53,29 +67,34 @@ class Options(object):
         parser.add_argument('--batch_size', type=int, default=16,
                             help='Batch size for neural models')
 
+        self.parser = parser
+
     def parse_args(self):
         import sys
         args = self.parser.parse_args()
         args = vars(args)
         self.args = args
         print(args, file=sys.stderr)
-        self.train = bool(args['train'])
-        self.test = bool(args['test'])
-        self.evaluate = bool(args['evaluate'])
-        self.training_path = args['training_path']
-        self.valid_path = args['valid_path']
-        self.test_path = args['test_path']
-        self.model_path = args['model_path']
-        self.output_path = args['output_path']
-        self.neural = bool(args['neural'])
-        self.training_algorithm = args['training_algorithm']
-        self.training_initial_learning_rate = args[
-            'training_initial_learning_rate']
-        self.training_learning_rate_schedule = args[
-            'training_learning_rate_schedule']
-        self.only_supported_features = args['only_supported_features']
-        self.use_averaging = args['use_averaging']
-        self.training_epochs = args['training_epochs']
-        self.regularization_constant = args['regularization_constant']
-        self.batch_size = args['batch_size']
 
+        options = Options()
+        options.train = bool(args['train'])
+        options.test = bool(args['test'])
+        options.evaluate = bool(args['evaluate'])
+        options.training_path = args['training_path']
+        options.valid_path = args['valid_path']
+        options.test_path = args['test_path']
+        options.model_path = args['model_path']
+        options.output_path = args['output_path']
+        options.neural = bool(args['neural'])
+        options.training_algorithm = args['training_algorithm']
+        options.training_initial_learning_rate = args[
+            'training_initial_learning_rate']
+        options.training_learning_rate_schedule = args[
+            'training_learning_rate_schedule']
+        options.only_supported_features = args['only_supported_features']
+        options.use_averaging = args['use_averaging']
+        options.training_epochs = args['training_epochs']
+        options.regularization_constant = args['regularization_constant']
+        options.batch_size = args['batch_size']
+
+        return options
