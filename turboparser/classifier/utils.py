@@ -19,10 +19,12 @@ def nearly_zero_tol(a, tol):
     return (a <= tol) and (a >= -tol)
 
 
-def read_embeddings(path):
+def read_embeddings(path, max_words=1000000):
     '''
     Read a text file, or xzipped text file, with word embeddings.
 
+    :param path: path to the embeddings file
+    :param max_words: maximum word embeddings to read (the rest will be ignored)
     :return: a dictionary mapping words to indices and a numpy array
     '''
     counter = 0
@@ -52,6 +54,9 @@ def read_embeddings(path):
 
             vector = np.array([float(field) for field in fields[1:]])
             vectors.append(vector)
+
+            if len(words) == max_words:
+                break
 
     embeddings = np.array(vectors, dtype=np.float32)
     return words, embeddings
