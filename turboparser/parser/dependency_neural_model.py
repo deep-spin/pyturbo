@@ -13,6 +13,7 @@ special_tokens = [NULL_SIBLING]
 
 class DependencyNeuralModel(nn.Module):
     def __init__(self,
+                 model_type,
                  token_dictionary,
                  dependency_dictionary,
                  word_embeddings,
@@ -23,6 +24,12 @@ class DependencyNeuralModel(nn.Module):
                  mlp_size,
                  num_layers,
                  dropout):
+        """
+        :param model_type: a ModelType object
+        :param token_dictionary: TokenDictionary object
+        :param dependency_dictionary: DependencyDictionary object
+        :param word_embeddings: numpy or torch embedding matrix
+        """
         super(DependencyNeuralModel, self).__init__()
         self.embedding_vocab_size = word_embeddings.shape[0]
         self.word_embedding_size = word_embeddings.shape[1]
@@ -87,25 +94,31 @@ class DependencyNeuralModel(nn.Module):
         # first order
         self.head_projection = self._create_projection()
         self.modifier_projection = self._create_projection()
+        self.arc_scorer = self._create_scorer()
+        self.label_scorer = self._create_scorer(output_size=self.num_labels)
 
-        #TODO: only create parameters as necessary for the model
+        if model_type.grandparents:
+            self.gp_grandparent_projection = self._create_projection()
+            self.gp_head_projection = self._create_projection()
+            self.gp_modifier_projection = self._create_projection()
+            self.grandparent_scorer = self._create_scorer()
 
-        # second order -- grandparent
-        self.gp_grandparent_projection = self._create_projection()
-        self.gp_head_projection = self._create_projection()
-        self.gp_modifier_projection = self._create_projection()
+        if model_type.consecutive_siblings:
+            self.sib_head_projection = self._create_projection()
+            self.sib_modifier_projection = self._create_projection()
+            self.sib_sibling_projection = self._create_projection()
+            self.sibling_scorer = self._create_scorer()
 
-        # second order -- consecutive siblings
-        self.sib_head_projection = self._create_projection()
-        self.sib_modifier_projection = self._create_projection()
-        self.sib_sibling_projection = self._create_projection()
-        self.null_sibling_tensor = self._create_parameter_tensor()
+        if model_type.consecutive_siblings or model_type.grandsiblings \
+                or model_type.trisiblings or model_type.arbitrary_siblings:
+            self.null_sibling_tensor = self._create_parameter_tensor()
 
-        # third order -- grandsiblings (consecutive)
-        self.gsib_head_projection = self._create_projection()
-        self.gsib_modifier_projection = self._create_projection()
-        self.gsib_sibling_projection = self._create_projection()
-        self.gsib_grandparent_projection = self._create_projection()
+        if model_type.grandsiblings:
+            self.gsib_head_projection = self._create_projection()
+            self.gsib_modifier_projection = self._create_projection()
+            self.gsib_sibling_projection = self._create_projection()
+            self.gsib_grandparent_projection = self._create_projection()
+            self.grandsibling_scorer = self._create_scorer()
 
         if self.distance_embedding_size:
             self.distance_projection = nn.Linear(
@@ -114,12 +127,6 @@ class DependencyNeuralModel(nn.Module):
                 bias=True)
         else:
             self.distance_projection = None
-
-        self.arc_scorer = self._create_scorer()
-        self.label_scorer = self._create_scorer(output_size=self.num_labels)
-        self.sibling_scorer = self._create_scorer()
-        self.grandparent_scorer = self._create_scorer()
-        self.grandsibling_scorer = self._create_scorer()
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -180,7 +187,12 @@ class DependencyNeuralModel(nn.Module):
         else:
             state_dict = torch.load(file, map_location='cpu')
 
-        self.load_state_dict(state_dict)
+        # kind of a hack to allow compatibility with previous versions
+        own_state_dict = self.state_dict()
+        pretrained_dict = {k: v for k, v in state_dict.items() if
+                           k in own_state_dict}
+        own_state_dict.update(pretrained_dict)
+        self.load_state_dict(own_state_dict)
 
     def _compute_arc_scores(self, states, parts, scores):
         """

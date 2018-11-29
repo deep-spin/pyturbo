@@ -18,6 +18,30 @@ import pickle
 import logging
 
 
+class ModelType(object):
+    """Dummy class to store the types of parts used by a parser"""
+    def __init__(self, type_string):
+        """
+        :param type_string: a string encoding multiple types of parts:
+            af: arc factored (always used)
+            cs: consecutive siblings
+            gp: grandparents
+            as: arbitrary siblings
+            hb: head bigrams
+            gs: grandsiblings
+            ts: trisiblings
+
+            More than one type must be concatenated by +, e.g., af+cs+gp
+        """
+        codes = type_string.lower().split('+')
+        self.consecutive_siblings = 'cs' in codes
+        self.grandparents = 'gp' in codes
+        self.grandsiblings = 'gs' in codes
+        self.arbitrary_siblings = 'as' in codes
+        self.head_bigrams = 'hb' in codes
+        self.trisiblings = 'ts' in codes
+
+
 class TurboParser(StructuredClassifier):
     '''Dependency parser.'''
     def __init__(self, options):
@@ -42,6 +66,7 @@ class TurboParser(StructuredClassifier):
                     embeddings = self._create_random_embeddings()
 
                 model = DependencyNeuralModel(
+                    self.model_type,
                     self.token_dictionary, self.dictionary, embeddings,
                     char_embedding_size=self.options.char_embedding_size,
                     tag_embedding_size=self.options.tag_embedding_size,
@@ -97,7 +122,7 @@ class TurboParser(StructuredClassifier):
         Set some parameters of the parser determined from its `options`
         attribute.
         """
-        self.model_type = self.options.model_type.split('+')
+        self.model_type = ModelType(self.options.model_type)
         self.has_pruner = bool(self.options.pruner_path)
 
         if self.has_pruner:
@@ -148,6 +173,7 @@ class TurboParser(StructuredClassifier):
                 dummy_embeddings = np.empty([embedding_vocab_size,
                                              word_embedding_size], np.float32)
                 neural_model = DependencyNeuralModel(
+                    self.model_type,
                     self.token_dictionary,
                     self.dictionary, dummy_embeddings,
                     char_embedding_size,
@@ -341,13 +367,13 @@ class TurboParser(StructuredClassifier):
         if not self.options.unlabeled:
             self.make_parts_labeled(instance, parts, gold_output)
 
-        if 'cs' in self.model_type:
+        if self.model_type.consecutive_siblings:
             self.make_parts_consecutive_siblings(instance, parts,
                                                  gold_output)
-        if 'gp' in self.model_type:
+        if self.model_type.grandparents:
             self.make_parts_grandparent(instance, parts, gold_output)
 
-        if 'gs' in self.model_type:
+        if self.model_type.grandsiblings:
             self.make_parts_grandsibling(instance, parts, gold_output)
 
         if instance.output is not None:
@@ -479,6 +505,8 @@ class TurboParser(StructuredClassifier):
 
         for g in range(len(instance)):
             for h in range(1, len(instance)):
+                print('Preparing grand siblings with h', h, 'and m', m)
+
                 if g == h:
                     continue
 
