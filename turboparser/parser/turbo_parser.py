@@ -205,6 +205,9 @@ class TurboParser(StructuredClassifier):
         self.options.pruner_max_heads = model_options.pruner_max_heads
         self._set_options()
 
+        # most of the time, we load a model to run its predictions
+        self.eval_mode()
+
     def should_save(self, validation_loss):
         """
         Return a bool for whether the model should be saved. This function
@@ -505,8 +508,6 @@ class TurboParser(StructuredClassifier):
 
         for g in range(len(instance)):
             for h in range(1, len(instance)):
-                print('Preparing grand siblings with h', h, 'and m', m)
-
                 if g == h:
                     continue
 
