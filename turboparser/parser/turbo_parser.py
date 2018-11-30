@@ -505,8 +505,6 @@ class TurboParser(StructuredClassifier):
 
         for g in range(len(instance)):
             for h in range(1, len(instance)):
-                print('Preparing grand siblings with h', h, 'and m', m)
-
                 if g == h:
                     continue
 
