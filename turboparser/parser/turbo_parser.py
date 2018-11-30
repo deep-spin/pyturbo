@@ -896,7 +896,8 @@ class TurboParser(StructuredClassifier):
                 score = output[index]
 
                 if self.options.single_root and root != -1:
-                    self.reassigned_roots += 1
+                    if self.options.evaluate:
+                        self.reassigned_roots += 1
                     if score > root_score:
                         # this token is better scored for root
                         # attach the previous root candidate to it
