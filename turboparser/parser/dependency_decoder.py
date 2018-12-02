@@ -543,7 +543,7 @@ def _populate_structure_list(left_list, right_list, parts, scores,
 
         # make this check because modifier == head has a special meaning for
         # sibling parts
-        if isinstance(part, NextSibling):
+        if isinstance(part, (NextSibling, GrandSibling)):
             is_right = part.sibling > part.head
         else:
             is_right = part.modifier > part.head
