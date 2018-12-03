@@ -205,6 +205,9 @@ class TurboParser(StructuredClassifier):
         self.options.pruner_max_heads = model_options.pruner_max_heads
         self._set_options()
 
+        # most of the time, we load a model to run its predictions
+        self.eval_mode()
+
     def should_save(self, validation_loss):
         """
         Return a bool for whether the model should be saved. This function
@@ -894,7 +897,8 @@ class TurboParser(StructuredClassifier):
                 score = output[index]
 
                 if self.options.single_root and root != -1:
-                    self.reassigned_roots += 1
+                    if self.options.evaluate:
+                        self.reassigned_roots += 1
                     if score > root_score:
                         # this token is better scored for root
                         # attach the previous root candidate to it
