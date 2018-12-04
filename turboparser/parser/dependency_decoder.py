@@ -344,6 +344,8 @@ class DependencyDecoder(StructuredDecoder):
         :param variables: list of binary variables denoting arcs
         """
         offset_arcs, _ = parts.get_offset(Arc)
+        # n is the number of tokens including the root
+        n = len(self.left_siblings)
 
         def create_gp_head_automaton(structures, decreasing):
             """
@@ -362,32 +364,34 @@ class DependencyDecoder(StructuredDecoder):
                              for p in grandparent_structure.parts]
 
                 # (g, h) arcs must always be in increasing order
-                incoming_arcs = grandparent_structure.get_arcs(
-                    sort_decreasing=False, head='grandparent', modifier='head',
-                    sort_by_head=True)
+                # we must include (g, h) even if there is no grandparent part
+                # this happens when the only sibling part is with null siblings
+                h = sib_tuples[0][0]
+                incoming_arcs = []
+                incoming_var_inds = []
+                for g in range(n):
+                    index = parts.find_arc_index(g, h)
+                    if index >= 0:
+                        incoming_var_inds.append(index)
+                        incoming_arcs.append((g, h))
 
                 # get arcs from siblings because we must include even outgoing
                 # arcs that would make a cycle with the grandparent
                 outgoing_arcs = siblings_structure.get_arcs(decreasing)
 
-                if len(incoming_arcs) == 0 or len(outgoing_arcs) == 0:
+                if len(incoming_arcs) == 0:
                     # no grandparent structure; create simple head automaton
-                    # TODO: maybe change the function to receive a single
-                    # structure instead of a list?
                     self._create_head_automata(
                         [siblings_structure], parts, graph, variables,
                         decreasing, offset_arcs)
                     continue
 
-                in_var_inds = [parts.find_arc_index(arc[0],
-                                                    arc[1]) - offset_arcs
-                               for arc in incoming_arcs]
-                out_var_inds = [parts.find_arc_index(arc[0],
-                                                     arc[1]) - offset_arcs
-                                for arc in outgoing_arcs]
+                outgoing_var_inds = [parts.find_arc_index(arc[0],
+                                                          arc[1]) - offset_arcs
+                                     for arc in outgoing_arcs]
 
-                incoming_vars = [variables[i] for i in in_var_inds]
-                outgoing_vars = [variables[i] for i in out_var_inds]
+                incoming_vars = [variables[i] for i in incoming_var_inds]
+                outgoing_vars = [variables[i] for i in outgoing_var_inds]
                 local_variables = incoming_vars + outgoing_vars
 
                 indices = gp_indices + sib_indices
