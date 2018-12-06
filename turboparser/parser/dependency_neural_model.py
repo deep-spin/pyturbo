@@ -339,7 +339,7 @@ class DependencyNeuralModel(nn.Module):
             head_indices.append(part.head)
             modifier_indices.append(part.modifier)
             if part.sibling == 0:
-                # this indicates there's no sibling to the left
+                # sibling == 0 or -1 indicates there's no sibling to the left
                 # (to the right, sibling == len(states))
                 sibling_indices.append(len(states))
             else:
@@ -387,7 +387,7 @@ class DependencyNeuralModel(nn.Module):
             modifier_indices.append(part.modifier)
             grandparent_indices.append(part.grandparent)
             if part.sibling == 0:
-                # this indicates there's no sibling to the left
+                # sibling == 0 or -1 indicates there's no sibling to the left
                 # (to the right, sibling == len(states))
                 sibling_indices.append(len(states))
             else:
