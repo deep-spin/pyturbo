@@ -326,7 +326,9 @@ class StructuredClassifier(object):
             loss -= inner_loss
             if loss < 0.0:
                 if loss < -1e-6:
-                    msg_len_1 = '(length 1)' if len(instance) == 1 else ''
+                    # len 2 means root + one word
+                    msg_len_1 = '(sentence length 1)' \
+                        if len(instance) == 2 else ''
                     msg = 'Negative loss set to zero: %f %s' % (loss, msg_len_1)
                     logging.warning(msg)
                 loss = 0.0
