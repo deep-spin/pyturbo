@@ -729,9 +729,14 @@ class StructuredClassifier(object):
         toc = time.time()
         logging.info('Time: %f' % (toc - tic))
 
+        self._run_report(len(instances))
+
         if self.options.evaluate:
             self.end_evaluation(len(instances))
 
+    def _run_report(self, num_instances):
+        pass
+            
     def classify_instance(self, instance):
         '''Run the structured classifier on a single instance.'''
         formatted_instance = self.format_instance(instance)
