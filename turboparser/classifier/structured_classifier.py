@@ -534,7 +534,7 @@ class StructuredClassifier(object):
 
         valid_start = time.time()
         self.eval_mode()
-        valid_pred, valid_losses = self._run_batches(valid_data, 128,
+        valid_pred, valid_losses = self._run_batches(valid_data, 32,
                                                      return_loss=True)
         self._get_task_validation_metrics(valid_data, valid_pred)
         valid_end = time.time()
