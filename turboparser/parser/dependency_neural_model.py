@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from .dependency_parts import Arc, DependencyParts, NextSibling, Grandparent, \
     GrandSibling, LabeledArc
+from .token_dictionary import TokenDictionary, UNKNOWN, PADDING
 import numpy as np
 
 #TODO: maybe this should be elsewhere?
@@ -23,12 +24,15 @@ class DependencyNeuralModel(nn.Module):
                  rnn_size,
                  mlp_size,
                  num_layers,
-                 dropout):
+                 dropout,
+                 word_dropout):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
+        :type token_dictionary: TokenDictionary
         :param dependency_dictionary: DependencyDictionary object
         :param word_embeddings: numpy or torch embedding matrix
+        :param word_dropout: chance of replacing a word by the unknown token
         """
         super(DependencyNeuralModel, self).__init__()
         self.embedding_vocab_size = word_embeddings.shape[0]
@@ -40,8 +44,11 @@ class DependencyNeuralModel(nn.Module):
         self.mlp_size = mlp_size
         self.num_layers = num_layers
         self.dropout_rate = dropout
+        self.word_dropout_rate = word_dropout
         self.num_labels = len(dependency_dictionary.relation_alphabet)
-        self.padding = token_dictionary.token_padding
+        self.padding_word = token_dictionary.get_embedding_id(PADDING)
+        self.padding_tag = token_dictionary.get_tag_id(PADDING)
+        self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
 
         # self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
@@ -423,17 +430,22 @@ class DependencyNeuralModel(nn.Module):
         :param word_or_tag: either 'word' or 'tag'
         :return: a tensor with shape (batch, sequence, embedding size)
         """
-        index_matrix = torch.full((len(instances), max_length), self.padding,
+        # padding is not supposed to be used in the end results
+        index_matrix = torch.full((len(instances), max_length), 0,
                                   dtype=torch.long)
-
         for i, instance in enumerate(instances):
             if word_or_tag == 'word':
-                getter = instance.get_form
+                getter = instance.get_embedding_id
             else:
                 getter = instance.get_tag
 
             indices = [getter(j) for j in range(len(instance))]
             index_matrix[i, :len(instance)] = torch.tensor(indices)
+
+        if word_or_tag == 'word' and self.training and self.word_dropout_rate:
+            dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
+            inds = dropout_draw < self.word_dropout_rate
+            index_matrix[inds] = self.unknown_word
 
         if self.on_gpu:
             index_matrix = index_matrix.cuda()
@@ -462,7 +474,7 @@ class DependencyNeuralModel(nn.Module):
         token_lengths = torch.zeros(shape, dtype=torch.long)
 
         shape = [len(instances), max_sentence_length, max_token_length]
-        token_indices = torch.full(shape, self.padding, dtype=torch.long)
+        token_indices = torch.full(shape, 0, dtype=torch.long)
 
         for i, instance in enumerate(instances):
             token_lengths[i, :len(instance)] = torch.tensor(token_lengths_[i])

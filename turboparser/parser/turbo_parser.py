@@ -75,7 +75,8 @@ class TurboParser(StructuredClassifier):
                     rnn_size=self.options.rnn_size,
                     mlp_size=self.options.mlp_size,
                     num_layers=self.options.num_layers,
-                    dropout=self.options.dropout)
+                    dropout=self.options.dropout,
+                    word_dropout=options.word_dropout)
                 self.neural_scorer.initialize(model, self.options.learning_rate)
 
     def _create_random_embeddings(self):
@@ -149,6 +150,7 @@ class TurboParser(StructuredClassifier):
                 pickle.dump(self.neural_scorer.model.mlp_size, f)
                 pickle.dump(self.neural_scorer.model.num_layers, f)
                 pickle.dump(self.neural_scorer.model.dropout_rate, f)
+                pickle.dump(self.neural_scorer.model.word_dropout_rate, f)
                 self.neural_scorer.model.save(f)
 
     def load(self, model_path=None):
@@ -170,6 +172,7 @@ class TurboParser(StructuredClassifier):
                 mlp_size = pickle.load(f)
                 num_layers = pickle.load(f)
                 dropout = pickle.load(f)
+                word_dropout = pickle.load(f)
                 dummy_embeddings = np.empty([embedding_vocab_size,
                                              word_embedding_size], np.float32)
                 neural_model = DependencyNeuralModel(
@@ -182,7 +185,8 @@ class TurboParser(StructuredClassifier):
                     rnn_size=rnn_size,
                     mlp_size=mlp_size,
                     num_layers=num_layers,
-                    dropout=dropout)
+                    dropout=dropout,
+                    word_dropout=word_dropout)
                 neural_model.load(f)
                 self.neural_scorer = NeuralScorer(neural_model)
 

@@ -182,6 +182,9 @@ class TokenDictionary(Dictionary):
         """
         Initializes the dictionary with indices for word forms and tags.
 
+        If a word dictionary with words having pretrained embeddings is given,
+        new words found in the training data are added in the beginning of it
+
         :param reader: a subclass of Reader
         :param word_dict: optional dictionary mapping words to indices, in case
             pre-trained embeddings are used.
@@ -196,6 +199,7 @@ class TokenDictionary(Dictionary):
         morph_tag_counts = Counter()
 
         for name in self.special_symbols.names:
+            # embeddings not included here to keep the same ordering
             for alphabet in [self.form_alphabet,
                              self.form_lower_alphabet,
                              self.lemma_alphabet,
@@ -204,12 +208,6 @@ class TokenDictionary(Dictionary):
                              self.tag_alphabet,
                              self.morph_tag_alphabet]:
                 alphabet.insert(name)
-            # for counts in [form_counts,
-            #                form_lower_counts,
-            #                lemma_counts,
-            #                tag_counts,
-            #                morph_tag_counts]:
-            #     counts.append(-1)
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.

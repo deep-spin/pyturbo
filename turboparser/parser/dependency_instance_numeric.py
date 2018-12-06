@@ -119,6 +119,9 @@ class DependencyInstanceNumeric(DependencyInstance):
     def get_characters(self, i):
         return self.input.characters[i]
 
+    def get_embedding_id(self, i):
+        return self.input.embedding_ids[i]
+
     def get_form_lower(self, i):
         return self.input.forms_lower[i]
 

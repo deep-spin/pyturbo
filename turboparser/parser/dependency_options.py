@@ -106,6 +106,8 @@ class DependencyOptionParser(OptionParser):
                             help='Number of RNN layers')
         parser.add_argument('--dropout', type=float, default=0,
                             help='Dropout rate')
+        parser.add_argument('--word_dropout', type=float, default=0,
+                            help='Word dropout rate (replace by unknown)')
         parser.add_argument('--learning_rate', type=float, default=0.001,
                             help='Neural model learning rate')
 
@@ -168,6 +170,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         options.mlp_size = args['mlp_size']
         options.num_layers = args['num_layers']
         options.dropout = args['dropout']
+        options.word_dropout = args['word_dropout']
         options.learning_rate = args['learning_rate']
 
         if options.model_type == 'basic':
