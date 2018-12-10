@@ -19,7 +19,6 @@ def train_parser(options):
     logging.info('Training the parser...')
     dependency_parser = TurboParser(options)
     dependency_parser.train()
-    dependency_parser.save()
 
 
 def test_parser(options):
