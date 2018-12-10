@@ -226,28 +226,22 @@ class StructuredClassifier(object):
         self.parameters.finalize(self.options.training_epochs
                                  * len(train_instances))
 
-    def read_instances(self, path, return_originals=False):
+    def read_instances(self, path):
         """
         Read instances from the given path and change them to the format
         used internally.
 
+        Returned instances are not formatted; i.e., they have non-numeric
+        attributes.
+
         :param path: path to a file
-        :param return_originals: if True, return a tuple (formatted_instances,
-        original_instances)
-        :return: list of instances
+        :return: list of instances (not formatted)
         """
         instances = []
-        original_instances = []
 
         with self.reader.open(path) as r:
             for instance in r:
-                formatted_instance = self.format_instance(instance)
-                instances.append(formatted_instance)
-                if return_originals:
-                    original_instances.append(instance)
-
-        if return_originals:
-            return instances, original_instances
+                instances.append(instance)
 
         return instances
 
@@ -626,8 +620,9 @@ class StructuredClassifier(object):
         """
         Create parts for all instances in the batch.
 
-        :param instances: list of Instance objects
+        :param instances: list of non-formatted Instance objects
         :return: an InstanceData object.
+            It contains formatted instances.
             If the instances do not have the gold label, the gold attribute
             will be a list of None. In neural models, features is also a
             list of None.
@@ -635,9 +630,10 @@ class StructuredClassifier(object):
         all_parts = []
         all_gold = []
         all_features = []
+        formatted_instances = []
 
         for instance in instances:
-            parts, gold_output = self.make_parts(instance)
+            f_instance, parts, gold_output = self.make_parts(instance)
             if self.options.neural:
                 features = None
             else:
@@ -649,12 +645,14 @@ class StructuredClassifier(object):
                 if self.options.only_supported_features:
                     self.remove_unsupported_features(instance, parts, features)
 
+            formatted_instances.append(f_instance)
             all_parts.append(parts)
             all_features.append(features)
             all_gold.append(gold_output)
 
         self._report_make_parts(instances, all_parts)
-        data = InstanceData(instances, all_parts, all_features, all_gold)
+        data = InstanceData(formatted_instances, all_parts, all_features,
+                            all_gold)
         return data
 
     def run_batch(self, instance_data, return_loss=False):
@@ -712,8 +710,8 @@ class StructuredClassifier(object):
         if self.options.evaluate:
             self.begin_evaluation()
 
-        instances, orig_instances = self.read_instances(self.options.test_path,
-                                                        return_originals=True)
+        instances = self.read_instances(self.options.test_path)
+        logging.info('Number of instances: %d' % len(instances))
         data = self.make_parts_batch(instances)
         predictions = []
         batch_index = 0
@@ -724,8 +722,7 @@ class StructuredClassifier(object):
             predictions.extend(batch_predictions)
             batch_index = next_index
 
-        self.write_predictions(orig_instances, data.parts, predictions)
-        logging.info('Number of instances: %d' % len(instances))
+        self.write_predictions(instances, data.parts, predictions)
         toc = time.time()
         logging.info('Time: %f' % (toc - tic))
 
@@ -739,8 +736,7 @@ class StructuredClassifier(object):
             
     def classify_instance(self, instance):
         '''Run the structured classifier on a single instance.'''
-        formatted_instance = self.format_instance(instance)
-        parts, gold_output = self.make_parts(formatted_instance)
+        formatted_instance, parts, gold_output = self.make_parts(instance)
         features = self.make_features(formatted_instance, parts)
         scores = self.compute_scores(formatted_instance, parts, features)
         predicted_output = self.decoder.decode(formatted_instance, parts,

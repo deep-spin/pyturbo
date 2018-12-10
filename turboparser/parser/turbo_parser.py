@@ -280,6 +280,7 @@ class TurboParser(StructuredClassifier):
         pruner_options.train = False
         pruner = TurboParser(pruner_options)
         pruner.load(model_path)
+
         return pruner
 
     def format_instance(self, instance):
@@ -289,11 +290,12 @@ class TurboParser(StructuredClassifier):
         """
         Prune out some arcs with the pruner model.
 
-        :param instance: a DependencyInstance object
+        :param instance: a DependencyInstance object, not formatted
         :param parts: a DependencyParts object with arcs
         :param gold_output: either None or a 0/1 array indicating gold parts
         :return: a new DependencyParts object contained the kept arcs
         """
+        instance = self.pruner.format_instance(instance)
         scores = self.pruner.compute_scores(instance, parts)[0]
         new_parts, new_gold = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores, gold_output,
@@ -359,17 +361,22 @@ class TurboParser(StructuredClassifier):
         """
         Create the parts (arcs) into which the problem is factored.
 
-        :param instance: a DependencyInstance object
-        :return: a tuple (parts, gold_output). If the instances don't have the
-            gold label, `gold_output` is None. If it does, it is a numpy array.
+        :param instance: a DependencyInstance object, not yet formatted.
+        :return: a tuple (instance, parts, gold_output).
+            If the instances don't have the gold label, `gold_output` is None.
+            If it does, it is a numpy array.
+            The returned instance will have been formatted.
         """
         parts = DependencyParts()
         gold_output = None if instance.output is None else []
         self.pruner_mistakes = 0
 
+        orig_instance = instance
+        instance = self.format_instance(instance)
+
         self.make_parts_basic(instance, parts, gold_output)
         if self.has_pruner:
-            parts, gold_output = self.prune(instance, parts, gold_output)
+            parts, gold_output = self.prune(orig_instance, parts, gold_output)
 
         if not self.options.unlabeled:
             self.make_parts_labeled(instance, parts, gold_output)
@@ -391,9 +398,7 @@ class TurboParser(StructuredClassifier):
                 'Number of parts = %d and number of gold outputs = % d' \
                 % (num_parts, num_gold)
 
-        # self.print_parts(GrandSibling, parts, gold_output)
-
-        return parts, gold_output
+        return instance, parts, gold_output
 
     def print_parts(self, part_type, parts, gold):
         """
