@@ -24,10 +24,11 @@ class MultiwordSpan(object):
 
 
 class DependencyInstanceInput(object):
-    def __init__(self, forms, lemmas, tags, morph_tags, multiwords):
+    def __init__(self, forms, lemmas, tags, fine_tags, morph_tags, multiwords):
         self.forms = forms
         self.lemmas = lemmas
         self.tags = tags
+        self.fine_tags = fine_tags
         self.morph_tags = morph_tags
         self.multiwords = multiwords
 
@@ -54,6 +55,9 @@ class DependencyInstance(Instance):
 
     def get_tag(self, i):
         return self.input.tags[i]
+
+    def get_fine_tag(self, i):
+        return self.input.fine_tags[i]
 
     def get_num_morph_tags(self, i):
         return len(self.input.morph_tags[i])

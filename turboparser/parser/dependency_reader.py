@@ -80,8 +80,8 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
                         'Invalid value of head (%d) not in range [1..%d]'
                         % (heads[i], length))
             relations[i] = info[7]
-        input_ = DependencyInstanceInput(forms, lemmas, tags, morph_tags,
-                                         multiwords)
+        input_ = DependencyInstanceInput(forms, lemmas, tags, fine_tags,
+                                         morph_tags, multiwords)
         if heads[1] == -1:
             output = None
         else:

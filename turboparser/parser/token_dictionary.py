@@ -24,6 +24,7 @@ class TokenDictionary(Dictionary):
         self.suffix_alphabet = Alphabet()
         self.morph_tag_alphabet = Alphabet()
         self.tag_alphabet = Alphabet()
+        self.fine_tag_alphabet = Alphabet()
         self.shape_alphabet = Alphabet()
 
         # keep all alphabets ordered
@@ -36,6 +37,7 @@ class TokenDictionary(Dictionary):
                           self.suffix_alphabet,
                           self.morph_tag_alphabet,
                           self.tag_alphabet,
+                          self.fine_tag_alphabet,
                           self.shape_alphabet]
 
         # Special symbols.
@@ -84,6 +86,7 @@ class TokenDictionary(Dictionary):
         self.suffix_alphabet = pickle.load(file)
         self.morph_tag_alphabet = pickle.load(file)
         self.tag_alphabet = pickle.load(file)
+        self.fine_tag_alphabet = pickle.load(file)
         self.shape_alphabet = pickle.load(file)
         self.special_symbols = pickle.load(file)
         self.token_unknown = pickle.load(file)
@@ -117,6 +120,9 @@ class TokenDictionary(Dictionary):
 
     def get_num_tags(self):
         return len(self.tag_alphabet)
+
+    def get_num_fine_tags(self):
+        return len(self.fine_tag_alphabet)
 
     def get_embedding_id(self, form):
         id_ = self.embedding_alphabet.lookup(form)
@@ -166,6 +172,12 @@ class TokenDictionary(Dictionary):
             return id_
         return self.tag_alphabet.lookup(UNKNOWN)
 
+    def get_fine_tag_id(self, tag):
+        id_ = self.fine_tag_alphabet.lookup(tag)
+        if id_ >= 0:
+            return id_
+        return self.fine_tag_alphabet.lookup(UNKNOWN)
+
     def get_morph_tag_id(self, morph_tag):
         id_ = self.morph_tag_alphabet.lookup(morph_tag)
         if id_ >= 0:
@@ -196,6 +208,7 @@ class TokenDictionary(Dictionary):
         form_lower_counts = Counter()
         lemma_counts = Counter()
         tag_counts = Counter()
+        fine_tag_counts = Counter()
         morph_tag_counts = Counter()
 
         for name in self.special_symbols.names:
@@ -206,6 +219,7 @@ class TokenDictionary(Dictionary):
                              self.prefix_alphabet,
                              self.suffix_alphabet,
                              self.tag_alphabet,
+                             self.fine_tag_alphabet,
                              self.morph_tag_alphabet]:
                 alphabet.insert(name)
 
@@ -240,6 +254,9 @@ class TokenDictionary(Dictionary):
                     tag = instance.get_tag(i)
                     tag_counts[tag] += 1
 
+                    tag = instance.get_fine_tag(i)
+                    fine_tag_counts[tag] += 1
+
                     # Add morph tags to alphabet.
                     for j in range(instance.get_num_morph_tags(i)):
                         morph_tag = instance.get_morph_tag(i, j)
@@ -250,17 +267,19 @@ class TokenDictionary(Dictionary):
             zip(['char', 'form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
                 [self.character_alphabet, self.form_alphabet,
                  self.form_lower_alphabet, self.lemma_alphabet,
-                 self.tag_alphabet, self.morph_tag_alphabet],
+                 self.tag_alphabet, self.fine_tag_alphabet,
+                 self.morph_tag_alphabet],
                 [char_counts, form_counts, form_lower_counts, lemma_counts,
-                 tag_counts, morph_tag_counts],
+                 tag_counts, fine_tag_counts, morph_tag_counts],
                 [self.classifier.options.char_cutoff,
                  self.classifier.options.form_cutoff,
                  self.classifier.options.form_cutoff,
                  self.classifier.options.lemma_cutoff,
                  self.classifier.options.tag_cutoff,
+                 self.classifier.options.tag_cutoff,
                  self.classifier.options.morph_tag_cutoff],
                 [int(10e6), self.max_forms, self.max_forms, self.max_lemmas,
-                 self.max_tags, self.max_morph_tags]):
+                 self.max_tags, self.max_tags, self.max_morph_tags]):
 
             alphabet.clear()
             for name in self.special_symbols.names:
@@ -292,5 +311,7 @@ class TokenDictionary(Dictionary):
         logging.info('Number of lemmas: %d' % len(self.lemma_alphabet))
         logging.info('Number of prefixes: %d' % len(self.prefix_alphabet))
         logging.info('Number of suffixes: %d' % len(self.suffix_alphabet))
-        logging.info('Number of tags: %d' % len(self.tag_alphabet))
+        logging.info('Number of coarse POS tags: %d' % len(self.tag_alphabet))
+        logging.info('Number of fine POS tags: %d' %
+                     len(self.fine_tag_alphabet))
         logging.info('Number of morph tags: %d' % len(self.morph_tag_alphabet))
