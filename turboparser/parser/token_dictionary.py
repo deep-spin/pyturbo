@@ -284,6 +284,7 @@ class TokenDictionary(Dictionary):
             alphabet.clear()
             for name in self.special_symbols.names:
                 alphabet.insert(name)
+            max_length = max_length - len(self.special_symbols)
             for name, count in counter.most_common(max_length):
                 if count >= cutoff:
                     alphabet.insert(name)
