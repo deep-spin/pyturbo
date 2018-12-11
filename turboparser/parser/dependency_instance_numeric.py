@@ -69,7 +69,6 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
 
             tag = input.fine_tags[i]
             id_ = token_dictionary.get_fine_tag_id(tag)
-            assert id_ < 0xff
             self.fine_tags[i] = id_
 
             # Morphological tags.
