@@ -49,6 +49,7 @@ class DependencyNeuralModel(nn.Module):
         self.padding_word = token_dictionary.get_embedding_id(PADDING)
         self.padding_tag = token_dictionary.get_tag_id(PADDING)
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
+        self.unknown_tag = token_dictionary.get_tag_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
 
         # self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
@@ -96,24 +97,25 @@ class DependencyNeuralModel(nn.Module):
             batch_first=True)
         self.rnn_hidden_size = 2 * rnn_size
         self.tanh = nn.Tanh()
+        self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
 
         # first order
-        self.head_projection = self._create_projection()
-        self.modifier_projection = self._create_projection()
+        self.head_mlp = self._create_mlp()
+        self.modifier_mlp = self._create_mlp()
         self.arc_scorer = self._create_scorer()
         self.label_scorer = self._create_scorer(output_size=self.num_labels)
 
         if model_type.grandparents:
-            self.gp_grandparent_projection = self._create_projection()
-            self.gp_head_projection = self._create_projection()
-            self.gp_modifier_projection = self._create_projection()
+            self.gp_grandparent_mlp = self._create_mlp()
+            self.gp_head_mlp = self._create_mlp()
+            self.gp_modifier_mlp = self._create_mlp()
             self.grandparent_scorer = self._create_scorer()
 
         if model_type.consecutive_siblings:
-            self.sib_head_projection = self._create_projection()
-            self.sib_modifier_projection = self._create_projection()
-            self.sib_sibling_projection = self._create_projection()
+            self.sib_head_mlp = self._create_mlp()
+            self.sib_modifier_mlp = self._create_mlp()
+            self.sib_sibling_mlp = self._create_mlp()
             self.sibling_scorer = self._create_scorer()
 
         if model_type.consecutive_siblings or model_type.grandsiblings \
@@ -121,19 +123,19 @@ class DependencyNeuralModel(nn.Module):
             self.null_sibling_tensor = self._create_parameter_tensor()
 
         if model_type.grandsiblings:
-            self.gsib_head_projection = self._create_projection()
-            self.gsib_modifier_projection = self._create_projection()
-            self.gsib_sibling_projection = self._create_projection()
-            self.gsib_grandparent_projection = self._create_projection()
+            self.gsib_head_mlp = self._create_mlp()
+            self.gsib_modifier_mlp = self._create_mlp()
+            self.gsib_sibling_mlp = self._create_mlp()
+            self.gsib_grandparent_mlp = self._create_mlp()
             self.grandsibling_scorer = self._create_scorer()
 
         if self.distance_embedding_size:
-            self.distance_projection = nn.Linear(
+            self.distance_projector = nn.Linear(
                 distance_embedding_size,
                 mlp_size,
                 bias=True)
         else:
-            self.distance_projection = None
+            self.distance_mlp = None
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -172,18 +174,32 @@ class DependencyNeuralModel(nn.Module):
 
         return scorer
 
-    def _create_projection(self):
+    def _create_mlp(self, input_size=None, hidden_size=None, num_layers=2):
         """
-        Create the weights for projecting an input from the BiLSTM to a
-        feedforward layer.
+        Create the weights for a fully connected subnetwork.
 
+        The first layer will have a weight matrix (input x hidden), subsequent
+        layers will be (hidden x hidden).
+
+        :param input_size: if not given, will be assumed rnn_size * 2
+        :param hidden_size: if not given, will be assumed mlp_size
+        :param num_layers: number of hidden layers (including the last one)
         :return: an nn.Linear object, mapping an input with 2*hidden_units
             to hidden_units.
         """
-        linear = nn.Linear(self.rnn_size * 2, self.mlp_size, bias=False)
-        projection = nn.Sequential(self.dropout, linear)
+        if input_size is None:
+            input_size = self.rnn_size * 2
+        if hidden_size is None:
+            hidden_size = self.mlp_size
 
-        return projection
+        layers = []
+        for _ in range(num_layers):
+            layer = nn.Linear(input_size, hidden_size)
+            layers.extend([self.dropout, layer, self.relu])
+            input_size = hidden_size
+
+        mlp = nn.Sequential(*layers)
+        return mlp
 
     def save(self, file):
         torch.save(self.state_dict(), file)
@@ -213,8 +229,8 @@ class DependencyNeuralModel(nn.Module):
             positions relative to first order features are indexed by the parts
             object. It is modified in-place.
         """
-        head_tensors = self.head_projection(states)
-        modifier_tensors = self.modifier_projection(states)
+        head_tensors = self.head_mlp(states)
+        modifier_tensors = self.modifier_mlp(states)
         offset, num_arcs = parts.get_offset(Arc)
 
         head_indices = []
@@ -244,7 +260,7 @@ class DependencyNeuralModel(nn.Module):
                 distance_indices = distance_indices.cuda()
             
             distances = self.distance_embeddings(distance_indices)
-            distance_projections = self.distance_projection(distances)
+            distance_projections = self.distance_projector(distances)
             distance_projections = distance_projections.view(
                 -1, self.mlp_size)
 
@@ -285,9 +301,9 @@ class DependencyNeuralModel(nn.Module):
             positions relative to the features are indexed by the parts
             object. It is modified in-place.
         """
-        head_tensors = self.gp_head_projection(states)
-        grandparent_tensors = self.gp_grandparent_projection(states)
-        modifier_tensors = self.gp_modifier_projection(states)
+        head_tensors = self.gp_head_mlp(states)
+        grandparent_tensors = self.gp_grandparent_mlp(states)
+        modifier_tensors = self.gp_modifier_mlp(states)
 
         head_indices = []
         modifier_indices = []
@@ -325,9 +341,9 @@ class DependencyNeuralModel(nn.Module):
         states_and_sibling = torch.cat([states,
                                         self.null_sibling_tensor.view(1, -1)])
 
-        head_tensors = self.sib_head_projection(states)
-        modifier_tensors = self.sib_modifier_projection(states)
-        sibling_tensors = self.sib_sibling_projection(states_and_sibling)
+        head_tensors = self.sib_head_mlp(states)
+        modifier_tensors = self.sib_modifier_mlp(states)
+        sibling_tensors = self.sib_sibling_mlp(states_and_sibling)
 
         head_indices = []
         modifier_indices = []
@@ -371,10 +387,10 @@ class DependencyNeuralModel(nn.Module):
         states_and_sibling = torch.cat([states,
                                         self.null_sibling_tensor.view(1, -1)])
 
-        head_tensors = self.gsib_head_projection(states)
-        modifier_tensors = self.gsib_modifier_projection(states)
-        sibling_tensors = self.gsib_sibling_projection(states_and_sibling)
-        grandparent_tensors = self.gsib_grandparent_projection(states)
+        head_tensors = self.gsib_head_mlp(states)
+        modifier_tensors = self.gsib_modifier_mlp(states)
+        sibling_tensors = self.gsib_sibling_mlp(states_and_sibling)
+        grandparent_tensors = self.gsib_grandparent_mlp(states)
 
         head_indices = []
         modifier_indices = []
