@@ -159,6 +159,26 @@ class TurboParser(StructuredClassifier):
             model_path = self.options.model_path
         with open(model_path, 'rb') as f:
             model_options = pickle.load(f)
+
+            self.options.neural = model_options.neural
+            self.options.model_type = model_options.model_type
+            self.options.unlabeled = model_options.unlabeled
+            self.options.projective = model_options.projective
+
+            # prune arcs with label/head POS/modifier POS unseen in training
+            self.options.prune_relations = model_options.prune_relations
+
+            # prune arcs with a distance unseen with the given POS tags
+            self.options.prune_distances = model_options.prune_distances
+
+            # threshold for the basic pruner, if used
+            self.options.pruner_posterior_threshold = \
+                model_options.pruner_posterior_threshold
+
+            # maximum candidate heads per word in the basic pruner, if used
+            self.options.pruner_max_heads = model_options.pruner_max_heads
+            self._set_options()
+
             self.token_dictionary.load(f)
             self.dictionary.load(f)
             self.parameters = pickle.load(f)
@@ -189,25 +209,6 @@ class TurboParser(StructuredClassifier):
                     word_dropout=word_dropout)
                 neural_model.load(f)
                 self.neural_scorer = NeuralScorer(neural_model)
-
-        self.options.neural = model_options.neural
-        self.options.model_type = model_options.model_type
-        self.options.unlabeled = model_options.unlabeled
-        self.options.projective = model_options.projective
-
-        # prune arcs with label/head POS/modifier POS unseen in training data
-        self.options.prune_relations = model_options.prune_relations
-
-        # prune arcs with a distance unseen in training with the given POS tags
-        self.options.prune_distances = model_options.prune_distances
-
-        # threshold for the basic pruner, if used
-        self.options.pruner_posterior_threshold = \
-            model_options.pruner_posterior_threshold
-
-        # maximum candidate heads per word in the basic pruner, if used
-        self.options.pruner_max_heads = model_options.pruner_max_heads
-        self._set_options()
 
         # most of the time, we load a model to run its predictions
         self.eval_mode()

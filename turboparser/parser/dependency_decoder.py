@@ -90,7 +90,8 @@ class DependencyDecoder(StructuredDecoder):
 
         self._index_parts_by_head(parts, instance, scores)
 
-        if self.use_siblings and self.use_grandparents:
+        if self.use_grandsiblings or \
+                (self.use_siblings and self.use_grandparents):
             self.create_gp_head_automata(parts, graph, variables)
         elif self.use_grandparents:
             self.create_grandparent_factors(parts, scores, graph, variables)
@@ -173,23 +174,23 @@ class DependencyDecoder(StructuredDecoder):
         """
         n = len(instance)
 
+        self.left_siblings = create_empty_structures(n)
+        self.right_siblings = create_empty_structures(n)
         if self.use_siblings:
-            self.left_siblings = create_empty_structures(n)
-            self.right_siblings = create_empty_structures(n)
             _populate_structure_list(
                 self.left_siblings, self.right_siblings, parts, scores,
                 NextSibling)
 
+        self.left_grandparents = create_empty_structures(n)
+        self.right_grandparents = create_empty_structures(n)
         if self.use_grandparents:
-            self.left_grandparents = create_empty_structures(n)
-            self.right_grandparents = create_empty_structures(n)
             _populate_structure_list(
                 self.left_grandparents, self.right_grandparents, parts, scores,
                 Grandparent)
 
+        self.left_grandsiblings = create_empty_structures(n)
+        self.right_grandsiblings = create_empty_structures(n)
         if self.use_grandsiblings:
-            self.left_grandsiblings = create_empty_structures(n)
-            self.right_grandsiblings = create_empty_structures(n)
             _populate_structure_list(
                 self.left_grandsiblings, self.right_grandsiblings, parts,
                 scores, GrandSibling)
