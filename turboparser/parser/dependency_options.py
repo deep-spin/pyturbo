@@ -110,6 +110,8 @@ class DependencyOptionParser(OptionParser):
                             help='Dropout rate')
         parser.add_argument('--word_dropout', type=float, default=0,
                             help='Word dropout rate (replace by unknown)')
+        parser.add_argument('--tag_dropout', type=float, default=0,
+                            help='Tag dropout rate (replace by unknown)')
         parser.add_argument('--learning_rate', type=float, default=0.001,
                             help='Neural model learning rate')
 
@@ -174,6 +176,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         options.mlp_layers = args['mlp_layers']
         options.dropout = args['dropout']
         options.word_dropout = args['word_dropout']
+        options.tag_dropout = args['tag_dropout']
         options.learning_rate = args['learning_rate']
 
         if options.model_type == 'basic':

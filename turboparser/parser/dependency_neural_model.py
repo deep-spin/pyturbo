@@ -26,14 +26,18 @@ class DependencyNeuralModel(nn.Module):
                  rnn_layers,
                  mlp_layers,
                  dropout,
-                 word_dropout):
+                 word_dropout,
+                 tag_dropout):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
         :type token_dictionary: TokenDictionary
         :param dependency_dictionary: DependencyDictionary object
         :param word_embeddings: numpy or torch embedding matrix
-        :param word_dropout: chance of replacing a word by the unknown token
+        :param word_dropout: probability of replacing a word with the unknown
+            token
+        :param tag_dropout: probability of replacing a POS tag with the unknown
+            tag
         """
         super(DependencyNeuralModel, self).__init__()
         self.embedding_vocab_size = word_embeddings.shape[0]
@@ -47,6 +51,7 @@ class DependencyNeuralModel(nn.Module):
         self.mlp_layers = mlp_layers
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
+        self.tag_dropout_rate = tag_dropout
         self.num_labels = len(dependency_dictionary.relation_alphabet)
         self.padding_word = token_dictionary.get_embedding_id(PADDING)
         self.padding_tag = token_dictionary.get_tag_id(PADDING)
@@ -463,18 +468,22 @@ class DependencyNeuralModel(nn.Module):
             indices = [getter(j) for j in range(len(instance))]
             index_matrix[i, :len(instance)] = torch.tensor(indices)
 
-        if word_or_tag == 'word' and self.training and self.word_dropout_rate:
+        if word_or_tag == 'word':
+            embedding_matrix = self.word_embeddings
+            dropout_rate = self.word_dropout_rate
+        else:
+            embedding_matrix = self.tag_embeddings
+            dropout_rate = self.tag_dropout_rate
+
+        if self.training and dropout_rate:
             dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
-            inds = dropout_draw < self.word_dropout_rate
-            index_matrix[inds] = self.unknown_word
+            inds = dropout_draw < dropout_rate
+            unknown_symbol = self.unknown_word if word_or_tag == 'word' \
+                else self.unknown_tag
+            index_matrix[inds] = unknown_symbol
 
         if self.on_gpu:
             index_matrix = index_matrix.cuda()
-
-        if word_or_tag == 'word':
-            embedding_matrix = self.word_embeddings
-        else:
-            embedding_matrix = self.tag_embeddings
 
         return embedding_matrix(index_matrix)
 
