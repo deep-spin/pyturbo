@@ -23,7 +23,8 @@ class DependencyNeuralModel(nn.Module):
                  distance_embedding_size,
                  rnn_size,
                  mlp_size,
-                 num_layers,
+                 rnn_layers,
+                 mlp_layers,
                  dropout,
                  word_dropout):
         """
@@ -42,7 +43,8 @@ class DependencyNeuralModel(nn.Module):
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
         self.mlp_size = mlp_size
-        self.num_layers = num_layers
+        self.rnn_layers = rnn_layers
+        self.mlp_layers = mlp_layers
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
         self.num_labels = len(dependency_dictionary.relation_alphabet)
@@ -91,7 +93,7 @@ class DependencyNeuralModel(nn.Module):
         self.rnn = nn.LSTM(
             input_size=input_size,
             hidden_size=rnn_size,
-            num_layers=num_layers,
+            num_layers=rnn_layers,
             dropout=dropout,
             bidirectional=True,
             batch_first=True)
@@ -174,7 +176,7 @@ class DependencyNeuralModel(nn.Module):
 
         return scorer
 
-    def _create_mlp(self, input_size=None, hidden_size=None, num_layers=2):
+    def _create_mlp(self, input_size=None, hidden_size=None, num_layers=None):
         """
         Create the weights for a fully connected subnetwork.
 
@@ -183,7 +185,8 @@ class DependencyNeuralModel(nn.Module):
 
         :param input_size: if not given, will be assumed rnn_size * 2
         :param hidden_size: if not given, will be assumed mlp_size
-        :param num_layers: number of hidden layers (including the last one)
+        :param num_layers: number of hidden layers (including the last one). If
+            not given, will be mlp_layers
         :return: an nn.Linear object, mapping an input with 2*hidden_units
             to hidden_units.
         """
@@ -191,6 +194,8 @@ class DependencyNeuralModel(nn.Module):
             input_size = self.rnn_size * 2
         if hidden_size is None:
             hidden_size = self.mlp_size
+        if num_layers is None:
+            num_layers = self.mlp_layers
 
         layers = []
         for _ in range(num_layers):

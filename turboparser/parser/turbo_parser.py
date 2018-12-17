@@ -74,7 +74,8 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size,
                     rnn_size=self.options.rnn_size,
                     mlp_size=self.options.mlp_size,
-                    num_layers=self.options.num_layers,
+                    rnn_layers=self.options.rnn_layers,
+                    mlp_layers=self.options.mlp_layers,
                     dropout=self.options.dropout,
                     word_dropout=options.word_dropout)
                 self.neural_scorer.initialize(model, self.options.learning_rate)
@@ -148,7 +149,8 @@ class TurboParser(StructuredClassifier):
                 pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_size, f)
                 pickle.dump(self.neural_scorer.model.mlp_size, f)
-                pickle.dump(self.neural_scorer.model.num_layers, f)
+                pickle.dump(self.neural_scorer.model.rnn_layers, f)
+                pickle.dump(self.neural_scorer.model.mlp_layers, f)
                 pickle.dump(self.neural_scorer.model.dropout_rate, f)
                 pickle.dump(self.neural_scorer.model.word_dropout_rate, f)
                 self.neural_scorer.model.save(f)
@@ -190,7 +192,8 @@ class TurboParser(StructuredClassifier):
                 distance_embedding_size = pickle.load(f)
                 rnn_size = pickle.load(f)
                 mlp_size = pickle.load(f)
-                num_layers = pickle.load(f)
+                rnn_layers = pickle.load(f)
+                mlp_layers = pickle.load(f)
                 dropout = pickle.load(f)
                 word_dropout = pickle.load(f)
                 dummy_embeddings = np.empty([embedding_vocab_size,
@@ -204,7 +207,8 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size=distance_embedding_size,
                     rnn_size=rnn_size,
                     mlp_size=mlp_size,
-                    num_layers=num_layers,
+                    rnn_layers=rnn_layers,
+                    mlp_layers=mlp_layers,
                     dropout=dropout,
                     word_dropout=word_dropout)
                 neural_model.load(f)
