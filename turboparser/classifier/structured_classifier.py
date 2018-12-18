@@ -515,6 +515,7 @@ class StructuredClassifier(object):
         self.dictionary.stop_growth()
 
         t = len(train_data) * epoch
+        train_data.shuffle()
         batch_index = 0
         batch_size = self.options.batch_size
         while batch_index < len(train_data):

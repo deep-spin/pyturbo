@@ -1,3 +1,5 @@
+import random
+
 class Instance(object):
     '''An abstract instance.'''
     def __init__(self, input, output=None):
@@ -24,3 +26,27 @@ class InstanceData(object):
 
     def __len__(self):
         return len(self.instances)
+
+    def shuffle(self):
+        """
+        Shuffle the data stored by this object.
+        """
+        # zip the attributes together so they are shuffled in the same order
+        data = [self.instances, self.parts]
+        if self.features is not None:
+            data.append(self.features)
+        if self.gold_labels is not None:
+            data.append(self.gold_labels)
+
+        zipped = list(zip(*data))
+        random.shuffle(zipped)
+        shuffled_data = zip(*zipped)
+
+        it = iter(shuffled_data)
+
+        self.instances = list(next(it))
+        self.parts = list(next(it))
+        if self.features is not None:
+            self.features = list(next(it))
+        if self.gold_labels is not None:
+            self.gold_labels = list(next(it))
