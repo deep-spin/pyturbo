@@ -221,8 +221,13 @@ class StructuredClassifier(object):
         self._reset_best_validation_metric()
         self.lambda_coeff = 1.0 / (self.options.regularization_constant *
                                    float(len(train_instances)))
+        self.num_bad_epochs = 0
         for epoch in range(self.options.training_epochs):
             self.train_epoch(epoch, train_data, valid_data)
+
+            if self.num_bad_epochs == self.options.patience:
+                break
+
         self.parameters.finalize(self.options.training_epochs
                                  * len(train_instances))
 
@@ -546,6 +551,9 @@ class StructuredClassifier(object):
         if self.should_save(validation_loss):
             self.save()
             logging.info('Saved model')
+            self.num_bad_epochs = 0
+        else:
+            self.num_bad_epochs += 1
 
         if self.options.training_algorithm in ['perceptron']:
             logging.info('Number of mistakes: %d/%d (%f)' %

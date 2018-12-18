@@ -79,7 +79,10 @@ class TurboParser(StructuredClassifier):
                     dropout=self.options.dropout,
                     word_dropout=options.word_dropout,
                     tag_dropout=options.tag_dropout)
-                self.neural_scorer.initialize(model, self.options.learning_rate)
+
+                self.neural_scorer.initialize(
+                    model, self.options.learning_rate, options.decay,
+                    options.beta1, options.beta2)
 
     def _create_random_embeddings(self):
         """
@@ -769,7 +772,8 @@ class TurboParser(StructuredClassifier):
 
     def _get_task_validation_metrics(self, valid_data, valid_pred):
         """
-        Compute and store internally validation UAS.
+        Compute and store internally validation UAS. Also call the neural scorer
+        to update learning rate based on UAS.
 
         :param valid_data: InstanceData
         :param valid_pred: list with predicted outputs (decoded) for each item
@@ -804,6 +808,8 @@ class TurboParser(StructuredClassifier):
             self._should_save = True
         else:
             self._should_save = False
+
+        self.neural_scorer.lr_scheduler_step(self.validation_uas)
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:

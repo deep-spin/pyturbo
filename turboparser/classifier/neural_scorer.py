@@ -1,18 +1,22 @@
 import torch
 import torch.optim as optim
+import torch.optim.lr_scheduler as scheduler
+
 
 class NeuralScorer(object):
-    def __init__(self, model=None, learning_rate=0.001):
+    def __init__(self):
         self.scores = None
-        if model:
-            self.initialize(model, learning_rate)
 
-    def initialize(self, model, learning_rate=0.001):
+    def initialize(self, model, learning_rate=0.001, decay=1,
+                   beta1=0.9, beta2=0.999):
         self.model = model
         if torch.cuda.is_available():
             self.model.cuda()
         params = [p for p in model.parameters() if p.requires_grad]
-        self.optimizer = optim.Adam(params, lr=learning_rate)
+        self.optimizer = optim.Adam(
+            params, lr=learning_rate, betas=(beta1, beta2))
+        self.scheduler = scheduler.ReduceLROnPlateau(
+            self.optimizer, 'max', factor=decay, patience=0, verbose=True)
 
     def compute_scores(self, instances, parts):
         # Run the forward pass.
@@ -34,6 +38,12 @@ class NeuralScorer(object):
         Set the neural model to eval mode
         """
         self.model.eval()
+
+    def lr_scheduler_step(self, accuracy):
+        """
+        Perform a step of the learning rate scheduler, based on accuracy.
+        """
+        self.scheduler.step(accuracy)
 
     def compute_gradients(self, gold_output, predicted_output):
         """

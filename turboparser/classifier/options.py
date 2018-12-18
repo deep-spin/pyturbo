@@ -52,6 +52,14 @@ class OptionParser(object):
                             help="""Learning rate annealing schedule (SGD 
                             only). Options are 'fixed', 'lecun', 'invsqrt', 
                             'inv'.""")
+        parser.add_argument('--decay', type=float, default=0.99,
+                            help="""Decay value to multiply learning rate after 
+                            an epoch without improvement in the validation 
+                            set.""")
+        parser.add_argument('--beta1', type=float, default=0.9,
+                            help="""Beta1 parameter of the adam optimizer""")
+        parser.add_argument('--beta2', type=float, default=0.999,
+                            help="""Beta2 parameter of the adam optimizer""")
         parser.add_argument('--only_supported_features', action='store_const',
                             default=0, const=1,
                             help="""1 for using supported features only 
@@ -61,6 +69,10 @@ class OptionParser(object):
                             at the end of training.""")
         parser.add_argument('--training_epochs', type=int, default=10,
                             help='Number of training epochs.''')
+        parser.add_argument('--patience', type=int, default=5,
+                            help='Number of epochs without improvements in the'
+                                 ' validation set to wait before terminating '
+                                 'training.')
         parser.add_argument('--regularization_constant', type=float,
                             default=1e12,
                             help='Regularization parameter C.')
@@ -96,5 +108,9 @@ class OptionParser(object):
         options.training_epochs = args['training_epochs']
         options.regularization_constant = args['regularization_constant']
         options.batch_size = args['batch_size']
+        options.patience = args['patience']
+        options.decay = args['decay']
+        options.beta1 = args['beta1']
+        options.beta2 = args['beta2']
 
         return options
