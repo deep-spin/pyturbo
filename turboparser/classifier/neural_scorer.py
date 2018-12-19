@@ -6,6 +6,7 @@ import torch.optim.lr_scheduler as scheduler
 class NeuralScorer(object):
     def __init__(self):
         self.scores = None
+        self.model = None
 
     def initialize(self, model, learning_rate=0.001, decay=1,
                    beta1=0.9, beta2=0.999):
@@ -17,6 +18,9 @@ class NeuralScorer(object):
             params, lr=learning_rate, betas=(beta1, beta2))
         self.scheduler = scheduler.ReduceLROnPlateau(
             self.optimizer, 'max', factor=decay, patience=0, verbose=True)
+
+    def set_model(self, model):
+        self.model = model
 
     def compute_scores(self, instances, parts):
         # Run the forward pass.

@@ -218,7 +218,8 @@ class TurboParser(StructuredClassifier):
                     dropout=dropout,
                     word_dropout=word_dropout, tag_dropout=tag_dropout)
                 neural_model.load(f)
-                self.neural_scorer = NeuralScorer(neural_model)
+                self.neural_scorer = NeuralScorer()
+                self.neural_scorer.set_model(neural_model)
 
         # most of the time, we load a model to run its predictions
         self.eval_mode()
