@@ -131,6 +131,8 @@ class DependencyParts(list):
         return self[offset:size]
 
     def get_offset(self, type_):
+        """Return the tuple (offset, num_parts) of the given type in this
+        list"""
         return self.offsets[type_]
 
     def set_offset(self, type_, offset, size):

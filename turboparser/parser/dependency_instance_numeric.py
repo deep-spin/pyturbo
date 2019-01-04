@@ -3,7 +3,7 @@ from .dependency_instance import DependencyInstance, \
 
 
 class DependencyInstanceNumericInput(DependencyInstanceInput):
-    def __init__(self, input, dictionary):
+    def __init__(self, input, token_dictionary):
         self.characters = [None for _ in range(len(input.forms))]
         self.embedding_ids = [-1] * len(input.forms)
         self.forms = [-1] * len(input.forms)
@@ -19,8 +19,6 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
         self.is_verb = [False] * len(input.forms)
         self.is_punc = [False] * len(input.forms)
         self.is_coord = [False] * len(input.forms)
-
-        token_dictionary = dictionary.classifier.token_dictionary
 
         for i in range(len(input.forms)):
             # Form and lower-case form.
@@ -90,32 +88,40 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
             self.is_coord[i] = input.tags[i] in ['Conj', 'KON', 'conj',
                                                  'Conjunction', 'CC', 'cc']
 
+
 class DependencyInstanceNumericOutput(DependencyInstanceOutput):
     def __init__(self, output, dictionary):
         self.heads = [-1] * len(output.heads)
         self.relations = [-1] * len(output.relations)
-
-        token_dictionary = dictionary.classifier.token_dictionary
+        if output.tags is None:
+            self.tags = None
+        else:
+            self.tags = [-1] * len(output.tags)
 
         for i in range(len(output.heads)):
             self.heads[i] = output.heads[i]
             relation = output.relations[i]
-            id = dictionary.relation_alphabet.lookup(relation)
-            assert id < 0xff # Check this.
-            if id < 0:
-                id = token_dictionary.token_unknown
-            self.relations[i] = id
+            self.relations[i] = dictionary.get_relation_id(relation)
+            if self.tags is not None:
+                tag = output.tags[i]
+                self.tags[i] = dictionary.get_tag_id(tag)
+
 
 class DependencyInstanceNumeric(DependencyInstance):
     '''An dependency parsing instance with numeric fields.'''
-    def __init__(self, instance, dictionary):
+    def __init__(self, instance, token_dictionary):
+        """
+        :param instance: DependencyInstance
+        :param token_dictionary: TokenDictionary
+        """
         if instance.output is None:
             output = None
         else:
             output = DependencyInstanceNumericOutput(instance.output,
-                                                     dictionary)
+                                                     token_dictionary)
         DependencyInstance.__init__(
-            self, DependencyInstanceNumericInput(instance.input, dictionary),
+            self, DependencyInstanceNumericInput(instance.input,
+                                                 token_dictionary),
             output)
 
     def __len__(self):

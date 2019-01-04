@@ -34,9 +34,10 @@ class DependencyInstanceInput(object):
 
 
 class DependencyInstanceOutput(object):
-    def __init__(self, heads, relations):
+    def __init__(self, heads, relations, tags=None):
         self.heads = heads
         self.relations = relations
+        self.tags = tags
 
 
 class DependencyInstance(Instance):

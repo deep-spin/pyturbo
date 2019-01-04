@@ -85,6 +85,6 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
         if heads[1] == -1:
             output = None
         else:
-            output = DependencyInstanceOutput(heads, relations)
+            output = DependencyInstanceOutput(heads, relations, tags)
 
         return DependencyInstance(input_, output)
