@@ -80,6 +80,9 @@ class TurboParser(StructuredClassifier):
                     word_dropout=options.word_dropout,
                     tag_dropout=options.tag_dropout)
 
+                print('Model summary:')
+                print(model)
+
                 self.neural_scorer.initialize(
                     model, self.options.learning_rate, options.decay,
                     options.beta1, options.beta2)
@@ -220,6 +223,9 @@ class TurboParser(StructuredClassifier):
                 neural_model.load(f)
                 self.neural_scorer = NeuralScorer()
                 self.neural_scorer.set_model(neural_model)
+
+                print('Model summary:')
+                print(neural_model)
 
         # most of the time, we load a model to run its predictions
         self.eval_mode()
