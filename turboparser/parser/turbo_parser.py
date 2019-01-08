@@ -266,6 +266,12 @@ class TurboParser(StructuredClassifier):
         """
         return 'Naive validation UAS: %f' % self.validation_uas
 
+    def _get_post_train_report(self):
+        """
+        Return the best parsing accuracy.
+        """
+        return 'Best validation UAS: %f' % self.best_validation_uas
+
     def _update_task_metrics(self, predicted, gold, instance, parts):
         """
         Update the accumulated UAS count. It sums the UAS for each sentence

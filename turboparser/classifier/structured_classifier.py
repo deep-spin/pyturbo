@@ -211,6 +211,12 @@ class StructuredClassifier(object):
         """
         self.best_loss = np.inf
 
+    def _get_post_train_report(self):
+        """
+        Return a string reporting the best accuracy or other relevant metrics.
+        """
+        return ''
+
     def train(self):
         '''Train with a general online algorithm.'''
         self.preprocess_data()
@@ -230,6 +236,7 @@ class StructuredClassifier(object):
 
         self.parameters.finalize(self.options.training_epochs
                                  * len(train_instances))
+        logging.info(self._get_post_train_report())
 
     def read_instances(self, path):
         """
