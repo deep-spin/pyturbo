@@ -10,9 +10,7 @@ class NeuralScorer(object):
 
     def initialize(self, model, learning_rate=0.001, decay=1,
                    beta1=0.9, beta2=0.999):
-        self.model = model
-        if torch.cuda.is_available():
-            self.model.cuda()
+        self.set_model(model)
         params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
             params, lr=learning_rate, betas=(beta1, beta2))
@@ -21,6 +19,8 @@ class NeuralScorer(object):
 
     def set_model(self, model):
         self.model = model
+        if torch.cuda.is_available():
+            self.model.cuda()
 
     def compute_scores(self, instances, parts):
         # Run the forward pass.
