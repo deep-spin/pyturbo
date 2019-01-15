@@ -60,7 +60,7 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--single_root', action='store_true',
                             help='When running the parser, enforce that there '
                                  'is only one root per sentence.')
-        parser.add_argument('--prune_relations', type=int, default=1,
+        parser.add_argument('--prune_relations', type=int, default=0,
                             help="""1 for pruning the set of possible relations
                             taking into account the labels that have occured for
                             each pair of POS tags in the training data.""")
