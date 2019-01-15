@@ -283,7 +283,7 @@ class DependencyNeuralModel(nn.Module):
         else:
             distance_projections = 0
 
-        arc_states = self.relu(heads + modifiers + distance_projections)
+        arc_states = self.tanh(heads + modifiers + distance_projections)
         arc_scores = self.arc_scorer(arc_states)
         scores[offset:offset + num_arcs] = arc_scores.view(-1)
 
