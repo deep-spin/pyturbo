@@ -101,7 +101,9 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--rnn_size', type=int, default=100,
                             help='Size of hidden RNN layers')
         parser.add_argument('--mlp_size', type=int, default=100,
-                            help='Size of hidden MLP layers')
+                            help='Size of hidden head MLP layers')
+        parser.add_argument('--label_mlp_size', type=int, default=100,
+                            help='Size of hidden dependency label MLP layers')
         parser.add_argument('--rnn_layers', type=int, default=1,
                             help='Number of RNN layers')
         parser.add_argument('--mlp_layers', type=int, default=1,
@@ -172,6 +174,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         options.distance_embedding_size = args['distance_embedding_size']
         options.rnn_size = args['rnn_size']
         options.mlp_size = args['mlp_size']
+        options.label_mlp_size = args['label_mlp_size']
         options.rnn_layers = args['rnn_layers']
         options.mlp_layers = args['mlp_layers']
         options.dropout = args['dropout']

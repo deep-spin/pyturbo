@@ -23,6 +23,7 @@ class DependencyNeuralModel(nn.Module):
                  distance_embedding_size,
                  rnn_size,
                  mlp_size,
+                 label_mlp_size,
                  rnn_layers,
                  mlp_layers,
                  dropout,
@@ -47,6 +48,7 @@ class DependencyNeuralModel(nn.Module):
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
         self.mlp_size = mlp_size
+        self.label_mlp_size = label_mlp_size
         self.rnn_layers = rnn_layers
         self.mlp_layers = mlp_layers
         self.dropout_rate = dropout
@@ -111,6 +113,11 @@ class DependencyNeuralModel(nn.Module):
         self.head_mlp = self._create_mlp()
         self.modifier_mlp = self._create_mlp()
         self.arc_scorer = self._create_scorer()
+
+        self.label_head_mlp = self._create_mlp(
+            hidden_size=self.label_mlp_size)
+        self.label_modifier_mlp = self._create_mlp(
+            hidden_size=self.label_mlp_size)
         self.label_scorer = self._create_scorer(output_size=self.num_labels)
 
         if model_type.grandparents:
@@ -141,6 +148,11 @@ class DependencyNeuralModel(nn.Module):
                 distance_embedding_size,
                 mlp_size,
                 bias=True)
+            self.label_distance_projector = nn.Linear(
+                distance_embedding_size,
+                self.label_mlp_size,
+                bias=True
+            )
         else:
             self.distance_mlp = None
 
@@ -270,6 +282,8 @@ class DependencyNeuralModel(nn.Module):
         # now index all of them to process at once
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
+        distances = []
+
         if self.distance_embedding_size:
             distance_indices = torch.tensor(distance_indices, dtype=torch.long)
             if self.on_gpu:
@@ -290,8 +304,19 @@ class DependencyNeuralModel(nn.Module):
         if not parts.has_type(LabeledArc):
             return
 
+        head_tensors = self.label_head_mlp(states)
+        modifier_tensors = self.label_modifier_mlp(states)
+
+        # we can reuse indices
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
+        if self.distance_embedding_size:
+            distance_projections = self.label_distance_projector(distances)
+
+        label_states = self.tanh(heads + modifiers + distance_projections)
+        label_scores = self.label_scorer(label_states)
+
         offset_labeled, num_labeled = parts.get_offset(LabeledArc)
-        label_scores = self.label_scorer(arc_states)
         indices = []
 
         # place the label scores in the correct position in the output

@@ -74,6 +74,7 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size,
                     rnn_size=self.options.rnn_size,
                     mlp_size=self.options.mlp_size,
+                    label_mlp_size=self.options.label_mlp_size,
                     rnn_layers=self.options.rnn_layers,
                     mlp_layers=self.options.mlp_layers,
                     dropout=self.options.dropout,
@@ -156,6 +157,7 @@ class TurboParser(StructuredClassifier):
                 pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_size, f)
                 pickle.dump(self.neural_scorer.model.mlp_size, f)
+                pickle.dump(self.neural_scorer.model.label_mlp_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_layers, f)
                 pickle.dump(self.neural_scorer.model.mlp_layers, f)
                 pickle.dump(self.neural_scorer.model.dropout_rate, f)
@@ -200,6 +202,7 @@ class TurboParser(StructuredClassifier):
                 distance_embedding_size = pickle.load(f)
                 rnn_size = pickle.load(f)
                 mlp_size = pickle.load(f)
+                label_mlp_size = pickle.load(f)
                 rnn_layers = pickle.load(f)
                 mlp_layers = pickle.load(f)
                 dropout = pickle.load(f)
@@ -216,6 +219,7 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size=distance_embedding_size,
                     rnn_size=rnn_size,
                     mlp_size=mlp_size,
+                    label_mlp_size=label_mlp_size,
                     rnn_layers=rnn_layers,
                     mlp_layers=mlp_layers,
                     dropout=dropout,
@@ -244,7 +248,8 @@ class TurboParser(StructuredClassifier):
         """
         Set the best validation UAS score to 0
         """
-        self.best_validation_uas = 0
+        self.best_validation_uas = 0.
+        self.best_validation_las = 0.
         self._should_save = False
 
     def _reset_task_metrics(self):
@@ -252,8 +257,10 @@ class TurboParser(StructuredClassifier):
         Reset the accumulated UAS counter
         """
         self.accumulated_uas = 0.
+        self.accumulated_las = 0.
         self.total_tokens = 0
         self.validation_uas = 0.
+        self.validation_las = 0.
 
     def _get_task_train_report(self):
         """
@@ -262,7 +269,12 @@ class TurboParser(StructuredClassifier):
         :return: a string describing naive UAS on training data
         """
         uas = self.accumulated_uas / self.total_tokens
-        return 'Naive train UAS: %f' % uas
+        msg = 'Naive train UAS: %f' % uas
+        if not self.options.unlabeled:
+            las = self.accumulated_las / self.total_tokens
+            msg += '\tNaive train LAS: %f' % las
+
+        return msg
 
     def _get_task_valid_report(self):
         """
@@ -270,24 +282,34 @@ class TurboParser(StructuredClassifier):
 
         :return: a string describing naive UAS on validation data
         """
-        return 'Naive validation UAS: %f' % self.validation_uas
+        msg = 'Naive validation UAS: %f' % self.validation_uas
+        if not self.options.unlabeled:
+            msg += '\tNaive validation LAS: %f' % self.validation_las
+
+        return msg
 
     def _get_post_train_report(self):
         """
         Return the best parsing accuracy.
         """
-        return 'Best validation UAS: %f' % self.best_validation_uas
+        msg = 'Best validation UAS: %f' % self.best_validation_uas
+        if not self.options.unlabeled:
+            msg += '\tBest validation LAS: %f' % self.validation_las
+
+        return msg
 
     def _update_task_metrics(self, predicted, gold, instance, parts):
         """
-        Update the accumulated UAS count. It sums the UAS for each sentence
-        scaled by its number of tokens; when reporting performance, this value
-        is divided by the total number of tokens seen in all sentences combined.
+        Update the accumulated UAS and LAS count. It sums the metrics for each
+        sentence scaled by its number of tokens; when reporting performance,
+        this value is divided by the total number of tokens seen in all
+        sentences combined.
         """
         # UAS doesn't consider the root
         length = len(instance) - 1
-        uas = get_naive_uas(predicted, gold, parts, length)
+        uas, las = get_naive_metrics(predicted, gold, parts, length)
         self.accumulated_uas += length * uas
+        self.accumulated_las += length * las
         self.total_tokens += length
 
     def load_pruner(self, model_path):
@@ -693,7 +715,7 @@ class TurboParser(StructuredClassifier):
                 # should be pretty rare) consider all the possible
                 # relations.
                 if not allowed_relations:
-                    allowed_relations = self.dictionary.get_num_labels()
+                    allowed_relations = range(self.dictionary.get_num_labels())
                 for l in allowed_relations:
                     part = LabeledArc(h, m, l)
                     parts.append(part)
@@ -792,12 +814,12 @@ class TurboParser(StructuredClassifier):
             in the data.
         """
         accumulated_uas = 0.
+        accumulated_las = 0.
         total_tokens = 0
 
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
             parts = valid_data.parts[i]
-            # gold = valid_data.gold_labels[i]
             predictions = valid_pred[i]
 
             offset, size = parts.get_offset(Arc)
@@ -807,21 +829,39 @@ class TurboParser(StructuredClassifier):
 
             score_matrix = _make_score_matrix(len(instance), arcs, arc_scores)
             pred_heads = chu_liu_edmonds(score_matrix)[1:]
-            # uas = get_naive_uas(valid_pred[i], gold, parts, length)
             real_length = len(instance) - 1
 
             # scale UAS by sentence length; it is normalized later
-            accumulated_uas += np.sum(gold_heads == pred_heads)
+            head_hits = gold_heads == pred_heads
+            accumulated_uas += np.sum(head_hits)
             total_tokens += real_length
 
-        self.validation_uas = accumulated_uas / total_tokens
-        if self.validation_uas > self.best_validation_uas:
-            self.best_validation_uas = self.validation_uas
-            self._should_save = True
-        else:
-            self._should_save = False
+            if not self.options.unlabeled:
+                gold_labels = instance.output.relations[1:]
+                pred_labels = get_predicted_labels(pred_heads, parts)
+                label_hits = gold_labels == pred_labels
+                label_head_hits = np.logical_and(head_hits, label_hits)
+                accumulated_las += np.sum(label_head_hits)
 
-        self.neural_scorer.lr_scheduler_step(self.validation_uas)
+        self.validation_uas = accumulated_uas / total_tokens
+        self.validation_las = accumulated_las / total_tokens
+
+        if self.options.unlabeled:
+            acc = self.validation_uas
+            if self.validation_uas > self.best_validation_uas:
+                self.best_validation_uas = self.validation_uas
+                self._should_save = True
+            else:
+                self._should_save = False
+        else:
+            acc = self.validation_las
+            if self.validation_las > self.best_validation_las:
+                self.best_validation_las = self.validation_las
+                self._should_save = True
+            else:
+                self._should_save = False
+
+        self.neural_scorer.lr_scheduler_step(acc)
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
@@ -973,7 +1013,8 @@ def _make_score_matrix(length, arcs, scores):
 
     :param length: length of the sentence, including the root pseudo-token
     :param arcs: list of candidate Arc parts
-    :param scores: array with score of each arc (ordered in the same way as arcs
+    :param scores: array with score of each arc (ordered in the same way as
+        arcs)
     :return: a 2d numpy array
     """
     score_matrix = np.full([length, length], -np.inf, np.float32)
@@ -1172,36 +1213,80 @@ def _check_gold_arc(instance, head, modifier):
     return False
 
 
-def get_naive_uas(predicted, gold_output, parts, length):
+def get_naive_metrics(predicted, gold_output, parts, length):
     """
-    Compute the UAS (unlabeled accuracy score) naively, without considering tree
-    constraints. It just takes the highest scoring head for each token.
+    Compute the UAS (unlabeled accuracy score) and LAS (labeled accuracy score)
+    naively, without considering tree constraints. It just takes the highest
+    scoring head and label for each token.
+
+    If the decoder predicted output is given, tree constraints have already been
+    imposed, except for single root (which is not necessary for some treebanks).
 
     :param predicted: numpy array with scores for each part (can also be the
         decoder output)
     :param gold_output: same as predicted, with gold data. This
     :param parts: DependencyParts
+    :type parts: DependencyParts
     :param length: length of the sentence, excluding root
-    :return:
+    :return: UAS, LAS
     """
     # length + 1 to match the modifier indices
     head_per_modifier = np.zeros(length + 1, np.int)
-    max_per_modifier = np.zeros(length + 1, np.float)
-    hits = np.zeros(length + 1, np.float)
+    head_score_per_modifier = np.zeros(length + 1, np.float)
+    label_per_modifier = np.zeros(length + 1, np.float)
+    label_score_per_modifier = np.zeros(length + 1, np.float)
+    head_hits = np.zeros(length + 1, np.float)
+    label_hits = np.zeros(length + 1, np.float)
 
     for i, arc in parts.iterate_over_type(Arc, return_index=True):
         m = arc.modifier
         score = predicted[i]
-        if score < max_per_modifier[m]:
+        if score < head_score_per_modifier[m]:
             continue
 
-        max_per_modifier[m] = score
+        head_score_per_modifier[m] = score
         head_per_modifier[m] = arc.head
         if gold_output[i] == 1:
-            hits[m] = 1
+            head_hits[m] = 1
         else:
-            hits[m] = 0
+            head_hits[m] = 0
+
+    for i, arc in parts.iterate_over_type(LabeledArc, return_index=True):
+        m = arc.modifier
+        score = predicted[i]
+        if score < label_score_per_modifier[m]:
+            continue
+
+        label_score_per_modifier[m] = score
+        label_per_modifier[m] = arc.label
+        if gold_output[i] == 1:
+            label_hits[m] = 1
+        else:
+            label_hits[m] = 0
+
+    # LAS counts modifiers with correct label AND head
+    label_head_hits = np.logical_and(head_hits, label_hits)
 
     # exclude root
-    uas = hits[1:].mean()
-    return uas
+    uas = head_hits[1:].mean()
+    las = label_head_hits[1:].mean()
+
+    return uas, las
+
+
+def get_predicted_labels(predicted_heads, parts):
+    """
+    Get the labels of the dependency relations.
+
+    :param predicted_heads: list or array with the the head of the each word
+        (only for real words, i.e., not the root symbol)
+    :param parts: DependencyParts object
+    :return: numpy integer array with labels
+    """
+    labels = np.zeros(len(predicted_heads), dtype=np.int)
+
+    for modifier, head in enumerate(predicted_heads, 1):
+        i = parts.find_arc_index(head, modifier)
+        labels[modifier - 1] = parts.best_labels[i]
+
+    return labels

@@ -120,6 +120,8 @@ class DependencyDecoder(StructuredDecoder):
             its score increased by the best labeled score
         """
         # store the position of the best label for each arc
+        # best_label_indices[i] contains the position in the parts vector
+        # of the best LabeledArc part for Arc i
         self.best_label_indices = []
 
         # copied scores
@@ -287,14 +289,14 @@ class DependencyDecoder(StructuredDecoder):
         for value, index in zip(all_posteriors, all_indices):
             predicted_output[index] = value
 
-        # Copy the (unlabeled) arc prediction values found to the
-        # labeled part with the highest score.
+        # if doing labeled parsing, set 1 to the label with highest score
+        # for each predicted arc
         if self.best_label_indices:
             offset_arcs = parts.get_offset(Arc)[0]
             for i, arc in parts.iterate_over_type(Arc, return_index=True):
-                label_index = i - offset_arcs
-                label = self.best_label_indices[label_index]
-                predicted_output[label] = predicted_output[i]
+                arc_index = i - offset_arcs
+                best_label_index = self.best_label_indices[arc_index]
+                predicted_output[best_label_index] = predicted_output[i]
 
         return predicted_output
 

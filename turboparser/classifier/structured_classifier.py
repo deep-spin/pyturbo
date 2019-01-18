@@ -575,11 +575,7 @@ class StructuredClassifier(object):
                                     % train_loss,
                                     self._get_task_train_report(),
                                     'Validation Loss: %f' % validation_loss,
-                                    self._get_task_valid_report(),
-                                    'Total Reg: %f' % regularization_value,
-                                    'Total Loss+Reg: %f' %
-                                    (train_loss + regularization_value),
-                                    'Squared norm: %f' % sq_norm]))
+                                    self._get_task_valid_report()]))
 
     def _get_task_train_report(self):
         """

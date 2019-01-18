@@ -116,6 +116,9 @@ class DependencyParts(list):
         If return_index is True, also return the index of the part in the
         list.
         """
+        if type_ not in self.offsets:
+            raise StopIteration
+
         offset, size = self.get_offset(type_)
         for i in range(offset, offset + size):
             if return_index:
