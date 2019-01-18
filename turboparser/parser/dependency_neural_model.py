@@ -185,6 +185,9 @@ class DependencyNeuralModel(nn.Module):
         """
         Create the weights for a fully connected subnetwork.
 
+        The output has a linear activation; if num_layers > 1, hidden layers
+        will use a non-linearity.
+
         The first layer will have a weight matrix (input x hidden), subsequent
         layers will be (hidden x hidden).
 
@@ -203,9 +206,12 @@ class DependencyNeuralModel(nn.Module):
             num_layers = self.mlp_layers
 
         layers = []
-        for _ in range(num_layers):
-            layer = nn.Linear(input_size, hidden_size)
-            layers.extend([self.dropout, layer, self.relu])
+        for i in range(num_layers):
+            if i > 0:
+                layers.append(self.relu)
+
+            linear = nn.Linear(input_size, hidden_size)
+            layers.extend([self.dropout, linear])
             input_size = hidden_size
 
         mlp = nn.Sequential(*layers)

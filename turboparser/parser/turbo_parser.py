@@ -80,6 +80,9 @@ class TurboParser(StructuredClassifier):
                     word_dropout=options.word_dropout,
                     tag_dropout=options.tag_dropout)
 
+                print('Model summary:')
+                print(model)
+
                 self.neural_scorer.initialize(
                     model, self.options.learning_rate, options.decay,
                     options.beta1, options.beta2)
@@ -221,6 +224,9 @@ class TurboParser(StructuredClassifier):
                 self.neural_scorer = NeuralScorer()
                 self.neural_scorer.set_model(neural_model)
 
+                print('Model summary:')
+                print(neural_model)
+
         # most of the time, we load a model to run its predictions
         self.eval_mode()
 
@@ -265,6 +271,12 @@ class TurboParser(StructuredClassifier):
         :return: a string describing naive UAS on validation data
         """
         return 'Naive validation UAS: %f' % self.validation_uas
+
+    def _get_post_train_report(self):
+        """
+        Return the best parsing accuracy.
+        """
+        return 'Best validation UAS: %f' % self.best_validation_uas
 
     def _update_task_metrics(self, predicted, gold, instance, parts):
         """
