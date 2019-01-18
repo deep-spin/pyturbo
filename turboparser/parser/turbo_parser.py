@@ -693,8 +693,7 @@ class TurboParser(StructuredClassifier):
                 # should be pretty rare) consider all the possible
                 # relations.
                 if not allowed_relations:
-                    allowed_relations = range(len(
-                        self.dictionary.get_relation_alphabet()))
+                    allowed_relations = self.dictionary.get_num_labels()
                 for l in allowed_relations:
                     part = LabeledArc(h, m, l)
                     parts.append(part)

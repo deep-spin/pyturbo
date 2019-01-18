@@ -52,7 +52,7 @@ class DependencyNeuralModel(nn.Module):
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
         self.tag_dropout_rate = tag_dropout
-        self.num_labels = len(dependency_dictionary.relation_alphabet)
+        self.num_labels = dependency_dictionary.get_num_labels()
         self.padding_word = token_dictionary.get_embedding_id(PADDING)
         self.padding_tag = token_dictionary.get_tag_id(PADDING)
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
