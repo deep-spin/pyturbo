@@ -11,12 +11,18 @@ class StructuredDecoder(object):
         as parts.'''
         raise NotImplementedError
 
+    def _get_margin(self, parts, gold_output):
+        """
+        Compute and return a margin vector to be used in the loss and a
+        normalization term to be added to it.
+        """
+        return np.zeros_like(gold_output, dtype=np.float), 0
+
     def decode_mira(self, instance, parts, scores, gold_outputs,
                     old_mira=False):
         '''Perform cost-augmented decoding or classical MIRA.'''
-        p = 0.5 - gold_outputs
-        #TODO: any reason why this is not 0.5 * np.sum(gold_outputs)?
-        q = 0.5 * np.ones(len(gold_outputs)).dot(gold_outputs)
+        p, q = self._get_margin(parts, gold_outputs)
+
         if old_mira:
             predicted_outputs = self.decode(instance, parts, scores)
         else:

@@ -118,7 +118,8 @@ class DependencyNeuralModel(nn.Module):
             hidden_size=self.label_mlp_size)
         self.label_modifier_mlp = self._create_mlp(
             hidden_size=self.label_mlp_size)
-        self.label_scorer = self._create_scorer(output_size=self.num_labels)
+        self.label_scorer = self._create_scorer(self.label_mlp_size,
+                                                self.num_labels)
 
         if model_type.grandparents:
             self.gp_grandparent_mlp = self._create_mlp()

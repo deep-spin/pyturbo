@@ -3,7 +3,8 @@ from ..classifier.neural_scorer import NeuralScorer
 from ..classifier import utils
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
-from .dependency_decoder import DependencyDecoder
+from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
+    make_score_matrix
 from .dependency_dictionary import DependencyDictionary
 from .dependency_instance import DependencyInstanceOutput
 from .dependency_instance_numeric import DependencyInstanceNumeric
@@ -827,7 +828,7 @@ class TurboParser(StructuredClassifier):
             arc_scores = predictions[offset:offset + size]
             gold_heads = instance.output.heads[1:]
 
-            score_matrix = _make_score_matrix(len(instance), arcs, arc_scores)
+            score_matrix = make_score_matrix(len(instance), arcs, arc_scores)
             pred_heads = chu_liu_edmonds(score_matrix)[1:]
             real_length = len(instance) - 1
 
@@ -965,7 +966,7 @@ class TurboParser(StructuredClassifier):
         offset, size = parts.get_offset(Arc)
         arcs = parts[offset:offset + size]
         scores = output[offset:offset + size]
-        score_matrix = _make_score_matrix(len(instance), arcs, scores)
+        score_matrix = make_score_matrix(len(instance), arcs, scores)
         heads = chu_liu_edmonds(score_matrix)
 
         for m, h in enumerate(heads):
@@ -1003,195 +1004,6 @@ class TurboParser(StructuredClassifier):
                 if not self.options.unlabeled:
                     instance.output.relations[m] = \
                         self.dictionary.get_relation_name(0)
-
-
-def _make_score_matrix(length, arcs, scores):
-    """
-    Makes a score matrix from an array of scores ordered in the same way as a
-    list of DependencyPartArcs. Positions [h, m] corresponding to non-existing
-    arcs have score of -inf.
-
-    :param length: length of the sentence, including the root pseudo-token
-    :param arcs: list of candidate Arc parts
-    :param scores: array with score of each arc (ordered in the same way as
-        arcs)
-    :return: a 2d numpy array
-    """
-    score_matrix = np.full([length, length], -np.inf, np.float32)
-    for arc, score in zip(arcs, scores):
-        h = arc.head
-        m = arc.modifier
-        score_matrix[h, m] = score
-
-    return score_matrix
-
-
-def chu_liu_edmonds(score_matrix):
-    """
-    Run the Chu-Liu-Edmonds' algorithm to find the maximum spanning tree.
-
-    :param score_matrix: a matrix such that cell [h, m] has the score for the
-        arc (h, m).
-    :return: an array heads, such that heads[m] contains the head of token m.
-        The root is in position 0 and has head -1.
-    """
-    while True:
-        # pick the highest score head for each modifier
-        heads = score_matrix.argmax(0)
-
-        # find and solve cycles
-        cycle = find_cycle(heads)
-
-        if cycle is None:
-            break
-        solve_cycle(heads, cycle, score_matrix)
-
-    # set the head of the root pseudo token to -1
-    heads[0] = -1
-
-    return heads
-
-
-def find_cycle(heads):
-    """
-    Finds and returns the first cycle in the given list of heads, or None if
-    there is no cycle.
-
-    :param heads: candidate heads for each word in a sentence; i.e., heads[i]
-        contains the head for modifier i. heads[0] is ignored (0 is the root).
-    :return:
-    """
-    # this set stores all vertices with a valid path to the root
-    reachable_vertices = {0}
-
-    # vertices known to be unreachable from the root, i.e., in a cycle
-    vertices_in_cycles = set()
-
-    # vertices currently being evaluated, not known if they're reachable
-    visited = set()
-
-    # the directions of the edges don't matter if we only want to find cycles
-    for vertex in range(len(heads)):
-        if vertex in reachable_vertices or vertex in vertices_in_cycles:
-            continue
-
-        cycle = _find_cycle_recursive(heads, vertex, visited,
-                                      reachable_vertices, vertices_in_cycles)
-        if cycle is not None:
-            return cycle
-
-    return None
-
-
-def _find_cycle_recursive(heads, token, visited_tokens, reachable_tokens,
-                          tokens_in_cycles):
-    """
-    Return the first cycle it finds starting from the given token.
-
-    :param heads: heads for each token; heads[i] has the head of token i
-    :param token: which token is being currently visited
-    :param visited_tokens: set of tokens already visited in this round of
-        recursive calls
-    :param reachable_tokens: set of tokens known to be reachable from the root
-    :param tokens_in_cycles: set of tokens known to be unreachable from the
-        root
-    :return:
-    """
-    next_token = heads[token]
-    visited_tokens.add(token)
-
-    if next_token in reachable_tokens:
-        reachable_tokens.update(visited_tokens)
-        visited_tokens.clear()
-        cycle = None
-
-    elif next_token in visited_tokens:
-        # we found a cycle. return the tokens that are part of it.
-        visited_tokens.clear()
-        cycle = {token}
-        while next_token != token:
-            cycle.add(next_token)
-            next_token = heads[next_token]
-
-        tokens_in_cycles.update(cycle)
-
-    elif next_token in tokens_in_cycles:
-        # vertex linked to an existing cycle, but not part of it
-        visited_tokens.clear()
-        cycle = None
-
-    else:
-        # we still don't know if it's reachable or not, continue exploring
-        cycle = _find_cycle_recursive(heads, next_token, visited_tokens,
-                                      reachable_tokens, tokens_in_cycles)
-
-    return cycle
-
-
-def solve_cycle(heads, cycle, scores):
-    """
-    Resolve a cycle in the dependency tree.
-
-    :param heads: heads for each token; heads[i] has the head of token i
-    :param cycle: set of tokens which make up a cycle
-    :param scores: 2d numpy array with the scores for each [h, m] arc
-    :return:
-    """
-    num_tokens = len(heads)
-
-    # tokens outside this cycle. 0 (root) is always outside
-    tokens_outside = np.array([x for x in range(num_tokens) if x not in cycle])
-
-    cycle = np.array(list(cycle))
-
-    # first, pick an arc from the cycle to the outside tokens
-    # if len(outside) == 1, all vertices except for the root are in a cycle
-    if len(tokens_outside) > 1:
-        # make an Nx1 index array
-        cycle_inds = np.array([[i] for i in cycle])
-
-        # these are the weights of arcs connecting tokens in the cycle to the
-        # ones outside it. (-1 because we can't take the root now)
-        outgoing_weights = scores[cycle_inds, tokens_outside[1:]]
-
-        # find one outgoing arc for each token outside the cycle
-        max_outgoing_inds = outgoing_weights.argmax(0)
-        max_outgoing_weights = outgoing_weights.max(0)
-
-        # set every outgoing weight to -inf and then restore the highest ones
-        outgoing_weights[:] = -np.Infinity
-        inds_y = np.arange(len(tokens_outside) - 1)
-        outgoing_weights[max_outgoing_inds, inds_y] = max_outgoing_weights
-        scores[cycle_inds, tokens_outside[1:]] = outgoing_weights
-
-    # now, adjust incoming arcs. Each arc from a token v (outside the cycle)
-    # to v' (inside) is reweighted as:
-    # s(v, v') = s(v, v') + s(head(v'), v')
-    # and then we pick the highest arc for each outside token
-    token_inds = np.array([[i] for i in tokens_outside])
-    incoming_weights = scores[token_inds, cycle]
-
-    for i, token in enumerate(cycle):
-        head_to_t = scores[heads[token], token]
-        incoming_weights[:, i] += head_to_t
-
-    max_incoming_inds = incoming_weights.argmax(1)
-    max_incoming_weights = incoming_weights.max(1)
-
-    # analogous to the outgoing weights
-    incoming_weights[:] = -np.Infinity
-    incoming_weights[np.arange(len(tokens_outside)),
-                     max_incoming_inds] = max_incoming_weights
-    scores[token_inds, cycle] = incoming_weights
-
-    # the token with the maximum weighted incoming edge now changes
-    # its head, thus breaking the cycle
-    new_head_ind = max_incoming_weights.argmax()
-    token_leaving_cycle_ind = max_incoming_inds[new_head_ind]
-
-    token_leaving_cycle = cycle[token_leaving_cycle_ind]
-    old_head = heads[token_leaving_cycle]
-    scores[old_head, token_leaving_cycle] = -np.Infinity
 
 
 def _check_gold_arc(instance, head, modifier):
