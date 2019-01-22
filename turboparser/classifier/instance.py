@@ -1,5 +1,6 @@
 import random
 
+
 class Instance(object):
     '''An abstract instance.'''
     def __init__(self, input, output=None):

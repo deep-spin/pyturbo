@@ -260,7 +260,6 @@ class DependencyNeuralModel(nn.Module):
         """
         head_tensors = self.head_mlp(states)
         modifier_tensors = self.modifier_mlp(states)
-        offset, num_arcs = parts.get_offset(Arc)
 
         head_indices = []
         modifier_indices = []
@@ -300,6 +299,9 @@ class DependencyNeuralModel(nn.Module):
 
         arc_states = self.tanh(heads + modifiers + distance_projections)
         arc_scores = self.arc_scorer(arc_states)
+
+        offset = parts.get_type_offset(Arc)
+        num_arcs = parts.get_num_type(Arc)
         scores[offset:offset + num_arcs] = arc_scores.view(-1)
 
         if not parts.has_type(LabeledArc):
@@ -308,7 +310,7 @@ class DependencyNeuralModel(nn.Module):
         head_tensors = self.label_head_mlp(states)
         modifier_tensors = self.label_modifier_mlp(states)
 
-        # we can reuse indices
+        # we can reuse indices -- every LabeledArc must also appear as Arc
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
         if self.distance_embedding_size:
@@ -317,7 +319,8 @@ class DependencyNeuralModel(nn.Module):
         label_states = self.tanh(heads + modifiers + distance_projections)
         label_scores = self.label_scorer(label_states)
 
-        offset_labeled, num_labeled = parts.get_offset(LabeledArc)
+        offset_labeled = parts.get_type_offset(LabeledArc)
+        num_labeled = parts.get_num_type(LabeledArc)
         indices = []
 
         # place the label scores in the correct position in the output
@@ -363,7 +366,8 @@ class DependencyNeuralModel(nn.Module):
         part_states = self.tanh(heads + modifiers + grandparents)
         part_scores = self.grandparent_scorer(part_states)
 
-        offset, size = parts.get_offset(Grandparent)
+        offset = parts.get_type_offset(Grandparent)
+        size = parts.get_num_type(Grandparent)
         scores[offset:offset + size] = part_scores.view(-1)
 
     def _compute_consecutive_sibling_scores(self, states, parts, scores):
@@ -409,7 +413,8 @@ class DependencyNeuralModel(nn.Module):
         sibling_states = self.tanh(heads + modifiers + siblings)
         sibling_scores = self.sibling_scorer(sibling_states)
 
-        offset, size = parts.get_offset(NextSibling)
+        offset = parts.get_type_offset(NextSibling)
+        size = parts.get_num_type(NextSibling)
         scores[offset:offset + size] = sibling_scores.view(-1)
 
     def _compute_grandsibling_scores(self, states, parts, scores):
@@ -458,7 +463,8 @@ class DependencyNeuralModel(nn.Module):
         gsib_states = self.tanh(heads + modifiers + siblings + grandparents)
         gsib_scores = self.grandsibling_scorer(gsib_states)
 
-        offset, size = parts.get_offset(GrandSibling)
+        offset = parts.get_type_offset(GrandSibling)
+        size = parts.get_num_type(GrandSibling)
         scores[offset:offset + size] = gsib_scores.view(-1)
 
     def get_word_representation(self, instances, max_length):

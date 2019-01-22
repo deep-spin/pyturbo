@@ -1,3 +1,6 @@
+from collections import OrderedDict
+
+
 class DependencyPart(object):
     """
     Base class for Dependency Parts
@@ -54,14 +57,19 @@ class GrandSibling(DependencyPart):
         self.grandparent = grandparent
 
 
-class DependencyParts(list):
+class DependencyParts(object):
     def __init__(self):
         self.index = None
         self.index_labeled = None
-        self.offsets = {}
         self.arc_index = {}
         self.labeled_indices = {}
         self.arc_labels = {}
+
+        # part_lists[Arc] contains the list of Arc objects; same for others
+        self.part_lists = OrderedDict()
+
+        # part_gold[Arc] contains the gold labels for Arc objects
+        self.part_gold = OrderedDict()
 
         # the i-th position stores the best label found for arc i
         self.best_labels = []
@@ -74,21 +82,76 @@ class DependencyParts(list):
             Grandparent
         :return: boolean
         """
-        return type_ in self.offsets and self.offsets[type_][1] > 0
+        return type_ in self.part_lists and len(self.part_lists[type_]) > 0
 
-    def append(self, part):
+    def __len__(self):
+        return sum(len(part_list) for part_list in self.part_lists.values())
+
+    def get_num_type(self, type_):
+        """
+        Return the number of parts of the given type
+        """
+        if type_ not in self.part_lists:
+            return 0
+        return len(self.part_lists[type_])
+
+    def get_type_offset(self, type_):
+        """
+        Return the offset of the given type in the ordered array with gold data.
+        """
+        if type_ not in self.part_lists:
+            return -1
+
+        offset = 0
+        for type_i in self.part_lists:
+            if type_i == type_:
+                return offset
+            else:
+                offset += len(self.part_lists[type_i])
+
+    def get_gold_output(self):
+        """
+        Return a single list with all gold values, in the order that parts were
+        added.
+
+        If first Arc parts were added, then some Sibling, then more Arcs, the
+        gold list will have all Arcs and then all Siblings.
+
+        :return: a list if any output exists, None otherwise
+        """
+        all_gold = []
+        for type_ in self.part_gold:
+            all_gold.extend(self.part_gold[type_])
+
+        if len(all_gold) == 0:
+            return None
+
+        return all_gold
+
+    def append(self, part, gold=None):
         """
         Append the object to the internal list. If it's a first order arc, also
         update the position index.
 
         :param part: a DependencyPart
+        :param gold: either 1 or 0
         """
-        super(DependencyParts, self).append(part)
+        part_type = type(part)
+        if part_type not in self.part_lists:
+            self.part_lists[part_type] = []
+            if gold is not None:
+                self.part_gold[part_type] = []
+
+        self.part_lists[part_type].append(part)
+        if gold is not None:
+            self.part_gold[part_type].append(gold)
+
         if isinstance(part, Arc):
             if part.head not in self.arc_index:
                 self.arc_index[part.head] = {}
 
-            self.arc_index[part.head][part.modifier] = len(self) - 1
+            index = len(self.part_lists[Arc]) - 1
+            self.arc_index[part.head][part.modifier] = index
 
         elif isinstance(part, LabeledArc):
             if part.head not in self.labeled_indices:
@@ -105,39 +168,31 @@ class DependencyParts(list):
             if part.modifier not in head_labels:
                 head_labels[part.modifier] = []
 
-            position = len(self) - 1
-            head_indices[part.modifier].append(position)
+            index = len(self.part_lists[LabeledArc]) - 1
+            head_indices[part.modifier].append(index)
             head_labels[part.modifier].append(part.label)
 
-    def iterate_over_type(self, type_, return_index=False):
+    def iterate_over_type(self, type_):
         """
         Iterates over the parts (arcs) of a particular type.
-
-        If return_index is True, also return the index of the part in the
-        list.
         """
-        if type_ not in self.offsets:
+        if type_ not in self.part_lists:
             raise StopIteration
 
-        offset, size = self.get_offset(type_)
-        for i in range(offset, offset + size):
-            if return_index:
-                yield i, self[i]
-            else:
-                yield self[i]
+        for part in self.part_lists[type_]:
+            yield part
 
     def get_parts_of_type(self, type_):
         """
         Return a sublist of this object containing parts of the requested type.
         """
-        offset, size = self.get_offset(type_)
-        return self[offset:size]
+        return self.part_lists[type_]
 
-    def get_offset(self, type_):
-        return self.offsets[type_]
-
-    def set_offset(self, type_, offset, size):
-        self.offsets[type_] = (offset, size)
+    def get_gold_for_type(self, type_):
+        """
+        Return a list with gold values for parts of the given type
+        """
+        return self.part_gold[type_]
 
     def find_arc_index(self, head, modifier):
         """
@@ -155,8 +210,9 @@ class DependencyParts(list):
 
     def find_labeled_arc_indices(self, head, modifier):
         """
-        Return the list of positions of the labeled arcs connecting `head` and
-        `modifier`. If no such label exists, return an empty list.
+        Return the list of positions (within the list of labeled arcs) of the
+        labeled arcs connecting `head` and `modifier`. If no such label exists,
+        return an empty list.
         """
         if head not in self.labeled_indices:
             return []
@@ -180,3 +236,18 @@ class DependencyParts(list):
             return []
 
         return head_dict[modifier]
+
+
+def reorder(parts):
+    """
+    Create a new parts object with reordered contents, keeping contiguous
+    portions with the same part types.
+
+    E.g., if the given list has [Arc, Arc, Sibling, Arc] before the call, the
+    returned one will be reordered to [Arc, Arc, Arc, Sibling].
+
+    It also updates the offset values.
+    """
+    new_parts = DependencyParts()
+    for part in parts:
+        pass
