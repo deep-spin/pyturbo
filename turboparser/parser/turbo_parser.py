@@ -3,7 +3,8 @@ from ..classifier.neural_scorer import NeuralScorer
 from ..classifier import utils
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
-from .dependency_decoder import DependencyDecoder
+from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
+    make_score_matrix
 from .dependency_dictionary import DependencyDictionary
 from .dependency_instance import DependencyInstanceOutput
 from .dependency_instance_numeric import DependencyInstanceNumeric
@@ -74,6 +75,7 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size,
                     rnn_size=self.options.rnn_size,
                     mlp_size=self.options.mlp_size,
+                    label_mlp_size=self.options.label_mlp_size,
                     rnn_layers=self.options.rnn_layers,
                     mlp_layers=self.options.mlp_layers,
                     dropout=self.options.dropout,
@@ -156,6 +158,7 @@ class TurboParser(StructuredClassifier):
                 pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_size, f)
                 pickle.dump(self.neural_scorer.model.mlp_size, f)
+                pickle.dump(self.neural_scorer.model.label_mlp_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_layers, f)
                 pickle.dump(self.neural_scorer.model.mlp_layers, f)
                 pickle.dump(self.neural_scorer.model.dropout_rate, f)
@@ -200,6 +203,7 @@ class TurboParser(StructuredClassifier):
                 distance_embedding_size = pickle.load(f)
                 rnn_size = pickle.load(f)
                 mlp_size = pickle.load(f)
+                label_mlp_size = pickle.load(f)
                 rnn_layers = pickle.load(f)
                 mlp_layers = pickle.load(f)
                 dropout = pickle.load(f)
@@ -216,6 +220,7 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size=distance_embedding_size,
                     rnn_size=rnn_size,
                     mlp_size=mlp_size,
+                    label_mlp_size=label_mlp_size,
                     rnn_layers=rnn_layers,
                     mlp_layers=mlp_layers,
                     dropout=dropout,
@@ -244,7 +249,8 @@ class TurboParser(StructuredClassifier):
         """
         Set the best validation UAS score to 0
         """
-        self.best_validation_uas = 0
+        self.best_validation_uas = 0.
+        self.best_validation_las = 0.
         self._should_save = False
 
     def _reset_task_metrics(self):
@@ -252,8 +258,10 @@ class TurboParser(StructuredClassifier):
         Reset the accumulated UAS counter
         """
         self.accumulated_uas = 0.
+        self.accumulated_las = 0.
         self.total_tokens = 0
         self.validation_uas = 0.
+        self.validation_las = 0.
 
     def _get_task_train_report(self):
         """
@@ -262,7 +270,12 @@ class TurboParser(StructuredClassifier):
         :return: a string describing naive UAS on training data
         """
         uas = self.accumulated_uas / self.total_tokens
-        return 'Naive train UAS: %f' % uas
+        msg = 'Naive train UAS: %f' % uas
+        if not self.options.unlabeled:
+            las = self.accumulated_las / self.total_tokens
+            msg += '\tNaive train LAS: %f' % las
+
+        return msg
 
     def _get_task_valid_report(self):
         """
@@ -270,24 +283,34 @@ class TurboParser(StructuredClassifier):
 
         :return: a string describing naive UAS on validation data
         """
-        return 'Naive validation UAS: %f' % self.validation_uas
+        msg = 'Naive validation UAS: %f' % self.validation_uas
+        if not self.options.unlabeled:
+            msg += '\tNaive validation LAS: %f' % self.validation_las
+
+        return msg
 
     def _get_post_train_report(self):
         """
         Return the best parsing accuracy.
         """
-        return 'Best validation UAS: %f' % self.best_validation_uas
+        msg = 'Best validation UAS: %f' % self.best_validation_uas
+        if not self.options.unlabeled:
+            msg += '\tBest validation LAS: %f' % self.validation_las
+
+        return msg
 
     def _update_task_metrics(self, predicted, gold, instance, parts):
         """
-        Update the accumulated UAS count. It sums the UAS for each sentence
-        scaled by its number of tokens; when reporting performance, this value
-        is divided by the total number of tokens seen in all sentences combined.
+        Update the accumulated UAS and LAS count. It sums the metrics for each
+        sentence scaled by its number of tokens; when reporting performance,
+        this value is divided by the total number of tokens seen in all
+        sentences combined.
         """
         # UAS doesn't consider the root
         length = len(instance) - 1
-        uas = get_naive_uas(predicted, gold, parts, length)
+        uas, las = get_naive_metrics(predicted, gold, parts, length)
         self.accumulated_uas += length * uas
+        self.accumulated_las += length * las
         self.total_tokens += length
 
     def load_pruner(self, model_path):
@@ -308,21 +331,22 @@ class TurboParser(StructuredClassifier):
         return pruner
 
     def format_instance(self, instance):
-        return DependencyInstanceNumeric(instance, self.dictionary)
+        return DependencyInstanceNumeric(instance, self.token_dictionary,
+                                         self.dictionary)
 
-    def prune(self, instance, parts, gold_output):
+    def prune(self, instance, parts):
         """
         Prune out some arcs with the pruner model.
 
         :param instance: a DependencyInstance object, not formatted
         :param parts: a DependencyParts object with arcs
-        :param gold_output: either None or a 0/1 array indicating gold parts
+        :type parts:DependencyParts
         :return: a new DependencyParts object contained the kept arcs
         """
         instance = self.pruner.format_instance(instance)
         scores = self.pruner.compute_scores(instance, parts)[0]
-        new_parts, new_gold = self.decoder.decode_matrix_tree(
-            len(instance), parts.arc_index, parts, scores, gold_output,
+        new_parts = self.decoder.decode_matrix_tree(
+            len(instance), parts.arc_index, parts, scores,
             self.options.pruner_max_heads,
             self.options.pruner_posterior_threshold)
 
@@ -330,15 +354,22 @@ class TurboParser(StructuredClassifier):
             for m in range(1, len(instance)):
                 h = instance.output.heads[m]
                 if new_parts.find_arc_index(h, m) < 0:
-                    new_parts.append(Arc(h, m))
-                    new_gold.append(1)
+                    new_parts.append(Arc(h, m), 1)
 
                     # accumulate pruner mistakes here instead of later, because
                     # it is simpler to keep `parts` with only arcs
                     self.pruner_mistakes += 1
 
-        new_parts.set_offset(Arc, 0, len(new_parts))
-        return new_parts, new_gold
+                    # also add all labels if doing labeled parsing
+                    if not self.options.unlabeled:
+                        for label in range(self.dictionary.get_num_labels()):
+                            if instance.output.relations[m] == label:
+                                gold = 1
+                            else:
+                                gold = 0
+                            new_parts.append(LabeledArc(h, m, label), gold)
+
+        return new_parts
 
     def _report_make_parts(self, instances, parts):
         """
@@ -386,62 +417,33 @@ class TurboParser(StructuredClassifier):
         Create the parts (arcs) into which the problem is factored.
 
         :param instance: a DependencyInstance object, not yet formatted.
-        :return: a tuple (instance, parts, gold_output).
-            If the instances don't have the gold label, `gold_output` is None.
-            If it does, it is a numpy array.
+        :return: a tuple (instance, parts).
             The returned instance will have been formatted.
         """
         parts = DependencyParts()
-        gold_output = None if instance.output is None else []
         self.pruner_mistakes = 0
 
         orig_instance = instance
         instance = self.format_instance(instance)
 
-        self.make_parts_basic(instance, parts, gold_output)
-        if self.has_pruner:
-            parts, gold_output = self.prune(orig_instance, parts, gold_output)
-
+        self.make_parts_basic(instance, parts)
         if not self.options.unlabeled:
-            self.make_parts_labeled(instance, parts, gold_output)
+            self.make_parts_labeled(instance, parts)
+
+        if self.has_pruner:
+            parts = self.prune(orig_instance, parts)
 
         if self.model_type.consecutive_siblings:
-            self.make_parts_consecutive_siblings(instance, parts,
-                                                 gold_output)
+            self.make_parts_consecutive_siblings(instance, parts)
         if self.model_type.grandparents:
-            self.make_parts_grandparent(instance, parts, gold_output)
+            self.make_parts_grandparent(instance, parts)
 
         if self.model_type.grandsiblings:
-            self.make_parts_grandsibling(instance, parts, gold_output)
+            self.make_parts_grandsibling(instance, parts)
 
-        if instance.output is not None:
-            gold_output = np.array(gold_output)
-            num_parts = len(parts)
-            num_gold = len(gold_output)
-            assert num_parts == num_gold, \
-                'Number of parts = %d and number of gold outputs = % d' \
-                % (num_parts, num_gold)
+        return instance, parts
 
-        return instance, parts, gold_output
-
-    def print_parts(self, part_type, parts, gold):
-        """
-        Print the parts of a given type and their respective gold labels.
-
-        This function is for debugging purposes.
-
-        :param part_type: a subclass of DependencyPart
-        :param parts:
-        :param gold:
-        :return:
-        """
-        assert isinstance(parts, DependencyParts)
-        print('Iterating over parts of type', part_type.__name__)
-        for i, part in parts.iterate_over_type(part_type, True):
-            gold_label = gold[i] if gold is not None else None
-            print(part, gold_label)
-
-    def make_parts_consecutive_siblings(self, instance, parts, gold_output):
+    def make_parts_consecutive_siblings(self, instance, parts):
         """
         Create the parts relative to consecutive siblings.
 
@@ -452,14 +454,9 @@ class TurboParser(StructuredClassifier):
         :param parts: a DependencyParts object. It must already have been
             pruned.
         :type parts: DependencyParts
-        :param gold_output: either None or a list with binary values indicating
-            the presence of each part.
-        :return: if `instances` have the attribute output, return a numpy array
-            with the gold output. If it doesn't, return None.
         """
         make_gold = instance.output is not None
 
-        initial_index = len(parts)
         for h in range(len(instance)):
 
             # siblings to the right of h
@@ -479,17 +476,18 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
-                    parts.append(NextSibling(h, m, s))
                     if make_gold:
                         gold_hs = s == len(instance) or \
                                     _check_gold_arc(instance, h, s)
 
                         if gold_hm and gold_hs and not arc_between:
-                            value = 1
+                            gold = 1
                             arc_between = True
                         else:
-                            value = 0
-                        gold_output.append(value)
+                            gold = 0
+                    else:
+                        gold = None
+                    parts.append(NextSibling(h, m, s), gold)
 
             # siblings to the left of h
             for m in range(h, -1, -1):
@@ -506,21 +504,19 @@ class TurboParser(StructuredClassifier):
                         # pruned out
                         continue
 
-                    parts.append(NextSibling(h, m, s))
                     if make_gold:
                         gold_hs = s == -1 or _check_gold_arc(instance, h, s)
 
                         if gold_hm and gold_hs and not arc_between:
-                            value = 1
+                            gold = 1
                             arc_between = True
                         else:
-                            value = 0
-                        gold_output.append(value)
+                            gold = 0
+                    else:
+                        gold = None
+                    parts.append(NextSibling(h, m, s), gold)
 
-        parts.set_offset(NextSibling, initial_index,
-                         len(parts) - initial_index)
-
-    def make_parts_grandsibling(self, instance, parts, gold_output):
+    def make_parts_grandsibling(self, instance, parts):
         """
         Create the parts relative to grandsibling nodes.
 
@@ -529,13 +525,8 @@ class TurboParser(StructuredClassifier):
 
         :param instance: DependencyInstance
         :param parts: DependencyParts, already pruned
-        :param gold_output: either None or a list with binary values indicating
-            the presence of each part. If a list, it will be modified in-place.
-        :return:
         """
         make_gold = instance.output is not None
-
-        initial_index = len(parts)
 
         for g in range(len(instance)):
             for h in range(1, len(instance)):
@@ -565,18 +556,18 @@ class TurboParser(StructuredClassifier):
                         gold_hs = s == len(instance) or \
                             _check_gold_arc(instance, h, s)
 
-                        part = GrandSibling(h, m, g, s)
-                        parts.append(part)
-
                         if make_gold:
-                            value = 0
+                            gold = 0
                             if gold_hm and gold_hs and not arc_between:
                                 if gold_gh:
-                                    value = 1
+                                    gold = 1
 
                                 arc_between = True
+                        else:
+                            gold = None
 
-                            gold_output.append(value)
+                        part = GrandSibling(h, m, g, s)
+                        parts.append(part, gold)
 
                 # check modifiers to the left
                 for m in range(h, 0, -1):
@@ -593,23 +584,20 @@ class TurboParser(StructuredClassifier):
                             continue
 
                         gold_hs = s == -1 or _check_gold_arc(instance, h, s)
-                        part = GrandSibling(h, m, g, s)
-                        parts.append(part)
-
                         if make_gold:
-                            value = 0
+                            gold = 0
                             if gold_hm and gold_hs and not arc_between:
                                 if gold_gh:
-                                    value = 1
+                                    gold = 1
 
                                 arc_between = True
+                        else:
+                            gold = None
 
-                            gold_output.append(value)
+                        part = GrandSibling(h, m, g, s)
+                        parts.append(part, gold)
 
-        parts.set_offset(GrandSibling, initial_index,
-                         len(parts) - initial_index)
-
-    def make_parts_grandparent(self, instance, parts, gold_output):
+    def make_parts_grandparent(self, instance, parts):
         """
         Create the parts relative to grandparents.
 
@@ -619,14 +607,8 @@ class TurboParser(StructuredClassifier):
         :param parts: a DependencyParts object. It must already have been
             pruned.
         :type parts: DependencyParts
-        :param gold_output: either None or a list with binary values indicating
-            the presence of each part. If a list, it will be modified in-place.1
-        :return: if `instances` have the attribute output, return a numpy array
-            with the gold output. If it doesn't, return None.
         """
         make_gold = instance.output is not None
-
-        initial_index = len(parts)
 
         for g in range(len(instance)):
             for h in range(1, len(instance)):
@@ -649,28 +631,26 @@ class TurboParser(StructuredClassifier):
                         continue
 
                     arc = Grandparent(h, m, g)
-                    parts.append(arc)
                     if make_gold:
                         if gold_gh and instance.get_head(m) == h:
-                            gold_output.append(1)
+                            gold = 1
                         else:
-                            gold_output.append(0)
+                            gold = 0
+                    else:
+                        gold = None
+                    parts.append(arc, gold)
 
-        parts.set_offset(Grandparent,
-                         initial_index, len(parts) - initial_index)
-
-    def make_parts_labeled(self, instance, parts, gold_output):
+    def make_parts_labeled(self, instance, parts):
         """
         Create labeled arcs. This function expects that `make_parts_basic` has
         already been called and populated `parts` with unlabeled arcs.
 
         :param instance: DependencyInstance
         :param parts: DependencyParts
-        :param gold_output: list to be modified in-place
+        :type parts: DependencyParts
         """
         make_gold = instance.output is not None
 
-        num_parts_initial = len(parts)
         for h in range(len(instance)):
             for m in range(1, len(instance)):
                 if h == m:
@@ -693,41 +673,43 @@ class TurboParser(StructuredClassifier):
                 # should be pretty rare) consider all the possible
                 # relations.
                 if not allowed_relations:
-                    allowed_relations = range(len(
-                        self.dictionary.get_relation_alphabet()))
+                    allowed_relations = range(self.dictionary.get_num_labels())
                 for l in allowed_relations:
                     part = LabeledArc(h, m, l)
-                    parts.append(part)
+
                     if make_gold:
                         if instance.get_head(m) == h and \
                            instance.get_relation(m) == l:
-                            gold_output.append(1.)
+                            gold = 1
                         else:
-                            gold_output.append(0.)
+                            gold = 0
+                    else:
+                        gold = None
 
-        parts.set_offset(LabeledArc,
-                         num_parts_initial, len(parts) - num_parts_initial)
+                    parts.append(part, gold)
 
-    def make_parts_basic(self, instance, parts, gold_output):
+    def make_parts_basic(self, instance, parts):
         """
         Create the first-order arcs into which the problem is factored.
+
+        All parts except the ones pruned by distance or POS tag combination
+        are created (if such pruning methods are used). In higher order models,
+        the resulting parts should be further pruned by another parser.
 
         The objects `parts` is modified in-place.
 
         :param instance: a DependencyInstance object
         :param parts: a DependencyParts object, modified in-place
-        :param gold_output: either None or a list with binary values indicating
-            the presence of each part.
+        :type parts: DependencyParts
         :return: if `instances` have the attribute `output`, return a numpy
             array with 1 signaling the presence of an arc in a combination
             (head, modifier) or (head, modifier, label) and 0 otherwise.
             It is a one-dimensional array.
 
-            If `instances` doesn't have the attribute `output` return None.
+            If `instances` doesn't have the attribute `output`, return None.
         """
         make_gold = instance.output is not None
 
-        num_parts_initial = len(parts)
         for h in range(len(instance)):
             for m in range(1, len(instance)):
                 if h == m:
@@ -757,12 +739,15 @@ class TurboParser(StructuredClassifier):
                         continue
 
                 part = Arc(h, m)
-                parts.append(part)
                 if make_gold:
                     if instance.get_head(m) == h:
-                        gold_output.append(1.)
+                        gold = 1
                     else:
-                        gold_output.append(0.)
+                        gold = 0
+                else:
+                    gold = None
+
+                parts.append(part, gold)
 
         # When adding unlabeled arcs, make sure the graph stays connected.
         # Otherwise, enforce connectedness by adding some extra arcs
@@ -770,18 +755,19 @@ class TurboParser(StructuredClassifier):
         # NOTE: if --projective, enforcing connectedness is not enough,
         # so we add arcs of the form m-1 -> m to make sure the sentence
         # has a projective parse.
-        arcs = parts[num_parts_initial:]
+        arcs = parts.get_parts_of_type(Arc)
         inserted_arcs = self.enforce_well_formed_graph(instance, arcs)
         for h, m in inserted_arcs:
             part = Arc(h, m)
-            parts.append(part)
             if make_gold:
                 if instance.get_head(m) == h:
-                    gold_output.append(1.)
+                    gold = 1
                 else:
-                    gold_output.append(0.)
-        parts.set_offset(Arc,
-                         num_parts_initial, len(parts) - num_parts_initial)
+                    gold = 0
+            else:
+                gold = None
+
+            parts.append(part, gold)
 
     def _get_task_validation_metrics(self, valid_data, valid_pred):
         """
@@ -793,36 +779,58 @@ class TurboParser(StructuredClassifier):
             in the data.
         """
         accumulated_uas = 0.
+        accumulated_las = 0.
         total_tokens = 0
 
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
             parts = valid_data.parts[i]
-            # gold = valid_data.gold_labels[i]
             predictions = valid_pred[i]
 
-            offset, size = parts.get_offset(Arc)
-            arcs = parts[offset:offset + size]
-            arc_scores = predictions[offset:offset + size]
+            offset = parts.get_type_offset(Arc)
+            num_arcs = parts.get_num_type(Arc)
+            arcs = parts.get_parts_of_type(Arc)
+            arc_scores = predictions[offset:offset + num_arcs]
             gold_heads = instance.output.heads[1:]
 
-            score_matrix = _make_score_matrix(len(instance), arcs, arc_scores)
+            score_matrix = make_score_matrix(len(instance), arcs, arc_scores)
             pred_heads = chu_liu_edmonds(score_matrix)[1:]
-            # uas = get_naive_uas(valid_pred[i], gold, parts, length)
             real_length = len(instance) - 1
 
             # scale UAS by sentence length; it is normalized later
-            accumulated_uas += np.sum(gold_heads == pred_heads)
+            head_hits = gold_heads == pred_heads
+            accumulated_uas += np.sum(head_hits)
             total_tokens += real_length
 
+            if not self.options.unlabeled:
+                gold_labels = instance.output.relations[1:]
+                pred_labels = get_predicted_labels(pred_heads, parts)
+                label_hits = gold_labels == pred_labels
+                label_head_hits = np.logical_and(head_hits, label_hits)
+                accumulated_las += np.sum(label_head_hits)
+
         self.validation_uas = accumulated_uas / total_tokens
+        self.validation_las = accumulated_las / total_tokens
+
+        # always update UAS; use it as a criterion for saving if no LAS
         if self.validation_uas > self.best_validation_uas:
             self.best_validation_uas = self.validation_uas
-            self._should_save = True
+            improved_uas = True
         else:
-            self._should_save = False
+            improved_uas = False
 
-        self.neural_scorer.lr_scheduler_step(self.validation_uas)
+        if self.options.unlabeled:
+            acc = self.validation_uas
+            self._should_save = improved_uas
+        else:
+            acc = self.validation_las
+            if self.validation_las > self.best_validation_las:
+                self.best_validation_las = self.validation_las
+                self._should_save = True
+            else:
+                self._should_save = False
+
+        self.neural_scorer.lr_scheduler_step(acc)
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
@@ -917,16 +925,23 @@ class TurboParser(StructuredClassifier):
             logging.info(msg)
             
     def label_instance(self, instance, parts, output):
+        """
+        :type instance: DependencyInstance
+        :type parts: DependencyParts
+        :param output: array with predictions (decoder output)
+        :return:
+        """
         heads = [-1 for i in range(len(instance))]
         relations = ['NULL' for i in range(len(instance))]
         instance.output = DependencyInstanceOutput(heads, relations)
         root = -1
         root_score = -1
 
-        offset, size = parts.get_offset(Arc)
-        arcs = parts[offset:offset + size]
-        scores = output[offset:offset + size]
-        score_matrix = _make_score_matrix(len(instance), arcs, scores)
+        offset = parts.get_type_offset(Arc)
+        num_arcs = parts.get_num_type(Arc)
+        arcs = parts.get_parts_of_type(Arc)
+        scores = output[offset:offset + num_arcs]
+        score_matrix = make_score_matrix(len(instance), arcs, scores)
         heads = chu_liu_edmonds(score_matrix)
 
         for m, h in enumerate(heads):
@@ -966,194 +981,6 @@ class TurboParser(StructuredClassifier):
                         self.dictionary.get_relation_name(0)
 
 
-def _make_score_matrix(length, arcs, scores):
-    """
-    Makes a score matrix from an array of scores ordered in the same way as a
-    list of DependencyPartArcs. Positions [h, m] corresponding to non-existing
-    arcs have score of -inf.
-
-    :param length: length of the sentence, including the root pseudo-token
-    :param arcs: list of candidate Arc parts
-    :param scores: array with score of each arc (ordered in the same way as arcs
-    :return: a 2d numpy array
-    """
-    score_matrix = np.full([length, length], -np.inf, np.float32)
-    for arc, score in zip(arcs, scores):
-        h = arc.head
-        m = arc.modifier
-        score_matrix[h, m] = score
-
-    return score_matrix
-
-
-def chu_liu_edmonds(score_matrix):
-    """
-    Run the Chu-Liu-Edmonds' algorithm to find the maximum spanning tree.
-
-    :param score_matrix: a matrix such that cell [h, m] has the score for the
-        arc (h, m).
-    :return: an array heads, such that heads[m] contains the head of token m.
-        The root is in position 0 and has head -1.
-    """
-    while True:
-        # pick the highest score head for each modifier
-        heads = score_matrix.argmax(0)
-
-        # find and solve cycles
-        cycle = find_cycle(heads)
-
-        if cycle is None:
-            break
-        solve_cycle(heads, cycle, score_matrix)
-
-    # set the head of the root pseudo token to -1
-    heads[0] = -1
-
-    return heads
-
-
-def find_cycle(heads):
-    """
-    Finds and returns the first cycle in the given list of heads, or None if
-    there is no cycle.
-
-    :param heads: candidate heads for each word in a sentence; i.e., heads[i]
-        contains the head for modifier i. heads[0] is ignored (0 is the root).
-    :return:
-    """
-    # this set stores all vertices with a valid path to the root
-    reachable_vertices = {0}
-
-    # vertices known to be unreachable from the root, i.e., in a cycle
-    vertices_in_cycles = set()
-
-    # vertices currently being evaluated, not known if they're reachable
-    visited = set()
-
-    # the directions of the edges don't matter if we only want to find cycles
-    for vertex in range(len(heads)):
-        if vertex in reachable_vertices or vertex in vertices_in_cycles:
-            continue
-
-        cycle = _find_cycle_recursive(heads, vertex, visited,
-                                      reachable_vertices, vertices_in_cycles)
-        if cycle is not None:
-            return cycle
-
-    return None
-
-
-def _find_cycle_recursive(heads, token, visited_tokens, reachable_tokens,
-                          tokens_in_cycles):
-    """
-    Return the first cycle it finds starting from the given token.
-
-    :param heads: heads for each token; heads[i] has the head of token i
-    :param token: which token is being currently visited
-    :param visited_tokens: set of tokens already visited in this round of
-        recursive calls
-    :param reachable_tokens: set of tokens known to be reachable from the root
-    :param tokens_in_cycles: set of tokens known to be unreachable from the
-        root
-    :return:
-    """
-    next_token = heads[token]
-    visited_tokens.add(token)
-
-    if next_token in reachable_tokens:
-        reachable_tokens.update(visited_tokens)
-        visited_tokens.clear()
-        cycle = None
-
-    elif next_token in visited_tokens:
-        # we found a cycle. return the tokens that are part of it.
-        visited_tokens.clear()
-        cycle = {token}
-        while next_token != token:
-            cycle.add(next_token)
-            next_token = heads[next_token]
-
-        tokens_in_cycles.update(cycle)
-
-    elif next_token in tokens_in_cycles:
-        # vertex linked to an existing cycle, but not part of it
-        visited_tokens.clear()
-        cycle = None
-
-    else:
-        # we still don't know if it's reachable or not, continue exploring
-        cycle = _find_cycle_recursive(heads, next_token, visited_tokens,
-                                      reachable_tokens, tokens_in_cycles)
-
-    return cycle
-
-
-def solve_cycle(heads, cycle, scores):
-    """
-    Resolve a cycle in the dependency tree.
-
-    :param heads: heads for each token; heads[i] has the head of token i
-    :param cycle: set of tokens which make up a cycle
-    :param scores: 2d numpy array with the scores for each [h, m] arc
-    :return:
-    """
-    num_tokens = len(heads)
-
-    # tokens outside this cycle. 0 (root) is always outside
-    tokens_outside = np.array([x for x in range(num_tokens) if x not in cycle])
-
-    cycle = np.array(list(cycle))
-
-    # first, pick an arc from the cycle to the outside tokens
-    # if len(outside) == 1, all vertices except for the root are in a cycle
-    if len(tokens_outside) > 1:
-        # make an Nx1 index array
-        cycle_inds = np.array([[i] for i in cycle])
-
-        # these are the weights of arcs connecting tokens in the cycle to the
-        # ones outside it. (-1 because we can't take the root now)
-        outgoing_weights = scores[cycle_inds, tokens_outside[1:]]
-
-        # find one outgoing arc for each token outside the cycle
-        max_outgoing_inds = outgoing_weights.argmax(0)
-        max_outgoing_weights = outgoing_weights.max(0)
-
-        # set every outgoing weight to -inf and then restore the highest ones
-        outgoing_weights[:] = -np.Infinity
-        inds_y = np.arange(len(tokens_outside) - 1)
-        outgoing_weights[max_outgoing_inds, inds_y] = max_outgoing_weights
-        scores[cycle_inds, tokens_outside[1:]] = outgoing_weights
-
-    # now, adjust incoming arcs. Each arc from a token v (outside the cycle)
-    # to v' (inside) is reweighted as:
-    # s(v, v') = s(v, v') + s(head(v'), v')
-    # and then we pick the highest arc for each outside token
-    token_inds = np.array([[i] for i in tokens_outside])
-    incoming_weights = scores[token_inds, cycle]
-
-    for i, token in enumerate(cycle):
-        head_to_t = scores[heads[token], token]
-        incoming_weights[:, i] += head_to_t
-
-    max_incoming_inds = incoming_weights.argmax(1)
-    max_incoming_weights = incoming_weights.max(1)
-
-    # analogous to the outgoing weights
-    incoming_weights[:] = -np.Infinity
-    incoming_weights[np.arange(len(tokens_outside)),
-                     max_incoming_inds] = max_incoming_weights
-    scores[token_inds, cycle] = incoming_weights
-
-    # the token with the maximum weighted incoming edge now changes
-    # its head, thus breaking the cycle
-    new_head_ind = max_incoming_weights.argmax()
-    token_leaving_cycle_ind = max_incoming_inds[new_head_ind]
-
-    token_leaving_cycle = cycle[token_leaving_cycle_ind]
-    old_head = heads[token_leaving_cycle]
-    scores[old_head, token_leaving_cycle] = -np.Infinity
-
-
 def _check_gold_arc(instance, head, modifier):
     """
     Auxiliar function to check whether there is an arc from head to
@@ -1173,36 +1000,83 @@ def _check_gold_arc(instance, head, modifier):
     return False
 
 
-def get_naive_uas(predicted, gold_output, parts, length):
+def get_naive_metrics(predicted, gold_output, parts, length):
     """
-    Compute the UAS (unlabeled accuracy score) naively, without considering tree
-    constraints. It just takes the highest scoring head for each token.
+    Compute the UAS (unlabeled accuracy score) and LAS (labeled accuracy score)
+    naively, without considering tree constraints. It just takes the highest
+    scoring head and label for each token.
+
+    If the decoder predicted output is given, tree constraints have already been
+    imposed, except for single root (which is not necessary for some treebanks).
 
     :param predicted: numpy array with scores for each part (can also be the
         decoder output)
     :param gold_output: same as predicted, with gold data. This
     :param parts: DependencyParts
+    :type parts: DependencyParts
     :param length: length of the sentence, excluding root
-    :return:
+    :return: UAS, LAS
     """
     # length + 1 to match the modifier indices
     head_per_modifier = np.zeros(length + 1, np.int)
-    max_per_modifier = np.zeros(length + 1, np.float)
-    hits = np.zeros(length + 1, np.float)
+    head_score_per_modifier = np.zeros(length + 1, np.float)
+    label_per_modifier = np.zeros(length + 1, np.float)
+    label_score_per_modifier = np.zeros(length + 1, np.float)
+    head_hits = np.zeros(length + 1, np.float)
+    label_hits = np.zeros(length + 1, np.float)
 
-    for i, arc in parts.iterate_over_type(Arc, return_index=True):
+    offset_arc = parts.get_type_offset(Arc)
+    for i, arc in enumerate(parts.iterate_over_type(Arc), offset_arc):
         m = arc.modifier
         score = predicted[i]
-        if score < max_per_modifier[m]:
+        if score < head_score_per_modifier[m]:
             continue
 
-        max_per_modifier[m] = score
+        head_score_per_modifier[m] = score
         head_per_modifier[m] = arc.head
         if gold_output[i] == 1:
-            hits[m] = 1
+            head_hits[m] = 1
         else:
-            hits[m] = 0
+            head_hits[m] = 0
+
+    offset_labeled = parts.get_type_offset(LabeledArc)
+    for i, arc in enumerate(parts.iterate_over_type(LabeledArc),
+                            offset_labeled):
+        m = arc.modifier
+        score = predicted[i]
+        if score < label_score_per_modifier[m]:
+            continue
+
+        label_score_per_modifier[m] = score
+        label_per_modifier[m] = arc.label
+        if gold_output[i] == 1:
+            label_hits[m] = 1
+        else:
+            label_hits[m] = 0
+
+    # LAS counts modifiers with correct label AND head
+    label_head_hits = np.logical_and(head_hits, label_hits)
 
     # exclude root
-    uas = hits[1:].mean()
-    return uas
+    uas = head_hits[1:].mean()
+    las = label_head_hits[1:].mean()
+
+    return uas, las
+
+
+def get_predicted_labels(predicted_heads, parts):
+    """
+    Get the labels of the dependency relations.
+
+    :param predicted_heads: list or array with the the head of the each word
+        (only for real words, i.e., not the root symbol)
+    :param parts: DependencyParts object
+    :return: numpy integer array with labels
+    """
+    labels = np.zeros(len(predicted_heads), dtype=np.int)
+
+    for modifier, head in enumerate(predicted_heads, 1):
+        i = parts.find_arc_index(head, modifier)
+        labels[modifier - 1] = parts.best_labels[i]
+
+    return labels

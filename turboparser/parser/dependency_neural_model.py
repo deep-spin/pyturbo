@@ -23,6 +23,7 @@ class DependencyNeuralModel(nn.Module):
                  distance_embedding_size,
                  rnn_size,
                  mlp_size,
+                 label_mlp_size,
                  rnn_layers,
                  mlp_layers,
                  dropout,
@@ -47,12 +48,13 @@ class DependencyNeuralModel(nn.Module):
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
         self.mlp_size = mlp_size
+        self.label_mlp_size = label_mlp_size
         self.rnn_layers = rnn_layers
         self.mlp_layers = mlp_layers
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
         self.tag_dropout_rate = tag_dropout
-        self.num_labels = len(dependency_dictionary.relation_alphabet)
+        self.num_labels = dependency_dictionary.get_num_labels()
         self.padding_word = token_dictionary.get_embedding_id(PADDING)
         self.padding_tag = token_dictionary.get_tag_id(PADDING)
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
@@ -111,7 +113,13 @@ class DependencyNeuralModel(nn.Module):
         self.head_mlp = self._create_mlp()
         self.modifier_mlp = self._create_mlp()
         self.arc_scorer = self._create_scorer()
-        self.label_scorer = self._create_scorer(output_size=self.num_labels)
+
+        self.label_head_mlp = self._create_mlp(
+            hidden_size=self.label_mlp_size)
+        self.label_modifier_mlp = self._create_mlp(
+            hidden_size=self.label_mlp_size)
+        self.label_scorer = self._create_scorer(self.label_mlp_size,
+                                                self.num_labels)
 
         if model_type.grandparents:
             self.gp_grandparent_mlp = self._create_mlp()
@@ -141,6 +149,11 @@ class DependencyNeuralModel(nn.Module):
                 distance_embedding_size,
                 mlp_size,
                 bias=True)
+            self.label_distance_projector = nn.Linear(
+                distance_embedding_size,
+                self.label_mlp_size,
+                bias=True
+            )
         else:
             self.distance_mlp = None
 
@@ -247,7 +260,6 @@ class DependencyNeuralModel(nn.Module):
         """
         head_tensors = self.head_mlp(states)
         modifier_tensors = self.modifier_mlp(states)
-        offset, num_arcs = parts.get_offset(Arc)
 
         head_indices = []
         modifier_indices = []
@@ -270,6 +282,8 @@ class DependencyNeuralModel(nn.Module):
         # now index all of them to process at once
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
+        distances = []
+
         if self.distance_embedding_size:
             distance_indices = torch.tensor(distance_indices, dtype=torch.long)
             if self.on_gpu:
@@ -285,13 +299,28 @@ class DependencyNeuralModel(nn.Module):
 
         arc_states = self.tanh(heads + modifiers + distance_projections)
         arc_scores = self.arc_scorer(arc_states)
+
+        offset = parts.get_type_offset(Arc)
+        num_arcs = parts.get_num_type(Arc)
         scores[offset:offset + num_arcs] = arc_scores.view(-1)
 
         if not parts.has_type(LabeledArc):
             return
 
-        offset_labeled, num_labeled = parts.get_offset(LabeledArc)
-        label_scores = self.label_scorer(arc_states)
+        head_tensors = self.label_head_mlp(states)
+        modifier_tensors = self.label_modifier_mlp(states)
+
+        # we can reuse indices -- every LabeledArc must also appear as Arc
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
+        if self.distance_embedding_size:
+            distance_projections = self.label_distance_projector(distances)
+
+        label_states = self.tanh(heads + modifiers + distance_projections)
+        label_scores = self.label_scorer(label_states)
+
+        offset_labeled = parts.get_type_offset(LabeledArc)
+        num_labeled = parts.get_num_type(LabeledArc)
         indices = []
 
         # place the label scores in the correct position in the output
@@ -337,7 +366,8 @@ class DependencyNeuralModel(nn.Module):
         part_states = self.tanh(heads + modifiers + grandparents)
         part_scores = self.grandparent_scorer(part_states)
 
-        offset, size = parts.get_offset(Grandparent)
+        offset = parts.get_type_offset(Grandparent)
+        size = parts.get_num_type(Grandparent)
         scores[offset:offset + size] = part_scores.view(-1)
 
     def _compute_consecutive_sibling_scores(self, states, parts, scores):
@@ -383,7 +413,8 @@ class DependencyNeuralModel(nn.Module):
         sibling_states = self.tanh(heads + modifiers + siblings)
         sibling_scores = self.sibling_scorer(sibling_states)
 
-        offset, size = parts.get_offset(NextSibling)
+        offset = parts.get_type_offset(NextSibling)
+        size = parts.get_num_type(NextSibling)
         scores[offset:offset + size] = sibling_scores.view(-1)
 
     def _compute_grandsibling_scores(self, states, parts, scores):
@@ -432,7 +463,8 @@ class DependencyNeuralModel(nn.Module):
         gsib_states = self.tanh(heads + modifiers + siblings + grandparents)
         gsib_scores = self.grandsibling_scorer(gsib_states)
 
-        offset, size = parts.get_offset(GrandSibling)
+        offset = parts.get_type_offset(GrandSibling)
+        size = parts.get_num_type(GrandSibling)
         scores[offset:offset + size] = gsib_scores.view(-1)
 
     def get_word_representation(self, instances, max_length):

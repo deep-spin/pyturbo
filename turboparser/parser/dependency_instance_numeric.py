@@ -90,7 +90,7 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
 
 
 class DependencyInstanceNumericOutput(DependencyInstanceOutput):
-    def __init__(self, output, dictionary):
+    def __init__(self, output, token_dictionary, relation_dictionary):
         self.heads = [-1] * len(output.heads)
         self.relations = [-1] * len(output.relations)
         if output.tags is None:
@@ -101,24 +101,26 @@ class DependencyInstanceNumericOutput(DependencyInstanceOutput):
         for i in range(len(output.heads)):
             self.heads[i] = output.heads[i]
             relation = output.relations[i]
-            self.relations[i] = dictionary.get_relation_id(relation)
+            self.relations[i] = relation_dictionary.get_relation_id(relation)
             if self.tags is not None:
                 tag = output.tags[i]
-                self.tags[i] = dictionary.get_tag_id(tag)
+                self.tags[i] = token_dictionary.get_tag_id(tag)
 
 
 class DependencyInstanceNumeric(DependencyInstance):
     '''An dependency parsing instance with numeric fields.'''
-    def __init__(self, instance, token_dictionary):
+    def __init__(self, instance, token_dictionary, relation_dictionary):
         """
         :param instance: DependencyInstance
         :param token_dictionary: TokenDictionary
+        :param relation_dictionary: DependencyDictionary
         """
         if instance.output is None:
             output = None
         else:
             output = DependencyInstanceNumericOutput(instance.output,
-                                                     token_dictionary)
+                                                     token_dictionary,
+                                                     relation_dictionary)
         DependencyInstance.__init__(
             self, DependencyInstanceNumericInput(instance.input,
                                                  token_dictionary),

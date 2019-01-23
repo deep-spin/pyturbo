@@ -95,15 +95,6 @@ class StructuredClassifier(object):
         deriving class.'''
         raise NotImplementedError
 
-    def compute_neural_scores(self, instance, parts):
-        # TODO: Implement this.
-        # Run the forward pass.
-        num_parts = len(parts)
-        scores = torch.zeros(num_parts)
-        for r in range(num_parts):
-            scores[r] = self.neural_model.compute_score(instance, r)
-        return scores
-
     def compute_scores(self, instance, parts, features=None):
         '''Compute a score for every part in the instance using the current
         model and the part-specific features.
@@ -111,8 +102,7 @@ class StructuredClassifier(object):
         look at the current parameters. Each part will receive a score, so the
         vector of scores will be of the same size as the vector of parts.
         NOTE: Override this method for task-specific score computation (e.g.
-        to handle labeled features, etc.).
-        TODO: handle labeled features here instead of having to override.'''
+        to handle labeled features, etc.).'''
         if self.options.neural:
             scores = self.neural_scorer.compute_scores(instance, parts)
         else:
@@ -575,11 +565,7 @@ class StructuredClassifier(object):
                                     % train_loss,
                                     self._get_task_train_report(),
                                     'Validation Loss: %f' % validation_loss,
-                                    self._get_task_valid_report(),
-                                    'Total Reg: %f' % regularization_value,
-                                    'Total Loss+Reg: %f' %
-                                    (train_loss + regularization_value),
-                                    'Squared norm: %f' % sq_norm]))
+                                    self._get_task_valid_report()]))
 
     def _get_task_train_report(self):
         """
@@ -639,9 +625,7 @@ class StructuredClassifier(object):
         :param instances: list of non-formatted Instance objects
         :return: an InstanceData object.
             It contains formatted instances.
-            If the instances do not have the gold label, the gold attribute
-            will be a list of None. In neural models, features is also a
-            list of None.
+            In neural models, features is a list of None.
         """
         all_parts = []
         all_gold = []
@@ -649,7 +633,11 @@ class StructuredClassifier(object):
         formatted_instances = []
 
         for instance in instances:
-            f_instance, parts, gold_output = self.make_parts(instance)
+            f_instance, parts = self.make_parts(instance)
+            gold = parts.get_gold_output()
+            if gold is not None:
+                gold = np.array(gold, dtype=np.float)
+
             if self.options.neural:
                 features = None
             else:
@@ -663,12 +651,12 @@ class StructuredClassifier(object):
 
             formatted_instances.append(f_instance)
             all_parts.append(parts)
+            all_gold.append(gold)
             all_features.append(features)
-            all_gold.append(gold_output)
 
         self._report_make_parts(instances, all_parts)
-        data = InstanceData(formatted_instances, all_parts, all_features,
-                            all_gold)
+        data = InstanceData(formatted_instances, all_parts,
+                            all_features, all_gold)
         return data
 
     def run_batch(self, instance_data, return_loss=False):
@@ -750,19 +738,6 @@ class StructuredClassifier(object):
     def _run_report(self, num_instances):
         pass
             
-    def classify_instance(self, instance):
-        '''Run the structured classifier on a single instance.'''
-        formatted_instance, parts, gold_output = self.make_parts(instance)
-        features = self.make_features(formatted_instance, parts)
-        scores = self.compute_scores(formatted_instance, parts, features)
-        predicted_output = self.decoder.decode(formatted_instance, parts,
-                                               scores)
-        output_instance = type(instance)(input=instance.input, output=None)
-        self.label_instance(output_instance, parts, predicted_output)
-        if self.options.evaluate:
-            self.evaluate_instance(parts, gold_output, predicted_output)
-        return output_instance
-
     def begin_evaluation(self):
         '''Start all the evaluation counters for evaluating the classifier,
         evaluate each instance, and plot evaluation information at the end.

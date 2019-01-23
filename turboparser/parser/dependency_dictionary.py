@@ -32,6 +32,9 @@ class DependencyDictionary(Dictionary):
     def stop_growth(self):
         self.classifier.token_dictionary.stop_growth()
 
+    def get_num_labels(self):
+        return len(self.relation_alphabet)
+
     def create_relation_dictionary(self, reader):
         logging.info('Creating relation dictionary...')
 
@@ -105,6 +108,9 @@ class DependencyDictionary(Dictionary):
 
     def get_relation_name(self, relation):
         return self.relation_alphabet.get_label_name(relation)
+
+    def get_relation_id(self, relation):
+        return self.relation_alphabet.lookup(relation)
 
     def get_existing_relations(self, modifier_tag, head_tag):
         return self.existing_relations[modifier_tag][head_tag]
