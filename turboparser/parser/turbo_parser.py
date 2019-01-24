@@ -80,7 +80,9 @@ class TurboParser(StructuredClassifier):
                     mlp_layers=self.options.mlp_layers,
                     dropout=self.options.dropout,
                     word_dropout=options.word_dropout,
-                    tag_dropout=options.tag_dropout)
+                    tag_dropout=options.tag_dropout,
+                    pos_mlp_size=options.pos_mlp_size,
+                    predict_tags=options.predict_tag)
 
                 print('Model summary:')
                 print(model)
@@ -158,12 +160,14 @@ class TurboParser(StructuredClassifier):
                 pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_size, f)
                 pickle.dump(self.neural_scorer.model.mlp_size, f)
+                pickle.dump(self.neural_scorer.model.pos_mlp_size, f)
                 pickle.dump(self.neural_scorer.model.label_mlp_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_layers, f)
                 pickle.dump(self.neural_scorer.model.mlp_layers, f)
                 pickle.dump(self.neural_scorer.model.dropout_rate, f)
                 pickle.dump(self.neural_scorer.model.word_dropout_rate, f)
                 pickle.dump(self.neural_scorer.model.tag_dropout_rate, f)
+                pickle.dump(self.neural_scorer.model.predict_tags, f)
                 self.neural_scorer.model.save(f)
 
     def load(self, model_path=None):
@@ -203,12 +207,14 @@ class TurboParser(StructuredClassifier):
                 distance_embedding_size = pickle.load(f)
                 rnn_size = pickle.load(f)
                 mlp_size = pickle.load(f)
+                pos_mlp_size = pickle.load(f)
                 label_mlp_size = pickle.load(f)
                 rnn_layers = pickle.load(f)
                 mlp_layers = pickle.load(f)
                 dropout = pickle.load(f)
                 word_dropout = pickle.load(f)
                 tag_dropout = pickle.load(f)
+                predict_tags = pickle.load(f)
                 dummy_embeddings = np.empty([embedding_vocab_size,
                                              word_embedding_size], np.float32)
                 neural_model = DependencyNeuralModel(
@@ -220,11 +226,13 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size=distance_embedding_size,
                     rnn_size=rnn_size,
                     mlp_size=mlp_size,
+                    pos_mlp_size=pos_mlp_size,
                     label_mlp_size=label_mlp_size,
                     rnn_layers=rnn_layers,
                     mlp_layers=mlp_layers,
                     dropout=dropout,
-                    word_dropout=word_dropout, tag_dropout=tag_dropout)
+                    word_dropout=word_dropout, tag_dropout=tag_dropout,
+                    predict_tags=predict_tags)
                 neural_model.load(f)
                 self.neural_scorer = NeuralScorer()
                 self.neural_scorer.set_model(neural_model)

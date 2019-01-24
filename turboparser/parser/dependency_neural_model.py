@@ -28,7 +28,9 @@ class DependencyNeuralModel(nn.Module):
                  mlp_layers,
                  dropout,
                  word_dropout,
-                 tag_dropout):
+                 tag_dropout,
+                 predict_tags,
+                 pos_mlp_size=0):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
@@ -39,6 +41,7 @@ class DependencyNeuralModel(nn.Module):
             token
         :param tag_dropout: probability of replacing a POS tag with the unknown
             tag
+        :param predict_tags: whether to train the model to predict POS tags
         """
         super(DependencyNeuralModel, self).__init__()
         self.embedding_vocab_size = word_embeddings.shape[0]
@@ -48,6 +51,7 @@ class DependencyNeuralModel(nn.Module):
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
         self.mlp_size = mlp_size
+        self.pos_mlp_size = pos_mlp_size
         self.label_mlp_size = label_mlp_size
         self.rnn_layers = rnn_layers
         self.mlp_layers = mlp_layers
@@ -60,6 +64,7 @@ class DependencyNeuralModel(nn.Module):
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
         self.unknown_tag = token_dictionary.get_tag_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
+        self.predict_tags = predict_tags
 
         # self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
         #                                     word_embedding_size)
@@ -108,6 +113,14 @@ class DependencyNeuralModel(nn.Module):
         self.tanh = nn.Tanh()
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
+
+        # POS tags
+        if predict_tags:
+            self.pos_mlp = self._create_mlp(
+                hidden_size=pos_mlp_size, num_layers=1,
+                output_activation=self.relu)
+            num_tags = token_dictionary.get_num_tags()
+            self.pos_scorer = self._create_scorer(pos_mlp_size, num_tags)
 
         # first order
         self.head_mlp = self._create_mlp()
@@ -194,12 +207,14 @@ class DependencyNeuralModel(nn.Module):
 
         return scorer
 
-    def _create_mlp(self, input_size=None, hidden_size=None, num_layers=None):
+    def _create_mlp(self, input_size=None, hidden_size=None, num_layers=None,
+                    output_activation=None):
         """
         Create the weights for a fully connected subnetwork.
 
         The output has a linear activation; if num_layers > 1, hidden layers
-        will use a non-linearity.
+        will use a non-linearity. If output_activation is given, it will be
+        applied to the output.
 
         The first layer will have a weight matrix (input x hidden), subsequent
         layers will be (hidden x hidden).
@@ -226,6 +241,9 @@ class DependencyNeuralModel(nn.Module):
             linear = nn.Linear(input_size, hidden_size)
             layers.extend([self.dropout, linear])
             input_size = hidden_size
+
+        if output_activation is not None:
+            layers.append(output_activation)
 
         mlp = nn.Sequential(*layers)
         return mlp
@@ -617,6 +635,12 @@ class DependencyNeuralModel(nn.Module):
         batch_packed_states, _ = self.rnn(packed_embeddings)
         batch_states, _ = nn.utils.rnn.pad_packed_sequence(
             batch_packed_states, batch_first=True)
+
+        if self.predict_tags:
+            hidden = self.pos_mlp(batch_states)
+            self.pos_logits = self.pos_scorer(hidden)
+
+            # TODO: use some CRF decoder
 
         # now go through each batch item
         for i in range(batch_size):

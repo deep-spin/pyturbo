@@ -57,6 +57,8 @@ class DependencyOptionParser(OptionParser):
                             default=0, const=1,
                             help="""Force the parser output single-rooted
                             projective trees.""")
+        parser.add_argument('--pos', action='store_true',
+                            help='Predict POS tags')
         parser.add_argument('--single_root', action='store_true',
                             help='When running the parser, enforce that there '
                                  'is only one root per sentence.')
@@ -104,6 +106,8 @@ class DependencyOptionParser(OptionParser):
                             help='Size of hidden head MLP layers')
         parser.add_argument('--label_mlp_size', type=int, default=100,
                             help='Size of hidden dependency label MLP layers')
+        parser.add_argument('--pos_mlp_size', type=int, default=100,
+                            help='Size of hidden POS MLP layer')
         parser.add_argument('--rnn_layers', type=int, default=1,
                             help='Number of RNN layers')
         parser.add_argument('--mlp_layers', type=int, default=1,
@@ -159,6 +163,7 @@ DEFINE_bool(pruner_large_feature_set, false,
 
         options.model_type = args['model_type']
         options.unlabeled = bool(args['unlabeled'])
+        options.predict_tags = args['pos']
         options.projective = bool(args['projective'])
         options.prune_relations = bool(args['prune_relations'])
         options.prune_distances = bool(args['prune_distances'])
@@ -174,6 +179,7 @@ DEFINE_bool(pruner_large_feature_set, false,
         options.distance_embedding_size = args['distance_embedding_size']
         options.rnn_size = args['rnn_size']
         options.mlp_size = args['mlp_size']
+        options.pos_mlp_size = args['pos_mlp_size']
         options.label_mlp_size = args['label_mlp_size']
         options.rnn_layers = args['rnn_layers']
         options.mlp_layers = args['mlp_layers']
