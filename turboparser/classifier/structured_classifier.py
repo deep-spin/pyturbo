@@ -21,10 +21,7 @@ class StructuredClassifier(object):
         self.writer = None
         self.decoder = None
         self.parameters = None
-        if self.options.neural:
-            self.neural_scorer = NeuralScorer()
-        else:
-            self.neural_scorer = None
+        self.neural_scorer = None
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -113,7 +110,7 @@ class StructuredClassifier(object):
         return scores
 
     def make_gradient_step(self, gold_output, predicted_output, parts=None,
-                           features=None, eta=None, t=None):
+                           features=None, eta=None, t=None, instances=None):
         '''Perform a gradient step updating the current model.
         Perform a gradient step with stepsize eta. The iteration number is
         provided as input since it may be necessary to keep track of the
@@ -440,7 +437,8 @@ class StructuredClassifier(object):
 
             # run the gradient step for the whole batch
             start_time = time.time()
-            self.make_gradient_step(instance_data.gold_labels, all_predictions)
+            self.make_gradient_step(instance_data.gold_labels, all_predictions,
+                                    instances=instance_data.instances)
             end_time = time.time()
             self.time_gradient += end_time - start_time
 

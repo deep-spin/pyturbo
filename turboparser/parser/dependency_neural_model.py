@@ -519,7 +519,7 @@ class DependencyNeuralModel(nn.Module):
             if word_or_tag == 'word':
                 getter = instance.get_embedding_id
             else:
-                getter = instance.get_tag
+                getter = instance.get_coarse_tag
 
             indices = [getter(j) for j in range(len(instance))]
             index_matrix[i, :len(instance)] = torch.tensor(indices)
@@ -638,6 +638,9 @@ class DependencyNeuralModel(nn.Module):
 
         if self.predict_tags:
             hidden = self.pos_mlp(batch_states)
+
+            # pos_logits is (batch, num_tokens, num_tags)
+            # shorter sentences in the batch have spurious logits
             self.pos_logits = self.pos_scorer(hidden)
 
             # TODO: use some CRF decoder

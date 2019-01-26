@@ -251,7 +251,7 @@ class TokenDictionary(Dictionary):
                     suffix = form[-self.classifier.options.suffix_length:]
 
                     # Add tags to alphabet.
-                    tag = instance.get_tag(i)
+                    tag = instance.get_coarse_tag(i)
                     tag_counts[tag] += 1
 
                     tag = instance.get_fine_tag(i)

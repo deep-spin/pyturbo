@@ -5,6 +5,7 @@ from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
     make_score_matrix
+from .dependency_scorer import DependencyNeuralScorer
 from .dependency_dictionary import DependencyDictionary
 from .dependency_instance import DependencyInstanceOutput
 from .dependency_instance_numeric import DependencyInstanceNumeric
@@ -55,6 +56,9 @@ class TurboParser(StructuredClassifier):
         self.parameters = None
         self._set_options()        
 
+        if options.neural:
+            self.neural_scorer = DependencyNeuralScorer()
+
         if self.options.train:
             word_indices, embeddings = self._load_embeddings()
             self.token_dictionary.initialize(
@@ -82,7 +86,7 @@ class TurboParser(StructuredClassifier):
                     word_dropout=options.word_dropout,
                     tag_dropout=options.tag_dropout,
                     pos_mlp_size=options.pos_mlp_size,
-                    predict_tags=options.predict_tag)
+                    predict_tags=options.predict_tags)
 
                 print('Model summary:')
                 print(model)
@@ -420,6 +424,19 @@ class TurboParser(StructuredClassifier):
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
 
+    def make_gradient_step(self, gold_output, predicted_output, parts=None,
+                           features=None, eta=None, t=None, instances=None):
+        """
+        Perform a gradient step minimizing both parsing error and POS tagging
+        error.
+        """
+        if self.options.predict_tags:
+            pos_gold_output = [np.array(inst.get_coarse_tags())
+                               for inst in instances]
+            self.neural_scorer.compute_pos_gradients(pos_gold_output)
+        super(TurboParser, self).make_gradient_step(
+            gold_output, predicted_output, parts, features, eta, t, instances)
+
     def make_parts(self, instance):
         """
         Create the parts (arcs) into which the problem is factored.
@@ -670,8 +687,8 @@ class TurboParser(StructuredClassifier):
                     continue
 
                 # determine which relations are allowed between h and m
-                modifier_tag = instance.get_tag(m)
-                head_tag = instance.get_tag(h)
+                modifier_tag = instance.get_coarse_tag(m)
+                head_tag = instance.get_coarse_tag(h)
                 allowed_relations = self.dictionary.get_existing_relations(
                     modifier_tag, head_tag)
 
@@ -724,8 +741,8 @@ class TurboParser(StructuredClassifier):
                     continue
 
                 if h and self.options.prune_distances:
-                    modifier_tag = instance.get_tag(m)
-                    head_tag = instance.get_tag(h)
+                    modifier_tag = instance.get_coarse_tag(m)
+                    head_tag = instance.get_coarse_tag(h)
                     if h < m:
                         # Right attachment.
                         if m - h > \
@@ -739,8 +756,8 @@ class TurboParser(StructuredClassifier):
                                modifier_tag, head_tag):
                             continue
                 if self.options.prune_relations:
-                    modifier_tag = instance.get_tag(m)
-                    head_tag = instance.get_tag(h)
+                    modifier_tag = instance.get_coarse_tag(m)
+                    head_tag = instance.get_coarse_tag(h)
                     allowed_relations = self.dictionary.get_existing_relations(
                         modifier_tag, head_tag)
                     if not allowed_relations:

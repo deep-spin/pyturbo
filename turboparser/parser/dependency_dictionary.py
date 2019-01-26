@@ -71,9 +71,9 @@ class DependencyDictionary(Dictionary):
                     head = instance.get_head(i)
                     assert 0 <= head < len(instance)
                     modifier_tag = self.classifier.token_dictionary.get_tag_id(
-                        instance.get_tag(i))
+                        instance.get_coarse_tag(i))
                     head_tag = self.classifier.token_dictionary.get_tag_id(
-                        instance.get_tag(head))
+                        instance.get_coarse_tag(head))
                     if modifier_tag < 0:
                         modifier_tag = \
                             self.classifier.token_dictionary.token_unknown

@@ -16,6 +16,8 @@ class StructuredDecoder(object):
         """
         Compute and return a margin vector to be used in the loss and a
         normalization term to be added to it.
+
+        This function is supposed to be overridden.
         """
         return np.zeros_like(gold_output, dtype=np.float), 0
 

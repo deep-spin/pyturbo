@@ -54,11 +54,17 @@ class DependencyInstance(Instance):
     def get_lemma(self, i):
         return self.input.lemmas[i]
 
-    def get_tag(self, i):
+    def get_coarse_tag(self, i):
         return self.input.tags[i]
+
+    def get_coarse_tags(self):
+        return self.input.tags
 
     def get_fine_tag(self, i):
         return self.input.fine_tags[i]
+
+    def get_fine_tags(self):
+        return self.input.fine_tagsß
 
     def get_num_morph_tags(self, i):
         return len(self.input.morph_tags[i])
