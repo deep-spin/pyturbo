@@ -64,7 +64,7 @@ class DependencyInstance(Instance):
         return self.input.fine_tags[i]
 
     def get_fine_tags(self):
-        return self.input.fine_tagsß
+        return self.input.fine_tags
 
     def get_num_morph_tags(self, i):
         return len(self.input.morph_tags[i])

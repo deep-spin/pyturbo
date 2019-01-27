@@ -264,7 +264,7 @@ class StructuredClassifier(object):
         """
         Decode the scores at training time.
 
-        Return the predicted output, loss, eta.
+        Return the predicted output and eta.
         """
         algorithm = self.options.training_algorithm
         eta = None
@@ -426,11 +426,8 @@ class StructuredClassifier(object):
                 parts = instance_data.parts[i]
                 gold_output = instance_data.gold_labels[i]
 
-                # network scores are as long as the instance with most parts
-                instance_scores = scores[i][:len(parts)]
-
                 predicted_output, _ = self._decode_train(
-                    instance, parts, instance_scores, gold_output)
+                    instance, parts, scores[i], gold_output)
                 self._update_task_metrics(predicted_output, gold_output,
                                           instance, parts)
                 all_predictions.append(predicted_output)
@@ -616,6 +613,15 @@ class StructuredClassifier(object):
         """
         pass
 
+    def get_predictions(self, instance, parts, inst_scores):
+        """
+        Return the predicted output.
+
+        The predicted output can be a tuple of predictions (for different
+        targets) for an instance.
+        """
+        return self.decoder.decode(instance, parts, inst_scores)
+
     def make_parts_batch(self, instances):
         """
         Create parts for all instances in the batch.
@@ -686,23 +692,26 @@ class StructuredClassifier(object):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
             gold = instance_data.gold_labels[i]
-            inst_scores = scores[i][:len(parts)]
+            inst_scores = scores[i]
 
-            predicted_output = self.decoder.decode(instance, parts, inst_scores)
+            predicted_output = self.get_predictions(instance, parts,
+                                                    inst_scores)
             predictions.append(predicted_output)
 
-            if self.options.evaluate:
-                self.evaluate_instance(parts, gold, predicted_output)
+            # if self.options.evaluate:
+            #     self.evaluate_instance(parts, gold, predicted_output)
 
             if return_loss:
-                loss = self.decoder.compute_loss(gold, predicted_output,
-                                                 inst_scores)
+                loss = self.compute_loss(gold, predicted_output, inst_scores)
                 losses.append(loss)
 
         if return_loss:
             return predictions, losses
 
         return predictions
+
+    def compute_loss(self, gold, predicted_output, scores):
+        return self.decoder.compute_loss(gold, predicted_output, scores)
 
     def run(self):
         '''Run the structured classifier on test data.'''

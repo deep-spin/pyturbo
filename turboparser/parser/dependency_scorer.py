@@ -11,9 +11,7 @@ class DependencyNeuralScorer(NeuralScorer):
     """
     def compute_pos_gradients(self, gold_output):
         """
-
         :param gold_output: list with the gold outputs for each sentence
-        :return:
         """
         # pos_logits is (batch, num_tokens, num_tags)
         # ignore logits after each sentence end
@@ -31,3 +29,16 @@ class DependencyNeuralScorer(NeuralScorer):
         logits = self.model.pos_logits.transpose(1, 2)
         cross_entropy = F.cross_entropy(logits, targets, ignore_index=-1)
         cross_entropy.backward(retain_graph=True)
+
+    def compute_pos_loss(self, scores, gold_output):
+        return F.cross_entropy(scores, gold_output)
+
+    def compute_scores(self, instances, parts):
+        dependency_scores = super(DependencyNeuralScorer, self).\
+            compute_scores(instances, parts)
+
+        if self.model.predict_tags:
+            pos_scores = self.model.pos_logits.detach().numpy()
+            return list(zip(dependency_scores, pos_scores))
+
+        return dependency_scores

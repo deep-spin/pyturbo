@@ -120,7 +120,8 @@ class DependencyNeuralModel(nn.Module):
                 hidden_size=pos_mlp_size, num_layers=1,
                 output_activation=self.relu)
             num_tags = token_dictionary.get_num_tags()
-            self.pos_scorer = self._create_scorer(pos_mlp_size, num_tags)
+            self.pos_scorer = self._create_scorer(pos_mlp_size, num_tags,
+                                                  bias=True)
 
         # first order
         self.head_mlp = self._create_mlp()
@@ -191,7 +192,7 @@ class DependencyNeuralModel(nn.Module):
 
         return parameter
 
-    def _create_scorer(self, input_size=None, output_size=1):
+    def _create_scorer(self, input_size=None, output_size=1, bias=False):
         """
         Create the weights for scoring a given tensor representation to a
         single number.
@@ -202,7 +203,7 @@ class DependencyNeuralModel(nn.Module):
         """
         if input_size is None:
             input_size = self.mlp_size
-        linear = nn.Linear(input_size, output_size, bias=False)
+        linear = nn.Linear(input_size, output_size, bias=bias)
         scorer = nn.Sequential(self.dropout, linear)
 
         return scorer
@@ -637,12 +638,12 @@ class DependencyNeuralModel(nn.Module):
             batch_packed_states, batch_first=True)
 
         if self.predict_tags:
-            hidden = self.pos_mlp(batch_states)
+            # ignore root
+            hidden = self.pos_mlp(batch_states[:, 1:])
 
             # pos_logits is (batch, num_tokens, num_tags)
             # shorter sentences in the batch have spurious logits
             self.pos_logits = self.pos_scorer(hidden)
-
             # TODO: use some CRF decoder
 
         # now go through each batch item

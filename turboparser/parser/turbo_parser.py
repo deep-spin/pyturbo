@@ -238,7 +238,7 @@ class TurboParser(StructuredClassifier):
                     word_dropout=word_dropout, tag_dropout=tag_dropout,
                     predict_tags=predict_tags)
                 neural_model.load(f)
-                self.neural_scorer = NeuralScorer()
+                self.neural_scorer = DependencyNeuralScorer()
                 self.neural_scorer.set_model(neural_model)
 
                 print('Model summary:')
@@ -271,9 +271,11 @@ class TurboParser(StructuredClassifier):
         """
         self.accumulated_uas = 0.
         self.accumulated_las = 0.
+        self.accumulated_pos = 0
         self.total_tokens = 0
         self.validation_uas = 0.
         self.validation_las = 0.
+        self.validation_pos = 0.
 
     def _get_task_train_report(self):
         """
@@ -298,6 +300,8 @@ class TurboParser(StructuredClassifier):
         msg = 'Naive validation UAS: %f' % self.validation_uas
         if not self.options.unlabeled:
             msg += '\tNaive validation LAS: %f' % self.validation_las
+        if self.options.predict_tags:
+            msg += '\tUPOS accuracy: %f' % self.validation_pos
 
         return msg
 
@@ -311,6 +315,31 @@ class TurboParser(StructuredClassifier):
 
         return msg
 
+    def _decode_train(self, instance, parts, scores, gold_output,
+                      features=None, t=None):
+        """
+        Decode the scores at training time for one instance..
+
+        This function takes care of the cases when POS tags are also predicted.
+
+        Return the predicted output and eta.
+        """
+        if self.options.predict_tags:
+            dep_scores, pos_scores = scores
+        else:
+            dep_scores = scores
+
+        # network scores are as long as the instance with most parts
+        dep_scores = dep_scores[:len(parts)]
+        dep_output, eta = super(TurboParser, self)._decode_train(
+            instance, parts, dep_scores, gold_output, features, t)
+
+        if self.options.predict_tags:
+            pos_output = pos_scores.argmax(1)
+            return (dep_output, pos_output), eta
+
+        return dep_output, eta
+
     def _update_task_metrics(self, predicted, gold, instance, parts):
         """
         Update the accumulated UAS and LAS count. It sums the metrics for each
@@ -318,9 +347,20 @@ class TurboParser(StructuredClassifier):
         this value is divided by the total number of tokens seen in all
         sentences combined.
         """
+        if self.options.predict_tags:
+            dep_predicted, pos_predicted = predicted
+        else:
+            dep_predicted = predicted
+
         # UAS doesn't consider the root
         length = len(instance) - 1
-        uas, las = get_naive_metrics(predicted, gold, parts, length)
+        uas, las = get_naive_metrics(dep_predicted, gold, parts, length)
+
+        if self.options.predict_tags:
+            gold_pos = np.array(instance.get_coarse_tags()[1:])
+            pos_hits = np.sum(pos_predicted == gold_pos)
+            self.accumulated_pos += pos_hits
+
         self.accumulated_uas += length * uas
         self.accumulated_las += length * las
         self.total_tokens += length
@@ -429,11 +469,18 @@ class TurboParser(StructuredClassifier):
         """
         Perform a gradient step minimizing both parsing error and POS tagging
         error.
+
+        The inputs are a batch.
         """
         if self.options.predict_tags:
-            pos_gold_output = [np.array(inst.get_coarse_tags())
+            dep_prediction, pos_prediction = list(zip(*predicted_output))
+            predicted_output = dep_prediction
+
+            # skip root
+            pos_gold_output = [np.array(inst.get_coarse_tags()[1:])
                                for inst in instances]
             self.neural_scorer.compute_pos_gradients(pos_gold_output)
+
         super(TurboParser, self).make_gradient_step(
             gold_output, predicted_output, parts, features, eta, t, instances)
 
@@ -794,28 +841,81 @@ class TurboParser(StructuredClassifier):
 
             parts.append(part, gold)
 
+    def get_predictions(self, instance, parts, scores):
+        """
+        Find the predictions for an instance.
+
+        If using POS tags, predictions are the dependency tree and tags, if not,
+        only the tree.
+        """
+        if self.options.predict_tags:
+            dep_scores, pos_scores = scores
+            pos_scores = pos_scores[:len(instance)]
+
+            #TODO: use structured prediction for POS
+            pos_predictions = pos_scores.argmax(1)
+        else:
+            dep_scores = scores
+
+        dep_scores = dep_scores[:len(parts)]
+        dep_predictions = self.decoder.decode(instance, parts, dep_scores)
+
+        if self.options.predict_tags:
+            return dep_predictions, pos_predictions
+
+        return dep_predictions
+
+    def compute_loss(self, gold, predicted_output, scores):
+        if self.options.predict_tags:
+            dep_scores, pos_scores = scores
+            dep_pred, pos_pred = predicted_output
+            pos_scores = pos_scores[:len(pos_pred)]
+            dep_scores = dep_scores[:len(dep_pred)]
+
+            # TODO: compute loss
+            pos_loss = 0
+        else:
+            dep_scores = scores
+            dep_pred = predicted_output
+
+        dep_scores = dep_scores[:len(dep_pred)]
+        dep_loss = self.decoder.compute_loss(gold, dep_pred, dep_scores)
+
+        if self.options.predict_tags:
+            return dep_loss, pos_loss
+
+        return dep_loss
+
     def _get_task_validation_metrics(self, valid_data, valid_pred):
         """
-        Compute and store internally validation UAS. Also call the neural scorer
-        to update learning rate based on UAS.
+        Compute and store internally validation metrics. Also call the neural
+        scorer to update learning rate.
+
+        At least the UAS is computed. Depending on the options, also LAS and
+        POS accuracy.
 
         :param valid_data: InstanceData
         :param valid_pred: list with predicted outputs (decoded) for each item
-            in the data.
+            in the data. Each item may be a tuple with parser and POS output.
         """
         accumulated_uas = 0.
         accumulated_las = 0.
+        accumulated_pos = 0.
         total_tokens = 0
 
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
             parts = valid_data.parts[i]
             predictions = valid_pred[i]
+            if self.options.predict_tags:
+                dep_prediction, pos_prediction = predictions
+            else:
+                dep_prediction = predictions
 
             offset = parts.get_type_offset(Arc)
             num_arcs = parts.get_num_type(Arc)
             arcs = parts.get_parts_of_type(Arc)
-            arc_scores = predictions[offset:offset + num_arcs]
+            arc_scores = dep_prediction[offset:offset + num_arcs]
             gold_heads = instance.output.heads[1:]
 
             score_matrix = make_score_matrix(len(instance), arcs, arc_scores)
@@ -834,8 +934,16 @@ class TurboParser(StructuredClassifier):
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
+            if self.options.predict_tags:
+                # skip root
+                gold = np.array(instance.get_coarse_tags())[1:]
+                pos_prediction = pos_prediction[:len(gold)]
+                hits = gold == pos_prediction
+                accumulated_pos += np.sum(hits)
+
         self.validation_uas = accumulated_uas / total_tokens
         self.validation_las = accumulated_las / total_tokens
+        self.validation_pos = accumulated_pos / total_tokens
 
         # always update UAS; use it as a criterion for saving if no LAS
         if self.validation_uas > self.best_validation_uas:
@@ -953,19 +1061,26 @@ class TurboParser(StructuredClassifier):
         """
         :type instance: DependencyInstance
         :type parts: DependencyParts
-        :param output: array with predictions (decoder output)
+        :param output: array with predictions (decoder output) or tuples of
+            predictions (parse and POS)
         :return:
         """
         heads = [-1 for i in range(len(instance))]
         relations = ['NULL' for i in range(len(instance))]
-        instance.output = DependencyInstanceOutput(heads, relations)
+        tags = ['NULL' for i in range(len(instance))]
+        instance.output = DependencyInstanceOutput(heads, relations, tags)
         root = -1
         root_score = -1
+
+        if self.options.predict_tags:
+            dep_output, pos_output = output
+        else:
+            dep_output = output
 
         offset = parts.get_type_offset(Arc)
         num_arcs = parts.get_num_type(Arc)
         arcs = parts.get_parts_of_type(Arc)
-        scores = output[offset:offset + num_arcs]
+        scores = dep_output[offset:offset + num_arcs]
         score_matrix = make_score_matrix(len(instance), arcs, scores)
         heads = chu_liu_edmonds(score_matrix)
 
@@ -973,7 +1088,7 @@ class TurboParser(StructuredClassifier):
             instance.output.heads[m] = h
             if h == 0:
                 index = parts.find_arc_index(h, m)
-                score = output[index]
+                score = dep_output[index]
 
                 if self.options.single_root and root != -1:
                     self.reassigned_roots += 1
@@ -995,6 +1110,12 @@ class TurboParser(StructuredClassifier):
                 label = parts.best_labels[index]
                 label_name = self.dictionary.get_relation_name(label)
                 instance.output.relations[m] = label_name
+
+            if self.options.predict_tags and m > 0:
+                tag = pos_output[m - 1]
+                tag_name = self.token_dictionary.\
+                    tag_alphabet.get_label_name(tag)
+                instance.output.tags[m] = tag_name
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):

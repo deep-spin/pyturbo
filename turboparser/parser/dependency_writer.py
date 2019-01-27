@@ -32,11 +32,15 @@ class DependencyWriter(Writer):
                 else:
                     multiword = multiwords[multiword_idx]
 
+            if instance.output.tags is not None:
+                tags = instance.output.tags
+            else:
+                tags = instance.input.tags
             line = '\t'.join([str(i),
                               instance.input.forms[i],
                               instance.input.lemmas[i],
-                              instance.input.tags[i],
-                              instance.input.tags[i],
+                              tags[i],
+                              instance.input.fine_tags[i],
                               '_',
                               str(instance.output.heads[i]),
                               instance.output.relations[i],
