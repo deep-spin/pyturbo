@@ -617,12 +617,13 @@ class DependencyNeuralModel(nn.Module):
         lengths = torch.tensor([len(instance) for instance in instances],
                                dtype=torch.long)
         # packed sequences must be sorted by decreasing length
-        lengths, inds = lengths.sort(descending=True)
+        sorted_lengths, inds = lengths.sort(descending=True)
+        _, rev_inds = inds.sort()
         if self.on_gpu:
-            lengths = lengths.cuda()
+            sorted_lengths = sorted_lengths.cuda()
 
         # instances = [instances[i] for i in inds]
-        max_length = lengths[0].item()
+        max_length = sorted_lengths[0].item()
         max_num_parts = max(len(p) for p in parts)
         batch_scores = torch.zeros(batch_size, max_num_parts)
         embeddings = self.get_word_representation(instances, max_length)
@@ -630,12 +631,15 @@ class DependencyNeuralModel(nn.Module):
 
         # pack to account for variable lengths
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
-            sorted_embeddings, lengths, batch_first=True)
+            sorted_embeddings, sorted_lengths, batch_first=True)
 
         # batch_states is (batch, num_tokens, hidden_size)
         batch_packed_states, _ = self.rnn(packed_embeddings)
         batch_states, _ = nn.utils.rnn.pad_packed_sequence(
             batch_packed_states, batch_first=True)
+
+        # return to the original ordering
+        batch_states = batch_states[rev_inds]
 
         if self.predict_tags:
             # ignore root
@@ -648,17 +652,10 @@ class DependencyNeuralModel(nn.Module):
 
         # now go through each batch item
         for i in range(batch_size):
-            # i points to positions in the original instances and parts
-            # inds[i] points to the corresponding position in the RNN output
-            rnn_ind = inds[i]
-
-            # we will set the scores corresponding to the i-th item in the
-            # batch, or the rnn_ind-th item in the instances
-
             length = lengths[i].item()
             states = batch_states[i, :length]
-            scores = batch_scores[rnn_ind]
-            sent_parts = parts[rnn_ind]
+            scores = batch_scores[i]
+            sent_parts = parts[i]
 
             self._compute_arc_scores(states, sent_parts, scores)
 
