@@ -19,16 +19,22 @@ class DependencyNeuralScorer(NeuralScorer):
             gold_output = [gold_output]
 
         batch_size = len(gold_output)
-        max_length = max(len(g) for g in gold_output)
-        shape = (batch_size, max_length)
-        targets = torch.full(shape, -1, dtype=torch.long)
+        loss = torch.tensor(0.)
+        if torch.cuda.is_available():
+            loss = loss.cuda()
         for i in range(batch_size):
-            targets[i, :len(gold_output[i])] = torch.tensor(gold_output[i])
+            # targets[i, :len(gold_output[i])] = torch.tensor(gold_output[i])
+            logits = self.model.pos_logits[i]
+            gold = torch.tensor(gold_output[i], dtype=torch.long)
+            if torch.cuda.is_available():
+                gold = gold.cuda()
+            loss += F.cross_entropy(logits, gold)
 
-        # cross_entropy expects (batch, n_classes, ...)
-        logits = self.model.pos_logits.transpose(1, 2)
-        cross_entropy = F.cross_entropy(logits, targets, ignore_index=-1)
-        cross_entropy.backward(retain_graph=True)
+        loss.backward(retain_graph=True)
+        # # cross_entropy expects (batch, n_classes, ...)
+        # logits = self.model.pos_logits.transpose(1, 2)
+        # cross_entropy = F.cross_entropy(logits, targets, ignore_index=-1)
+        # cross_entropy.backward(retain_graph=True)
 
     def compute_pos_loss(self, scores, gold_output):
         return F.cross_entropy(scores, gold_output)
@@ -38,7 +44,8 @@ class DependencyNeuralScorer(NeuralScorer):
             compute_scores(instances, parts)
 
         if self.model.predict_tags:
-            pos_scores = self.model.pos_logits.detach().numpy()
+            pos_scores = [sent_scores.detach().numpy()
+                          for sent_scores in self.model.pos_logits]
             return list(zip(dependency_scores, pos_scores))
 
         return dependency_scores
