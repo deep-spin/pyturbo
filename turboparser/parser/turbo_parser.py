@@ -54,7 +54,7 @@ class TurboParser(StructuredClassifier):
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.parameters = None
-        self._set_options()        
+        self._set_options()
 
         if options.neural:
             self.neural_scorer = DependencyNeuralScorer()
@@ -185,6 +185,7 @@ class TurboParser(StructuredClassifier):
             self.options.model_type = model_options.model_type
             self.options.unlabeled = model_options.unlabeled
             self.options.projective = model_options.projective
+            self.options.predict_tags = model_options.predict_tags
 
             # prune arcs with label/head POS/modifier POS unseen in training
             self.options.prune_relations = model_options.prune_relations
@@ -1044,7 +1045,9 @@ class TurboParser(StructuredClassifier):
         super(TurboParser, self).begin_evaluation()
 
     def end_evaluation(self, num_instances):
-        super(TurboParser, self).end_evaluation(num_instances)
+        #TODO: evaluation that takes into account parsing and POS tagging
+        # super(TurboParser, self).end_evaluation(num_instances)
+        pass
 
     def run(self):
         self.reassigned_roots = 0
