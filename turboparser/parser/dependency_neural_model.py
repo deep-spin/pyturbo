@@ -642,13 +642,7 @@ class DependencyNeuralModel(nn.Module):
         batch_states = batch_states[rev_inds]
 
         if self.predict_tags:
-            # ignore root
-            hidden = self.pos_mlp(batch_states[:, 1:])
-
-            # pos_logits is (batch, num_tokens, num_tags)
-            # shorter sentences in the batch have spurious logits
-            self.pos_logits = self.pos_scorer(hidden)
-            # TODO: use some CRF decoder
+            self.pos_logits = []
 
         # now go through each batch item
         for i in range(batch_size):
@@ -668,5 +662,14 @@ class DependencyNeuralModel(nn.Module):
 
             if sent_parts.has_type(GrandSibling):
                 self._compute_grandsibling_scores(states, sent_parts, scores)
+
+            if self.predict_tags:
+                # ignore root
+                hidden = self.pos_mlp(states[1:])
+
+                # pos_logits is (batch, num_tokens, num_tags)
+                # shorter sentences in the batch have *no* spurious logits
+                self.pos_logits.append(self.pos_scorer(hidden))
+                # TODO: use some CRF decoder
 
         return batch_scores
