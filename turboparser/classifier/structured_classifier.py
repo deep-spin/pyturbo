@@ -1,9 +1,7 @@
 '''A generic implementation of an abstract structured classifier.'''
 
 import numpy as np
-import torch
 from .parameters import Parameters, FeatureVector
-from .neural_scorer import NeuralScorer
 from .utils import nearly_eq_tol
 from .instance import InstanceData
 import logging

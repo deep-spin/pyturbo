@@ -1,5 +1,4 @@
 from ..classifier.structured_classifier import StructuredClassifier
-from ..classifier.neural_scorer import NeuralScorer
 from ..classifier import utils
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
