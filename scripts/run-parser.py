@@ -1,5 +1,6 @@
 import logging
 import torch
+import random
 import numpy as np
 
 from turboparser.parser import DependencyOptionParser, TurboParser
@@ -8,8 +9,9 @@ from turboparser.parser import DependencyOptionParser, TurboParser
 def main():
     """Main function for the dependency parser."""
 
-    torch.manual_seed(666)
-    np.random.seed(999)
+    random.seed(6)
+    torch.manual_seed(6)
+    np.random.seed(6)
 
     # Parse arguments.
     parser = DependencyOptionParser()

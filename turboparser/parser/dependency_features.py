@@ -265,8 +265,8 @@ class DependencyFeatures(object):
         MLID = (instance.get_lemma(modifier))
         HWID = (instance.get_form(head))
         MWID = (instance.get_form(modifier))
-        HPID = (instance.get_coarse_tag(head))
-        MPID = (instance.get_coarse_tag(modifier))
+        HPID = (instance.get_upos(head))
+        MPID = (instance.get_upos(modifier))
 
         # Contextual information.
         token_start = self.classifier.token_dictionary.token_start
@@ -280,9 +280,9 @@ class DependencyFeatures(object):
                 if head > 0 else token_start
         pMWID = (instance.get_form(modifier - 1)) \
                 if modifier > 0 else token_start
-        pHPID = (instance.get_coarse_tag(head - 1)) \
+        pHPID = (instance.get_upos(head - 1)) \
                 if head > 0 else token_start
-        pMPID = (instance.get_coarse_tag(modifier - 1)) \
+        pMPID = (instance.get_upos(modifier - 1)) \
                 if modifier > 0 else token_start
         nHLID = (instance.get_lemma(head + 1)) \
                 if head < length - 1 else token_stop
@@ -292,9 +292,9 @@ class DependencyFeatures(object):
                 if head < length - 1 else token_stop
         nMWID = (instance.get_form(modifier + 1)) \
                 if modifier < length - 1 else token_stop
-        nHPID = (instance.get_coarse_tag(head + 1)) \
+        nHPID = (instance.get_upos(head + 1)) \
                 if head < length - 1 else token_stop
-        nMPID = (instance.get_coarse_tag(modifier + 1)) \
+        nMPID = (instance.get_upos(modifier + 1)) \
                 if modifier < length - 1 else token_stop
 
         # Context size = 2:
@@ -306,9 +306,9 @@ class DependencyFeatures(object):
                 if head > 1 else token_start
         ppMWID = (instance.get_form(modifier - 2)) \
                 if modifier > 1 else token_start
-        ppHPID = (instance.get_coarse_tag(head - 2)) \
+        ppHPID = (instance.get_upos(head - 2)) \
                 if head > 1 else token_start
-        ppMPID = (instance.get_coarse_tag(modifier - 2)) \
+        ppMPID = (instance.get_upos(modifier - 2)) \
                 if modifier > 1 else token_start
         nnHLID = (instance.get_lemma(head + 2)) \
                 if head < length - 2 else token_stop
@@ -318,9 +318,9 @@ class DependencyFeatures(object):
                 if head < length - 2 else token_stop
         nnMWID = (instance.get_form(modifier + 2)) \
                 if modifier < length - 2 else token_stop
-        nnHPID = (instance.get_coarse_tag(head + 2)) \
+        nnHPID = (instance.get_upos(head + 2)) \
                 if head < length - 2 else token_stop
-        nnMPID = (instance.get_coarse_tag(modifier + 2)) \
+        nnMPID = (instance.get_upos(modifier + 2)) \
                 if modifier < length - 2 else token_stop
 
         flags = (type) # 4 bits
@@ -675,7 +675,7 @@ class DependencyFeatures(object):
         BPIDs = set()
         BWIDs = set()
         for i in range(left_position + 1, right_position):
-            BPID = instance.get_coarse_tag(i)
+            BPID = instance.get_upos(i)
             if BPID not in BPIDs:
                 BPIDs.add(BPID)
 

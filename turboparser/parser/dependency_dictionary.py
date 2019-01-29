@@ -57,7 +57,7 @@ class DependencyDictionary(Dictionary):
 
         # Go through the corpus and build the existing relation for each
         # head-modifier POS pair.
-        num_tags = self.classifier.token_dictionary.get_num_tags()
+        num_tags = self.classifier.token_dictionary.get_num_upos_tags()
         self.existing_relations = [[[] for i in range(num_tags)]
                                    for j in range(num_tags)]
         self.maximum_left_distances = [[0 for i in range(num_tags)]
@@ -70,10 +70,10 @@ class DependencyDictionary(Dictionary):
                 for i in range(1, len(instance)):
                     head = instance.get_head(i)
                     assert 0 <= head < len(instance)
-                    modifier_tag = self.classifier.token_dictionary.get_tag_id(
-                        instance.get_coarse_tag(i))
-                    head_tag = self.classifier.token_dictionary.get_tag_id(
-                        instance.get_coarse_tag(head))
+                    modifier_tag = self.classifier.token_dictionary.get_upos_id(
+                        instance.get_upos(i))
+                    head_tag = self.classifier.token_dictionary.get_upos_id(
+                        instance.get_upos(head))
                     if modifier_tag < 0:
                         modifier_tag = \
                             self.classifier.token_dictionary.token_unknown

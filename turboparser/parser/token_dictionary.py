@@ -23,8 +23,8 @@ class TokenDictionary(Dictionary):
         self.prefix_alphabet = Alphabet()
         self.suffix_alphabet = Alphabet()
         self.morph_tag_alphabet = Alphabet()
-        self.tag_alphabet = Alphabet()
-        self.fine_tag_alphabet = Alphabet()
+        self.upos_alphabet = Alphabet()
+        self.xpos_alphabet = Alphabet()
         self.shape_alphabet = Alphabet()
 
         # keep all alphabets ordered
@@ -36,8 +36,8 @@ class TokenDictionary(Dictionary):
                           self.prefix_alphabet,
                           self.suffix_alphabet,
                           self.morph_tag_alphabet,
-                          self.tag_alphabet,
-                          self.fine_tag_alphabet,
+                          self.upos_alphabet,
+                          self.xpos_alphabet,
                           self.shape_alphabet]
 
         # Special symbols.
@@ -85,8 +85,8 @@ class TokenDictionary(Dictionary):
         self.prefix_alphabet = pickle.load(file)
         self.suffix_alphabet = pickle.load(file)
         self.morph_tag_alphabet = pickle.load(file)
-        self.tag_alphabet = pickle.load(file)
-        self.fine_tag_alphabet = pickle.load(file)
+        self.upos_alphabet = pickle.load(file)
+        self.xpos_alphabet = pickle.load(file)
         self.shape_alphabet = pickle.load(file)
         self.special_symbols = pickle.load(file)
         self.token_unknown = pickle.load(file)
@@ -118,11 +118,11 @@ class TokenDictionary(Dictionary):
     def get_num_lemmas(self):
         return len(self.form_alphabet)
 
-    def get_num_tags(self):
-        return len(self.tag_alphabet)
+    def get_num_upos_tags(self):
+        return len(self.upos_alphabet)
 
-    def get_num_fine_tags(self):
-        return len(self.fine_tag_alphabet)
+    def get_num_xpos_tags(self):
+        return len(self.xpos_alphabet)
 
     def get_embedding_id(self, form):
         id_ = self.embedding_alphabet.lookup(form)
@@ -166,17 +166,17 @@ class TokenDictionary(Dictionary):
             return id_
         return self.suffix_alphabet.lookup(UNKNOWN)
 
-    def get_tag_id(self, tag):
-        id_ = self.tag_alphabet.lookup(tag)
+    def get_upos_id(self, tag):
+        id_ = self.upos_alphabet.lookup(tag)
         if id_ >= 0:
             return id_
-        return self.tag_alphabet.lookup(UNKNOWN)
+        return self.upos_alphabet.lookup(UNKNOWN)
 
-    def get_fine_tag_id(self, tag):
-        id_ = self.fine_tag_alphabet.lookup(tag)
+    def get_xpos_id(self, tag):
+        id_ = self.xpos_alphabet.lookup(tag)
         if id_ >= 0:
             return id_
-        return self.fine_tag_alphabet.lookup(UNKNOWN)
+        return self.xpos_alphabet.lookup(UNKNOWN)
 
     def get_morph_tag_id(self, morph_tag):
         id_ = self.morph_tag_alphabet.lookup(morph_tag)
@@ -207,8 +207,8 @@ class TokenDictionary(Dictionary):
         form_counts = Counter()
         form_lower_counts = Counter()
         lemma_counts = Counter()
-        tag_counts = Counter()
-        fine_tag_counts = Counter()
+        upos_counts = Counter()
+        xpos_counts = Counter()
         morph_tag_counts = Counter()
 
         for name in self.special_symbols.names:
@@ -218,8 +218,8 @@ class TokenDictionary(Dictionary):
                              self.lemma_alphabet,
                              self.prefix_alphabet,
                              self.suffix_alphabet,
-                             self.tag_alphabet,
-                             self.fine_tag_alphabet,
+                             self.upos_alphabet,
+                             self.xpos_alphabet,
                              self.morph_tag_alphabet]:
                 alphabet.insert(name)
 
@@ -251,11 +251,11 @@ class TokenDictionary(Dictionary):
                     suffix = form[-self.classifier.options.suffix_length:]
 
                     # Add tags to alphabet.
-                    tag = instance.get_coarse_tag(i)
-                    tag_counts[tag] += 1
+                    tag = instance.get_upos(i)
+                    upos_counts[tag] += 1
 
-                    tag = instance.get_fine_tag(i)
-                    fine_tag_counts[tag] += 1
+                    tag = instance.get_xpos(i)
+                    xpos_counts[tag] += 1
 
                     # Add morph tags to alphabet.
                     for j in range(instance.get_num_morph_tags(i)):
@@ -267,10 +267,10 @@ class TokenDictionary(Dictionary):
             zip(['char', 'form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
                 [self.character_alphabet, self.form_alphabet,
                  self.form_lower_alphabet, self.lemma_alphabet,
-                 self.tag_alphabet, self.fine_tag_alphabet,
+                 self.upos_alphabet, self.xpos_alphabet,
                  self.morph_tag_alphabet],
                 [char_counts, form_counts, form_lower_counts, lemma_counts,
-                 tag_counts, fine_tag_counts, morph_tag_counts],
+                 upos_counts, xpos_counts, morph_tag_counts],
                 [self.classifier.options.char_cutoff,
                  self.classifier.options.form_cutoff,
                  self.classifier.options.form_cutoff,
@@ -312,7 +312,7 @@ class TokenDictionary(Dictionary):
         logging.info('Number of lemmas: %d' % len(self.lemma_alphabet))
         logging.info('Number of prefixes: %d' % len(self.prefix_alphabet))
         logging.info('Number of suffixes: %d' % len(self.suffix_alphabet))
-        logging.info('Number of coarse POS tags: %d' % len(self.tag_alphabet))
+        logging.info('Number of coarse POS tags: %d' % len(self.upos_alphabet))
         logging.info('Number of fine POS tags: %d' %
-                     len(self.fine_tag_alphabet))
+                     len(self.xpos_alphabet))
         logging.info('Number of morph tags: %d' % len(self.morph_tag_alphabet))

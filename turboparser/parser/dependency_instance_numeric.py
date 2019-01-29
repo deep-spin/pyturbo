@@ -11,8 +11,8 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
         self.lemmas = [-1] * len(input.lemmas)
         self.prefixes = [-1] * len(input.forms)
         self.suffixes = [-1] * len(input.forms)
-        self.tags = [-1] * len(input.tags)
-        self.fine_tags = [-1] * len(input.fine_tags)
+        self.upos = [-1] * len(input.upos)
+        self.xpos = [-1] * len(input.xpos)
         self.morph_tags = [[-1] * len(morph_tags)
                            for morph_tags in input.morph_tags]
         self.is_noun = [False] * len(input.forms)
@@ -60,14 +60,14 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
             self.suffixes[i] = id_
 
             # POS tag.
-            tag = input.tags[i]
-            id_ = token_dictionary.get_tag_id(tag)
+            tag = input.upos[i]
+            id_ = token_dictionary.get_upos_id(tag)
             assert id_ < 0xff
-            self.tags[i] = id_
+            self.upos[i] = id_
 
-            tag = input.fine_tags[i]
-            id_ = token_dictionary.get_fine_tag_id(tag)
-            self.fine_tags[i] = id_
+            tag = input.xpos[i]
+            id_ = token_dictionary.get_xpos_id(tag)
+            self.xpos[i] = id_
 
             # Morphological tags.
             morph_tags = input.morph_tags[i]
@@ -77,34 +77,42 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
                 assert id_ < 0xffff
                 self.morph_tags[i][j] = id_
 
-            # Check whether the word is a noun, verb, punctuation or
-            # coordination. Note: this depends on the POS tag string.
-            # This procedure is taken from EGSTRA
-            # (http://groups.csail.mit.edu/nlp/egstra/).
-            self.is_noun[i] = input.tags[i][0] in ['n', 'N']
-            self.is_verb[i] = input.tags[i][0] in ['v', 'V']
-            self.is_punc[i] = input.tags[i] in ['Punc', '$,', '$.', 'PUNC',
-                                             'punc', 'F', 'IK', 'XP', ',', ';']
-            self.is_coord[i] = input.tags[i] in ['Conj', 'KON', 'conj',
-                                                 'Conjunction', 'CC', 'cc']
+            # # Check whether the word is a noun, verb, punctuation or
+            # # coordination. Note: this depends on the POS tag string.
+            # # This procedure is taken from EGSTRA
+            # # (http://groups.csail.mit.edu/nlp/egstra/).
+            # self.is_noun[i] = input.upos[i][0] in ['n', 'N']
+            # self.is_verb[i] = input.upos[i][0] in ['v', 'V']
+            # self.is_punc[i] = input.upos[i] in ['Punc', '$,', '$.', 'PUNC',
+            #                                  'punc', 'F', 'IK', 'XP', ',', ';']
+            # self.is_coord[i] = input.upos[i] in ['Conj', 'KON', 'conj',
+            #                                      'Conjunction', 'CC', 'cc']
 
 
 class DependencyInstanceNumericOutput(DependencyInstanceOutput):
     def __init__(self, output, token_dictionary, relation_dictionary):
         self.heads = [-1] * len(output.heads)
         self.relations = [-1] * len(output.relations)
-        if output.tags is None:
-            self.tags = None
+        if output.upos is None:
+            self.upos = None
         else:
-            self.tags = [-1] * len(output.tags)
+            self.upos = [-1] * len(output.upos)
+
+        if output.xpos is None:
+            self.xpos = None
+        else:
+            self.xpos = [-1] * len(output.xpos)
 
         for i in range(len(output.heads)):
             self.heads[i] = output.heads[i]
             relation = output.relations[i]
             self.relations[i] = relation_dictionary.get_relation_id(relation)
-            if self.tags is not None:
-                tag = output.tags[i]
-                self.tags[i] = token_dictionary.get_tag_id(tag)
+            if self.upos is not None:
+                tag = output.upos[i]
+                self.upos[i] = token_dictionary.get_upos_id(tag)
+            if self.xpos is not None:
+                tag = output.xpos[i]
+                self.xpos[i] = token_dictionary.get_xpos_id(tag)
 
 
 class DependencyInstanceNumeric(DependencyInstance):

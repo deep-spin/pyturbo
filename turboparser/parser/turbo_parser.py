@@ -357,7 +357,7 @@ class TurboParser(StructuredClassifier):
         uas, las = get_naive_metrics(dep_predicted, gold, parts, length)
 
         if self.options.predict_tags:
-            gold_pos = np.array(instance.get_coarse_tags()[1:])
+            gold_pos = np.array(instance.get_all_upos()[1:])
             pos_hits = np.sum(pos_predicted == gold_pos)
             self.accumulated_pos += pos_hits
 
@@ -477,7 +477,7 @@ class TurboParser(StructuredClassifier):
             predicted_output = dep_prediction
 
             # skip root
-            pos_gold_output = [np.array(inst.get_coarse_tags()[1:])
+            pos_gold_output = [np.array(inst.get_all_upos()[1:])
                                for inst in instances]
             self.neural_scorer.compute_pos_gradients(pos_gold_output)
 
@@ -734,8 +734,8 @@ class TurboParser(StructuredClassifier):
                     continue
 
                 # determine which relations are allowed between h and m
-                modifier_tag = instance.get_coarse_tag(m)
-                head_tag = instance.get_coarse_tag(h)
+                modifier_tag = instance.get_upos(m)
+                head_tag = instance.get_upos(h)
                 allowed_relations = self.dictionary.get_existing_relations(
                     modifier_tag, head_tag)
 
@@ -788,8 +788,8 @@ class TurboParser(StructuredClassifier):
                     continue
 
                 if h and self.options.prune_distances:
-                    modifier_tag = instance.get_coarse_tag(m)
-                    head_tag = instance.get_coarse_tag(h)
+                    modifier_tag = instance.get_upos(m)
+                    head_tag = instance.get_upos(h)
                     if h < m:
                         # Right attachment.
                         if m - h > \
@@ -803,8 +803,8 @@ class TurboParser(StructuredClassifier):
                                modifier_tag, head_tag):
                             continue
                 if self.options.prune_relations:
-                    modifier_tag = instance.get_coarse_tag(m)
-                    head_tag = instance.get_coarse_tag(h)
+                    modifier_tag = instance.get_upos(m)
+                    head_tag = instance.get_upos(h)
                     allowed_relations = self.dictionary.get_existing_relations(
                         modifier_tag, head_tag)
                     if not allowed_relations:
@@ -936,7 +936,7 @@ class TurboParser(StructuredClassifier):
 
             if self.options.predict_tags:
                 # skip root
-                gold = np.array(instance.get_coarse_tags())[1:]
+                gold = np.array(instance.get_all_upos())[1:]
                 pos_prediction = pos_prediction[:len(gold)]
                 hits = gold == pos_prediction
                 accumulated_pos += np.sum(hits)

@@ -54,8 +54,8 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
         root_string = '_root_'
         forms = [root_string] * length
         lemmas = [root_string] * length
-        tags = [root_string] * length
-        fine_tags = [root_string] * length
+        upos = [root_string] * length
+        xpos = [root_string] * length
         morph_tags = [[]] * length
         morph_tags[0] = [root_string]
         heads = [-1] * length
@@ -64,8 +64,8 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
             info = sentence_fields[i-1]
             forms[i] = info[1]
             lemmas[i] = info[2]
-            tags[i] = info[3]
-            fine_tags[i] = info[4]
+            upos[i] = info[3]
+            xpos[i] = info[4]
             morph = info[5]
             if morph == '_':
                 morph_tags[i] = []
@@ -80,11 +80,11 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
                         'Invalid value of head (%d) not in range [1..%d]'
                         % (heads[i], length))
             relations[i] = info[7]
-        input_ = DependencyInstanceInput(forms, lemmas, tags, fine_tags,
+        input_ = DependencyInstanceInput(forms, lemmas, upos, xpos,
                                          morph_tags, multiwords)
         if heads[1] == -1:
             output = None
         else:
-            output = DependencyInstanceOutput(heads, relations, tags)
+            output = DependencyInstanceOutput(heads, relations, upos)
 
         return DependencyInstance(input_, output)

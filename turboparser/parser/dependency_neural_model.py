@@ -60,9 +60,9 @@ class DependencyNeuralModel(nn.Module):
         self.tag_dropout_rate = tag_dropout
         self.num_labels = dependency_dictionary.get_num_labels()
         self.padding_word = token_dictionary.get_embedding_id(PADDING)
-        self.padding_tag = token_dictionary.get_tag_id(PADDING)
+        self.padding_tag = token_dictionary.get_upos_id(PADDING)
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
-        self.unknown_tag = token_dictionary.get_tag_id(UNKNOWN)
+        self.unknown_tag = token_dictionary.get_upos_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
         self.predict_tags = predict_tags
 
@@ -86,7 +86,7 @@ class DependencyNeuralModel(nn.Module):
             char_based_embedding_size = 0
 
         if self.tag_embedding_size:
-            self.tag_embeddings = nn.Embedding(token_dictionary.get_num_tags(),
+            self.tag_embeddings = nn.Embedding(token_dictionary.get_num_upos_tags(),
                                                tag_embedding_size)
         else:
             self.tag_embeddings = None
@@ -119,7 +119,7 @@ class DependencyNeuralModel(nn.Module):
             self.pos_mlp = self._create_mlp(
                 hidden_size=pos_mlp_size, num_layers=1,
                 output_activation=self.relu)
-            num_tags = token_dictionary.get_num_tags()
+            num_tags = token_dictionary.get_num_upos_tags()
             self.pos_scorer = self._create_scorer(pos_mlp_size, num_tags,
                                                   bias=True)
 
@@ -520,7 +520,7 @@ class DependencyNeuralModel(nn.Module):
             if word_or_tag == 'word':
                 getter = instance.get_embedding_id
             else:
-                getter = instance.get_coarse_tag
+                getter = instance.get_upos
 
             indices = [getter(j) for j in range(len(instance))]
             index_matrix[i, :len(instance)] = torch.tensor(indices)

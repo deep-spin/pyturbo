@@ -24,20 +24,22 @@ class MultiwordSpan(object):
 
 
 class DependencyInstanceInput(object):
-    def __init__(self, forms, lemmas, tags, fine_tags, morph_tags, multiwords):
+    def __init__(self, forms, lemmas, upos, xpos, morph_tags, multiwords):
         self.forms = forms
         self.lemmas = lemmas
-        self.tags = tags
-        self.fine_tags = fine_tags
+        self.upos = upos
+        self.xpos = xpos
         self.morph_tags = morph_tags
         self.multiwords = multiwords
 
 
 class DependencyInstanceOutput(object):
-    def __init__(self, heads, relations, tags=None):
+    def __init__(self, heads, relations, upos=None, xpos=None, morph_tags=None):
         self.heads = heads
         self.relations = relations
-        self.tags = tags
+        self.upos = upos
+        self.xpos = xpos
+        self.morph_tags = morph_tags
 
 
 class DependencyInstance(Instance):
@@ -54,17 +56,17 @@ class DependencyInstance(Instance):
     def get_lemma(self, i):
         return self.input.lemmas[i]
 
-    def get_coarse_tag(self, i):
-        return self.input.tags[i]
+    def get_upos(self, i):
+        return self.input.upos[i]
 
-    def get_coarse_tags(self):
-        return self.input.tags
+    def get_all_upos(self):
+        return self.input.upos
 
-    def get_fine_tag(self, i):
-        return self.input.fine_tags[i]
+    def get_xpos(self, i):
+        return self.input.xpos[i]
 
-    def get_fine_tags(self):
-        return self.input.fine_tags
+    def get_all_xpos(self):
+        return self.input.xpos
 
     def get_num_morph_tags(self, i):
         return len(self.input.morph_tags[i])
