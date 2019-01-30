@@ -106,6 +106,14 @@ class TokenDictionary(Dictionary):
         for alphabet in self.alphabets:
             alphabet.stop_growth()
 
+    def get_upos_tags(self):
+        """Return the set of UPOS tags"""
+        return self.upos_alphabet.keys()
+
+    def get_xpos_tags(self):
+        """Return the set of XPOS tags"""
+        return self.xpos_alphabet.keys()
+
     def get_num_characters(self):
         return len(self.character_alphabet)
 

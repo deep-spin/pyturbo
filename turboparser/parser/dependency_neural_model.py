@@ -62,12 +62,11 @@ class DependencyNeuralModel(nn.Module):
         self.padding_word = token_dictionary.get_embedding_id(PADDING)
         self.padding_tag = token_dictionary.get_upos_id(PADDING)
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
-        self.unknown_tag = token_dictionary.get_upos_id(UNKNOWN)
+        self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
+        self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
         self.predict_tags = predict_tags
 
-        # self.word_embeddings = nn.Embedding(token_dictionary.get_num_forms(),
-        #                                     word_embedding_size)
         word_embeddings = torch.tensor(word_embeddings, dtype=torch.float32)
         self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings,
                                                             freeze=False)
@@ -85,11 +84,33 @@ class DependencyNeuralModel(nn.Module):
             self.char_rnn = None
             char_based_embedding_size = 0
 
-        if self.tag_embedding_size:
-            self.tag_embeddings = nn.Embedding(token_dictionary.get_num_upos_tags(),
-                                               tag_embedding_size)
+        total_tag_embedding_size = 0
+        if tag_embedding_size:
+            # only use tag embeddings if there are actual tags
+            # +2 for root and the placeholder "_" when there is no tags
+            num_upos = token_dictionary.get_num_upos_tags()
+            if num_upos > len(token_dictionary.special_symbols) + 2:
+                self.upos_embeddings = nn.Embedding(num_upos,
+                                                    tag_embedding_size)
+                total_tag_embedding_size += tag_embedding_size
+            else:
+                self.upos_embeddings = None
+
+            # also check if UPOS and XPOS are not the same
+            num_xpos = token_dictionary.get_num_xpos_tags()
+            xpos_tags = token_dictionary.get_xpos_tags()
+            upos_tags = token_dictionary.get_upos_tags()
+            print('xpos:', list(xpos_tags))
+            if num_xpos > len(token_dictionary.special_symbols) + 2 and \
+                    upos_tags != xpos_tags:
+                self.xpos_embeddings = nn.Embedding(num_xpos,
+                                                    tag_embedding_size)
+                total_tag_embedding_size += tag_embedding_size
+            else:
+                self.xpos_embeddings = None
         else:
-            self.tag_embeddings = None
+            self.upos_embeddings = None
+            self.xpos_embeddings = None
 
         if self.distance_embedding_size:
             self.distance_bins = np.array(
@@ -100,8 +121,8 @@ class DependencyNeuralModel(nn.Module):
             self.distance_bins = None
             self.distance_embeddings = None
 
-        input_size = self.word_embedding_size + tag_embedding_size + \
-            (2 * char_based_embedding_size)
+        input_size = self.word_embedding_size + total_tag_embedding_size + \
+                     (2 * char_based_embedding_size)
         self.rnn = nn.LSTM(
             input_size=input_size,
             hidden_size=rnn_size,
@@ -490,17 +511,29 @@ class DependencyNeuralModel(nn.Module):
         """
         Get the full embedding representation of a word, including word type
         embeddings, char level and POS tag embeddings.
-        """
-        embeddings = self._get_embeddings(instances, max_length, 'word')
-        if self.tag_embeddings is not None:
-            tag_embeddings = self._get_embeddings(instances, max_length, 'tag')
 
-            # each embedding tensor is (batch, num_tokens, embedding_size)
-            embeddings = torch.cat([embeddings, tag_embeddings], dim=2)
+        :param instances: list of instance objects
+        :param max_length: length of the longest instance in the batch
+        """
+        all_embeddings = []
+        word_embeddings = self._get_embeddings(instances, max_length, 'word')
+        all_embeddings.append(word_embeddings)
+        if self.upos_embeddings is not None:
+            upos_embeddings = self._get_embeddings(instances,
+                                                   max_length, 'upos')
+            all_embeddings.append(upos_embeddings)
+
+        if self.xpos_embeddings is not None:
+            xpos_embeddings = self._get_embeddings(instances,
+                                                   max_length, 'xpos')
+            all_embeddings.append(xpos_embeddings)
 
         if self.char_rnn is not None:
             char_embeddings = self._run_char_rnn(instances, max_length)
-            embeddings = torch.cat([embeddings, char_embeddings], dim=2)
+            all_embeddings.append(char_embeddings)
+
+        # each embedding tensor is (batch, num_tokens, embedding_size)
+        embeddings = torch.cat(all_embeddings, dim=2)
 
         return embeddings
 
@@ -511,6 +544,7 @@ class DependencyNeuralModel(nn.Module):
         This function takes care of padding.
 
         :param word_or_tag: either 'word' or 'tag'
+        :param max_length: length of the longest instance
         :return: a tensor with shape (batch, sequence, embedding size)
         """
         # padding is not supposed to be used in the end results
@@ -519,8 +553,10 @@ class DependencyNeuralModel(nn.Module):
         for i, instance in enumerate(instances):
             if word_or_tag == 'word':
                 getter = instance.get_embedding_id
-            else:
+            elif word_or_tag == 'upos':
                 getter = instance.get_upos
+            else:
+                getter = instance.get_xpos
 
             indices = [getter(j) for j in range(len(instance))]
             index_matrix[i, :len(instance)] = torch.tensor(indices)
@@ -528,15 +564,19 @@ class DependencyNeuralModel(nn.Module):
         if word_or_tag == 'word':
             embedding_matrix = self.word_embeddings
             dropout_rate = self.word_dropout_rate
+            unknown_symbol = self.unknown_word
         else:
-            embedding_matrix = self.tag_embeddings
             dropout_rate = self.tag_dropout_rate
+            if word_or_tag == 'upos':
+                embedding_matrix = self.upos_embeddings
+                unknown_symbol = self.unknown_upos
+            else:
+                embedding_matrix = self.xpos_embeddings
+                unknown_symbol = self.unknown_xpos
 
         if self.training and dropout_rate:
             dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
             inds = dropout_draw < dropout_rate
-            unknown_symbol = self.unknown_word if word_or_tag == 'word' \
-                else self.unknown_tag
             index_matrix[inds] = unknown_symbol
 
         if self.on_gpu:
