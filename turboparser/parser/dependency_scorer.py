@@ -37,6 +37,7 @@ class DependencyNeuralScorer(NeuralScorer):
         # cross_entropy.backward(retain_graph=True)
 
     def compute_pos_loss(self, scores, gold_output):
+        """Compute the loss for any tagging subtask"""
         return F.cross_entropy(scores, gold_output)
 
     def compute_scores(self, instances, parts):
@@ -44,8 +45,10 @@ class DependencyNeuralScorer(NeuralScorer):
             compute_scores(instances, parts)
 
         if self.model.predict_tags:
-            pos_scores = [sent_scores.detach().numpy()
-                          for sent_scores in self.model.pos_logits]
-            return list(zip(dependency_scores, pos_scores))
+            upos_scores = [sent_scores.detach().numpy()
+                           for sent_scores in self.model.upos_logits]
+            xpos_scores = [sent_scores.detach().numpy()
+                           for sent_scores in self.model.xpos_logits]
+            return list(zip(dependency_scores, upos_scores, xpos_scores))
 
         return dependency_scores

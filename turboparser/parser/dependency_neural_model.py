@@ -137,12 +137,19 @@ class DependencyNeuralModel(nn.Module):
 
         # POS tags
         if predict_tags:
-            self.pos_mlp = self._create_mlp(
+            self.upos_mlp = self._create_mlp(
                 hidden_size=pos_mlp_size, num_layers=1,
                 output_activation=self.relu)
             num_tags = token_dictionary.get_num_upos_tags()
-            self.pos_scorer = self._create_scorer(pos_mlp_size, num_tags,
-                                                  bias=True)
+            self.upos_scorer = self._create_scorer(pos_mlp_size, num_tags,
+                                                   bias=True)
+
+            self.xpos_mlp = self._create_mlp(
+                hidden_size=pos_mlp_size, num_layers=1,
+                output_activation=self.relu)
+            num_tags = token_dictionary.get_num_xpos_tags()
+            self.xpos_scorer = self._create_scorer(pos_mlp_size, num_tags,
+                                                   bias=True)
 
         # first order
         self.head_mlp = self._create_mlp()
@@ -682,7 +689,8 @@ class DependencyNeuralModel(nn.Module):
         batch_states = batch_states[rev_inds]
 
         if self.predict_tags:
-            self.pos_logits = []
+            self.upos_logits = []
+            self.xpos_logits = []
 
         # now go through each batch item
         for i in range(batch_size):
@@ -705,11 +713,16 @@ class DependencyNeuralModel(nn.Module):
 
             if self.predict_tags:
                 # ignore root
-                hidden = self.pos_mlp(states[1:])
+                hidden = self.upos_mlp(states[1:])
 
                 # pos_logits is (batch, num_tokens, num_tags)
                 # shorter sentences in the batch have *no* spurious logits
-                self.pos_logits.append(self.pos_scorer(hidden))
+                logits = self.upos_scorer(hidden)
+                self.upos_logits.append(logits)
+
+                hidden = self.xpos_mlp(states[1:])
+                logits = self.xpos_scorer(hidden)
+                self.xpos_logits.append(logits)
                 # TODO: use some CRF decoder
 
         return batch_scores
