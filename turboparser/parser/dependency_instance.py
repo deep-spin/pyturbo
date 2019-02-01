@@ -24,22 +24,25 @@ class MultiwordSpan(object):
 
 
 class DependencyInstanceInput(object):
-    def __init__(self, forms, lemmas, upos, xpos, morph_tags, multiwords):
+    def __init__(self, forms, lemmas, upos, xpos, morph_tags, morph_singletons,
+                 multiwords):
         self.forms = forms
         self.lemmas = lemmas
         self.upos = upos
         self.xpos = xpos
         self.morph_tags = morph_tags
+        self.morph_singletons = morph_singletons
         self.multiwords = multiwords
 
 
 class DependencyInstanceOutput(object):
-    def __init__(self, heads, relations, upos=None, xpos=None, morph_tags=None):
+    def __init__(self, heads, relations, upos=None, xpos=None,
+                 morph_singletons=None):
         self.heads = heads
         self.relations = relations
         self.upos = upos
         self.xpos = xpos
-        self.morph_tags = morph_tags
+        self.morph_singletons = morph_singletons
 
 
 class DependencyInstance(Instance):
@@ -68,6 +71,9 @@ class DependencyInstance(Instance):
     def get_all_xpos(self):
         return self.input.xpos
 
+    def get_all_morph_singletons(self):
+        return self.input.morph_singletons
+
     def get_num_morph_tags(self, i):
         return len(self.input.morph_tags[i])
 
@@ -76,6 +82,12 @@ class DependencyInstance(Instance):
         Return the j-th morphological attribute of the i-th word
         """
         return self.input.morph_tags[i][j]
+
+    def get_morph_singleton(self, i):
+        """
+        Return the singleton morphological data of the i-th word
+        """
+        return self.input.morph_singletons[i]
 
     def get_head(self, i):
         return self.output.heads[i]

@@ -29,8 +29,10 @@ class DependencyNeuralModel(nn.Module):
                  dropout,
                  word_dropout,
                  tag_dropout,
-                 predict_tags,
-                 pos_mlp_size=0):
+                 predict_upos,
+                 predict_xpos,
+                 predict_morph,
+                 tag_mlp_size):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
@@ -51,7 +53,7 @@ class DependencyNeuralModel(nn.Module):
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
         self.mlp_size = mlp_size
-        self.pos_mlp_size = pos_mlp_size
+        self.tag_mlp_size = tag_mlp_size
         self.label_mlp_size = label_mlp_size
         self.rnn_layers = rnn_layers
         self.mlp_layers = mlp_layers
@@ -65,7 +67,9 @@ class DependencyNeuralModel(nn.Module):
         self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
         self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
-        self.predict_tags = predict_tags
+        self.predict_upos = predict_upos
+        self.predict_xpos = predict_xpos
+        self.predict_morph = predict_morph
 
         word_embeddings = torch.tensor(word_embeddings, dtype=torch.float32)
         self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings,
@@ -100,7 +104,6 @@ class DependencyNeuralModel(nn.Module):
             num_xpos = token_dictionary.get_num_xpos_tags()
             xpos_tags = token_dictionary.get_xpos_tags()
             upos_tags = token_dictionary.get_upos_tags()
-            print('xpos:', list(xpos_tags))
             if num_xpos > len(token_dictionary.special_symbols) + 2 and \
                     upos_tags != xpos_tags:
                 self.xpos_embeddings = nn.Embedding(num_xpos,

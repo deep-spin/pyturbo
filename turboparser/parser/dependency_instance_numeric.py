@@ -15,6 +15,7 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
         self.xpos = [-1] * len(input.xpos)
         self.morph_tags = [[-1] * len(morph_tags)
                            for morph_tags in input.morph_tags]
+        self.morph_singletons = [-1] * len(input.forms)
         self.is_noun = [False] * len(input.forms)
         self.is_verb = [False] * len(input.forms)
         self.is_punc = [False] * len(input.forms)
@@ -77,6 +78,10 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
                 assert id_ < 0xffff
                 self.morph_tags[i][j] = id_
 
+            morph_singleton = input.morph_singletons[i]
+            self.morph_singletons[i] = token_dictionary.\
+                get_morph_singleton_id(morph_singleton)
+
             # # Check whether the word is a noun, verb, punctuation or
             # # coordination. Note: this depends on the POS tag string.
             # # This procedure is taken from EGSTRA
@@ -93,15 +98,9 @@ class DependencyInstanceNumericOutput(DependencyInstanceOutput):
     def __init__(self, output, token_dictionary, relation_dictionary):
         self.heads = [-1] * len(output.heads)
         self.relations = [-1] * len(output.relations)
-        if output.upos is None:
-            self.upos = None
-        else:
-            self.upos = [-1] * len(output.upos)
-
-        if output.xpos is None:
-            self.xpos = None
-        else:
-            self.xpos = [-1] * len(output.xpos)
+        self.upos = output.upos
+        self.xpos = output.xpos
+        self.morph_singletons = output.morph_singletons
 
         for i in range(len(output.heads)):
             self.heads[i] = output.heads[i]
@@ -113,6 +112,10 @@ class DependencyInstanceNumericOutput(DependencyInstanceOutput):
             if self.xpos is not None:
                 tag = output.xpos[i]
                 self.xpos[i] = token_dictionary.get_xpos_id(tag)
+            if self.morph_singletons is not None:
+                tag = output.morph_singletons[i]
+                self.morph_singletons[i] = token_dictionary.\
+                    get_morph_singleton_id(tag)
 
 
 class DependencyInstanceNumeric(DependencyInstance):

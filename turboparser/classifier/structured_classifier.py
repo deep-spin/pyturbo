@@ -1,7 +1,9 @@
 '''A generic implementation of an abstract structured classifier.'''
 
 import numpy as np
+import torch
 from .parameters import Parameters, FeatureVector
+from .neural_scorer import NeuralScorer
 from .utils import nearly_eq_tol
 from .instance import InstanceData
 import logging
@@ -107,8 +109,10 @@ class StructuredClassifier(object):
                 scores[r] = self.parameters.compute_score(features[r])
         return scores
 
-    def make_gradient_step(self, gold_output, predicted_output, parts=None,
-                           features=None, eta=None, t=None, instances=None):
+    def make_gradient_step(self, gold_parts, predicted_parts,
+                           gold_additional_labels=None, predicted_labels=None,
+                           parts=None, features=None, eta=None, t=None,
+                           instances=None):
         '''Perform a gradient step updating the current model.
         Perform a gradient step with stepsize eta. The iteration number is
         provided as input since it may be necessary to keep track of the
@@ -121,15 +125,15 @@ class StructuredClassifier(object):
         TODO: use "FeatureVector *difference" as input (see function
         MakeFeatureDifference(...) instead of computing on the fly).'''
         if self.options.neural:
-            self.neural_scorer.compute_gradients(gold_output, predicted_output)
+            self.neural_scorer.compute_gradients(gold_parts, predicted_parts)
             self.neural_scorer.make_gradient_step()
         else:
             for r in range(len(parts)):
-                if predicted_output[r] == gold_output[r]:
+                if predicted_parts[r] == gold_parts[r]:
                     continue
                 part_features = features[r]
                 self.parameters.make_gradient_step(
-                    part_features, eta, t, predicted_output[r]-gold_output[r])
+                    part_features, eta, t, predicted_parts[r]-gold_parts[r])
 
     def make_feature_difference(self, parts, features, gold_output,
                                 predicted_output):
@@ -257,12 +261,23 @@ class StructuredClassifier(object):
         logging.info('Time: %f' % (toc - tic))
         return train_instances, valid_instances
 
-    def _decode_train(self, instance, parts, scores, gold_output,
-                      features=None, t=None):
+    def _decode_unstructured_train(self, instances, scores, gold_labels):
         """
-        Decode the scores at training time.
+        Decode the scores for non-structured problems; implementations may vary.
 
-        Return the predicted output and eta.
+        Return a dictionary mapping each target name to the predicted output.
+
+        Unlike _decode_structured_train, this function operates with a list of
+        instances at once.
+        """
+        return {}
+
+    def _decode_structured_train(self, instance, parts, part_scores,
+                                 gold_output, features=None, t=None):
+        """
+        Decode the scores for a structured problem at training time.
+
+        Return the predicted output (for each part) and eta.
         """
         algorithm = self.options.training_algorithm
         eta = None
@@ -270,14 +285,14 @@ class StructuredClassifier(object):
         # This is a no-op by default. But it's convenient to have it here to
         # build latent-variable structured classifiers (e.g. for coreference
         # resolution).
-        inner_loss = self.transform_gold(instance, parts, scores,
+        inner_loss = self.transform_gold(instance, parts, part_scores,
                                          gold_output)
 
         # Do the decoding.
         start_decoding = time.time()
         if algorithm in ['perceptron']:
             predicted_output = self.decoder.decode(instance, parts,
-                                                   scores)
+                                                   part_scores)
             for r in range(len(parts)):
                 self.num_total += 1
                 if not nearly_eq_tol(gold_output[r],
@@ -288,7 +303,7 @@ class StructuredClassifier(object):
             predicted_output, cost, loss = self.decoder.decode_mira(
                 instance,
                 parts,
-                scores,
+                part_scores,
                 gold_output,
                 old_mira=True)
 
@@ -296,14 +311,14 @@ class StructuredClassifier(object):
             predicted_output, cost, loss = \
                 self.decoder.decode_cost_augmented(instance,
                                                    parts,
-                                                   scores,
+                                                   part_scores,
                                                    gold_output)
 
         elif algorithm in ['crf_mira', 'crf_sgd']:
             predicted_output, entropy, loss = \
                 self.decoder.decode_marginals(instance,
                                               parts,
-                                              scores,
+                                              part_scores,
                                               gold_output)
             assert entropy >= 0
         else:
@@ -369,6 +384,12 @@ class StructuredClassifier(object):
         """
         return
 
+    def get_parts_scores(self, score_dict):
+        """
+        Return the scores of the structured parts inside the score dictionary.
+        """
+        return score_dict['parts']
+
     def train_batch(self, instance_data, t):
         '''
         Run one batch of a learning algorithm. If it is an online one, just
@@ -387,7 +408,8 @@ class StructuredClassifier(object):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
             features = instance_data.features[i]
-            gold_output = instance_data.gold_labels[i]
+            gold_parts = instance_data.gold_parts[i]
+            gold_labels = instance_data.gold_labels[i]
 
             start_scores = time.time()
             scores = self.compute_scores(instance, parts, features)
@@ -395,12 +417,12 @@ class StructuredClassifier(object):
             self.time_scores += end_scores - start_scores
             all_scores.append(scores)
 
-            predicted_output, eta = self._decode_train(
-                instance, parts, scores, gold_output, features, t)
+            predicted_parts, eta = self._decode_structured_train(
+                instance, parts, scores, gold_parts, features, t)
 
             # Make gradient step.
             start_gradient = time.time()
-            self.make_gradient_step(gold_output, predicted_output, parts,
+            self.make_gradient_step(gold_parts, predicted_parts, parts,
                                     features, eta, t)
             self.time_gradient += time.time() - start_gradient
 
@@ -417,25 +439,30 @@ class StructuredClassifier(object):
             end_time = time.time()
             self.time_scores += end_time - start_time
 
-            all_predictions = []
+            all_predicted_parts = []
 
             for i in range(len(instance_data)):
                 instance = instance_data.instances[i]
                 parts = instance_data.parts[i]
-                gold_output = instance_data.gold_labels[i]
+                gold_labels = instance_data.gold_labels[i]
+                gold_parts = instance_data.gold_parts[i]
 
-                predicted_output, _ = self._decode_train(
-                    instance, parts, scores[i], gold_output)
-                self._update_task_metrics(predicted_output, gold_output,
+                score_parts = self.get_parts_scores(scores[i])
+                predicted_parts, _ = self._decode_structured_train(
+                    instance, parts, score_parts, gold_parts)
+
+                self._update_task_metrics(predicted_parts, gold_parts,
                                           instance, parts)
-                all_predictions.append(predicted_output)
+                all_predicted_parts.append(predicted_parts)
 
             # run the gradient step for the whole batch
             start_time = time.time()
-            self.make_gradient_step(instance_data.gold_labels, all_predictions,
+            self.make_gradient_step(instance_data.gold_labels,
+                                    all_predicted_parts,
                                     instances=instance_data.instances)
             end_time = time.time()
             self.time_gradient += end_time - start_time
+
 
     def _run_batches(self, instance_data, batch_size, return_loss=False):
         """

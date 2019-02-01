@@ -84,8 +84,10 @@ class TurboParser(StructuredClassifier):
                     dropout=self.options.dropout,
                     word_dropout=options.word_dropout,
                     tag_dropout=options.tag_dropout,
-                    pos_mlp_size=options.pos_mlp_size,
-                    predict_tags=options.predict_tags)
+                    tag_mlp_size=options.tag_mlp_size,
+                    predict_upos=options.predict_upos,
+                    predict_xpos=options.predict_xpos,
+                    predict_morph=options.predict_morph)
 
                 print('Model summary:')
                 print(model)
@@ -146,6 +148,14 @@ class TurboParser(StructuredClassifier):
         else:
             self.pruner = None
 
+        self.additional_targets = []
+        if self.options.predict_morph:
+            self.additional_targets.append('morph')
+        if self.options.predict_upos:
+            self.additional_targets.append('upos')
+        if self.options.predict_xpos:
+            self.additional_targets.append('xpos')
+
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
         if not model_path:
@@ -163,14 +173,16 @@ class TurboParser(StructuredClassifier):
                 pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_size, f)
                 pickle.dump(self.neural_scorer.model.mlp_size, f)
-                pickle.dump(self.neural_scorer.model.pos_mlp_size, f)
+                pickle.dump(self.neural_scorer.model.tag_mlp_size, f)
                 pickle.dump(self.neural_scorer.model.label_mlp_size, f)
                 pickle.dump(self.neural_scorer.model.rnn_layers, f)
                 pickle.dump(self.neural_scorer.model.mlp_layers, f)
                 pickle.dump(self.neural_scorer.model.dropout_rate, f)
                 pickle.dump(self.neural_scorer.model.word_dropout_rate, f)
                 pickle.dump(self.neural_scorer.model.tag_dropout_rate, f)
-                pickle.dump(self.neural_scorer.model.predict_tags, f)
+                pickle.dump(self.neural_scorer.model.predict_upos, f)
+                pickle.dump(self.neural_scorer.model.predict_xpos, f)
+                pickle.dump(self.neural_scorer.model.predict_morph, f)
                 self.neural_scorer.model.save(f)
 
     def load(self, model_path=None):
@@ -211,14 +223,16 @@ class TurboParser(StructuredClassifier):
                 distance_embedding_size = pickle.load(f)
                 rnn_size = pickle.load(f)
                 mlp_size = pickle.load(f)
-                pos_mlp_size = pickle.load(f)
+                tag_mlp_size = pickle.load(f)
                 label_mlp_size = pickle.load(f)
                 rnn_layers = pickle.load(f)
                 mlp_layers = pickle.load(f)
                 dropout = pickle.load(f)
                 word_dropout = pickle.load(f)
                 tag_dropout = pickle.load(f)
-                predict_tags = pickle.load(f)
+                predict_upos = pickle.load(f)
+                predict_xpos = pickle.load(f)
+                predict_morph = pickle.load(f)
                 dummy_embeddings = np.empty([embedding_vocab_size,
                                              word_embedding_size], np.float32)
                 neural_model = DependencyNeuralModel(
@@ -230,13 +244,14 @@ class TurboParser(StructuredClassifier):
                     distance_embedding_size=distance_embedding_size,
                     rnn_size=rnn_size,
                     mlp_size=mlp_size,
-                    pos_mlp_size=pos_mlp_size,
+                    tag_mlp_size=tag_mlp_size,
                     label_mlp_size=label_mlp_size,
                     rnn_layers=rnn_layers,
                     mlp_layers=mlp_layers,
                     dropout=dropout,
                     word_dropout=word_dropout, tag_dropout=tag_dropout,
-                    predict_tags=predict_tags)
+                    predict_upos=predict_upos, predict_xpos=predict_xpos,
+                    predict_morph=predict_morph)
                 neural_model.load(f)
                 self.neural_scorer = DependencyNeuralScorer()
                 self.neural_scorer.set_model(neural_model)
@@ -314,6 +329,23 @@ class TurboParser(StructuredClassifier):
             msg += '\tBest validation LAS: %f' % self.validation_las
 
         return msg
+
+    def _decode_unstructured_train(self, instances, scores, gold_labels):
+        """
+        Decode tag labes for a list of instances.
+
+        :return: a dictionary mapping the name of each tag to a vector of
+            predictions
+        """
+        predictions = {}
+
+        # iterate over upos, xpos, morph
+        for target_name in self.additional_targets:
+            # target_scores is (batch, length, num_classes)
+            target_scores = scores[target_name]
+            predictions[target_name] = target_scores.argmax(-1)
+
+        return predictions
 
     def _decode_train(self, instance, parts, scores, gold_output,
                       features=None, t=None):
@@ -464,11 +496,21 @@ class TurboParser(StructuredClassifier):
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
 
-    def make_gradient_step(self, gold_output, predicted_output, parts=None,
-                           features=None, eta=None, t=None, instances=None):
+    def get_parts_scores(self, score_dict):
         """
-        Perform a gradient step minimizing both parsing error and POS tagging
-        error.
+        Return the scores of the structured parts inside the score dictionary.
+
+        These are the scores for the parts of the parse tree.
+        """
+        return score_dict['dependency']
+
+    def make_gradient_step(self, gold_parts, predicted_parts,
+                           gold_additional_labels=None, predicted_labels=None,
+                           parts=None, features=None, eta=None, t=None,
+                           instances=None):
+        """
+        Perform a gradient step minimizing both parsing error and all tagging
+        errors.
 
         The inputs are a batch.
         """
@@ -482,7 +524,31 @@ class TurboParser(StructuredClassifier):
             self.neural_scorer.compute_pos_gradients(pos_gold_output)
 
         super(TurboParser, self).make_gradient_step(
-            gold_output, predicted_output, parts, features, eta, t, instances)
+            gold_parts, predicted_parts, None, None, parts, features, eta, t,
+            instances)
+
+    def create_gold_targets(self, instance):
+        """
+        Create the gold targets of an instance that do not depend on parts.
+
+        This will create targets for POS tagging and morphological tags, if
+        used.
+
+        :param instance: a formated instance
+        :type instance: DependencyInstanceNumeric
+        :return: numpy array
+        """
+        targets = {}
+        if self.options.predict_upos:
+            targets['upos'] = np.array([instance.get_all_upos()])
+        if self.options.predict_xpos:
+            targets['xpos'] = np.array([instance.get_all_xpos()])
+        if self.options.predict_morph:
+            # TODO: combine singleton morph tags (containing all morph
+            # information) with separate tags
+            targets['morph'] = np.array([instance.get_all_morph_singletons()])
+
+        return targets
 
     def make_parts(self, instance):
         """

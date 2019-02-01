@@ -23,6 +23,7 @@ class TokenDictionary(Dictionary):
         self.prefix_alphabet = Alphabet()
         self.suffix_alphabet = Alphabet()
         self.morph_tag_alphabet = Alphabet()
+        self.morph_singleton_alphabet = Alphabet()
         self.upos_alphabet = Alphabet()
         self.xpos_alphabet = Alphabet()
         self.shape_alphabet = Alphabet()
@@ -36,6 +37,7 @@ class TokenDictionary(Dictionary):
                           self.prefix_alphabet,
                           self.suffix_alphabet,
                           self.morph_tag_alphabet,
+                          self.morph_singleton_alphabet,
                           self.upos_alphabet,
                           self.xpos_alphabet,
                           self.shape_alphabet]
@@ -85,6 +87,7 @@ class TokenDictionary(Dictionary):
         self.prefix_alphabet = pickle.load(file)
         self.suffix_alphabet = pickle.load(file)
         self.morph_tag_alphabet = pickle.load(file)
+        self.morph_singleton_alphabet = pickle.load(file)
         self.upos_alphabet = pickle.load(file)
         self.xpos_alphabet = pickle.load(file)
         self.shape_alphabet = pickle.load(file)
@@ -131,6 +134,12 @@ class TokenDictionary(Dictionary):
 
     def get_num_xpos_tags(self):
         return len(self.xpos_alphabet)
+
+    def get_num_morph_tags(self):
+        return len(self.morph_tag_alphabet)
+
+    def get_num_morph_singletons(self):
+        return len(self.morph_singleton_alphabet)
 
     def get_embedding_id(self, form):
         id_ = self.embedding_alphabet.lookup(form)
@@ -192,6 +201,12 @@ class TokenDictionary(Dictionary):
             return id_
         return self.morph_tag_alphabet.lookup(UNKNOWN)
 
+    def get_morph_singleton_id(self, morph_singleton):
+        id_ = self.morph_singleton_alphabet.lookup(morph_singleton)
+        if id_ >= 0:
+            return id_
+        return self.morph_singleton_alphabet.lookup(UNKNOWN)
+
     def get_shape_id(self, shape):
         id_ = self.shape_alphabet.lookup(shape)
         if id_ >= 0:
@@ -218,6 +233,7 @@ class TokenDictionary(Dictionary):
         upos_counts = Counter()
         xpos_counts = Counter()
         morph_tag_counts = Counter()
+        morph_singletons_counts = Counter()
 
         for name in self.special_symbols.names:
             # embeddings not included here to keep the same ordering
@@ -228,7 +244,8 @@ class TokenDictionary(Dictionary):
                              self.suffix_alphabet,
                              self.upos_alphabet,
                              self.xpos_alphabet,
-                             self.morph_tag_alphabet]:
+                             self.morph_tag_alphabet,
+                             self.morph_singleton_alphabet]:
                 alphabet.insert(name)
 
         # Go through the corpus and build the dictionaries,
@@ -266,6 +283,8 @@ class TokenDictionary(Dictionary):
                     xpos_counts[tag] += 1
 
                     # Add morph tags to alphabet.
+                    morph_singleton = instance.get_morph_singleton(i)
+                    morph_singletons_counts[morph_singleton] += 1
                     for j in range(instance.get_num_morph_tags(i)):
                         morph_tag = instance.get_morph_tag(i, j)
                         morph_tag_counts[morph_tag] += 1
@@ -276,18 +295,21 @@ class TokenDictionary(Dictionary):
                 [self.character_alphabet, self.form_alphabet,
                  self.form_lower_alphabet, self.lemma_alphabet,
                  self.upos_alphabet, self.xpos_alphabet,
-                 self.morph_tag_alphabet],
+                 self.morph_tag_alphabet, self.morph_singleton_alphabet],
                 [char_counts, form_counts, form_lower_counts, lemma_counts,
-                 upos_counts, xpos_counts, morph_tag_counts],
+                 upos_counts, xpos_counts, morph_tag_counts,
+                 morph_singletons_counts],
                 [self.classifier.options.char_cutoff,
                  self.classifier.options.form_cutoff,
                  self.classifier.options.form_cutoff,
                  self.classifier.options.lemma_cutoff,
                  self.classifier.options.tag_cutoff,
                  self.classifier.options.tag_cutoff,
+                 self.classifier.options.morph_tag_cutoff,
                  self.classifier.options.morph_tag_cutoff],
                 [int(10e6), self.max_forms, self.max_forms, self.max_lemmas,
-                 self.max_tags, self.max_tags, self.max_morph_tags]):
+                 self.max_tags, self.max_tags, self.max_morph_tags,
+                 self.max_morph_tags]):
 
             alphabet.clear()
             for name in self.special_symbols.names:
@@ -324,3 +346,5 @@ class TokenDictionary(Dictionary):
         logging.info('Number of fine POS tags: %d' %
                      len(self.xpos_alphabet))
         logging.info('Number of morph tags: %d' % len(self.morph_tag_alphabet))
+        logging.info('Number of morph singletons (combination of morph tags '
+                     'seen in data): %d' % len(self.morph_singleton_alphabet))

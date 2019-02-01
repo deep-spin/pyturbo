@@ -41,14 +41,22 @@ class DependencyNeuralScorer(NeuralScorer):
         return F.cross_entropy(scores, gold_output)
 
     def compute_scores(self, instances, parts):
-        dependency_scores = super(DependencyNeuralScorer, self).\
-            compute_scores(instances, parts)
+        """
+        Compute the scores for all the targets this scorer
+        :param instances:
+        :param parts:
+        :return:
+        """
+        scores = {'dependency': super(DependencyNeuralScorer, self).
+            compute_scores(instances, parts)}
 
         if self.model.predict_tags:
             upos_scores = [sent_scores.detach().numpy()
-                           for sent_scores in self.model.upos_logits]
+                           for sent_scores in +
+                           self.model.upos_logits]
+            scores['upos'] = upos_scores
             xpos_scores = [sent_scores.detach().numpy()
                            for sent_scores in self.model.xpos_logits]
-            return list(zip(dependency_scores, upos_scores, xpos_scores))
+            scores['xpos'] = xpos_scores
 
-        return dependency_scores
+        return scores

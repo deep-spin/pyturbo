@@ -53,12 +53,15 @@ class DependencyOptionParser(OptionParser):
                             default=0, const=1,
                             help="""Make the parser output just the backbone
                             dependencies.""")
-        parser.add_argument('--projective', action='store_const',
-                            default=0, const=1,
+        parser.add_argument('--projective', action='store_true',
                             help="""Force the parser output single-rooted
                             projective trees.""")
-        parser.add_argument('--pos', action='store_true',
-                            help='Predict POS tags')
+        parser.add_argument('--upos', action='store_true',
+                            help='Predict UPOS tags')
+        parser.add_argument('--xpos', action='store_true',
+                            help='Predict XPOS tags')
+        parser.add_argument('--morph', action='store_true',
+                            help='Predict UMorph tags')
         parser.add_argument('--single_root', action='store_true',
                             help='When running the parser, enforce that there '
                                  'is only one root per sentence.')
@@ -163,8 +166,10 @@ DEFINE_bool(pruner_large_feature_set, false,
 
         options.model_type = args['model_type']
         options.unlabeled = bool(args['unlabeled'])
-        options.predict_tags = args['pos']
-        options.projective = bool(args['projective'])
+        options.predict_upos = args['upos']
+        options.predict_xpos = args['xpos']
+        options.predict_morph = args['morph']
+        options.projective = args['projective']
         options.prune_relations = bool(args['prune_relations'])
         options.prune_distances = bool(args['prune_distances'])
         options.pruner_path = args['pruner_path']

@@ -57,7 +57,7 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
         upos = [root_string] * length
         xpos = [root_string] * length
         morph_tags = [[]] * length
-        morph_tags[0] = [root_string]
+        morph_singletons = [root_string] * length
         heads = [-1] * length
         relations = [root_string] * length
         for i in range(1, length):
@@ -67,6 +67,7 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
             upos[i] = info[3]
             xpos[i] = info[4]
             morph = info[5]
+            morph_singletons[i] = morph
             if morph == '_':
                 morph_tags[i] = []
             else:
