@@ -82,7 +82,8 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
                         % (heads[i], length))
             relations[i] = info[7]
         input_ = DependencyInstanceInput(forms, lemmas, upos, xpos,
-                                         morph_tags, multiwords)
+                                         morph_tags, morph_singletons,
+                                         multiwords)
         if heads[1] == -1:
             output = None
         else:

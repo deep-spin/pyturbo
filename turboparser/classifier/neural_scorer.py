@@ -61,14 +61,14 @@ class NeuralScorer(object):
             batch_size = len(gold_output)
             max_length = max(len(g) for g in gold_output)
             shape = [batch_size, max_length]
-            diff = torch.zeros(shape, dtype=self.scores.dtype)
+            diff = torch.zeros(shape, dtype=torch.float)
             for i in range(batch_size):
                 gold_item = gold_output[i]
                 pred_item = predicted_output[i]
                 diff[i, :len(gold_item)] = torch.tensor(pred_item - gold_item)
         else:
             diff = torch.tensor(predicted_output - gold_output,
-                                dtype=self.scores.dtype)
+                                dtype=torch.float)
 
         error = (self.scores * diff).sum()
         # Backpropagate to accumulate gradients.

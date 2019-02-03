@@ -22,6 +22,8 @@ class StructuredClassifier(object):
         self.decoder = None
         self.parameters = None
         self.neural_scorer = None
+        self.structured_target = 'parts'
+        self.additional_targets = []
 
     def save(self, model_path=None):
         '''Save the full configuration and model.'''
@@ -110,7 +112,7 @@ class StructuredClassifier(object):
         return scores
 
     def make_gradient_step(self, gold_parts, predicted_parts,
-                           gold_additional_labels=None, predicted_labels=None,
+                           gold_additional_labels=None,
                            parts=None, features=None, eta=None, t=None,
                            instances=None):
         '''Perform a gradient step updating the current model.
@@ -378,7 +380,8 @@ class StructuredClassifier(object):
 
         return predicted_output, eta
 
-    def _update_task_metrics(self, predicted, gold, instance, parts):
+    def _update_task_metrics(self, predicted_parts, instance, scores, parts,
+                             gold_parts, gold_labels):
         """
         Update task-specific metrics during training.
         """
@@ -444,25 +447,27 @@ class StructuredClassifier(object):
             for i in range(len(instance_data)):
                 instance = instance_data.instances[i]
                 parts = instance_data.parts[i]
-                gold_labels = instance_data.gold_labels[i]
                 gold_parts = instance_data.gold_parts[i]
+                gold_labels = instance_data.gold_labels[i]
 
-                score_parts = self.get_parts_scores(scores[i])
+                score_parts = self.get_parts_scores(scores)[i][:len(parts)]
                 predicted_parts, _ = self._decode_structured_train(
                     instance, parts, score_parts, gold_parts)
 
-                self._update_task_metrics(predicted_parts, gold_parts,
-                                          instance, parts)
                 all_predicted_parts.append(predicted_parts)
+
+                self._update_task_metrics(predicted_parts, instance, scores,
+                                          parts, gold_parts, gold_labels)
 
             # run the gradient step for the whole batch
             start_time = time.time()
-            self.make_gradient_step(instance_data.gold_labels,
+            self.make_gradient_step(instance_data.gold_parts,
                                     all_predicted_parts,
+                                    instance_data.gold_labels,
+                                    parts=instance_data.parts,
                                     instances=instance_data.instances)
             end_time = time.time()
             self.time_gradient += end_time - start_time
-
 
     def _run_batches(self, instance_data, batch_size, return_loss=False):
         """
@@ -479,7 +484,10 @@ class StructuredClassifier(object):
             the list of predictions and the list of losses.
         """
         batch_index = 0
-        predictions = []
+        predictions = {self.structured_target: []}
+        for key in self.additional_targets:
+            predictions[key] = []
+
         losses = []
 
         while batch_index < len(instance_data):
@@ -487,10 +495,13 @@ class StructuredClassifier(object):
             batch_data = instance_data[batch_index:next_index]
             result = self.run_batch(batch_data, return_loss)
             if return_loss:
-                predictions.extend(result[0])
+                batch_predictions = result[0]
                 losses.extend(result[1])
             else:
-                predictions.extend(result)
+                batch_predictions = result
+
+            for key in batch_predictions:
+                predictions[key].extend(batch_predictions[key])
 
             batch_index = next_index
 
@@ -638,7 +649,7 @@ class StructuredClassifier(object):
         """
         pass
 
-    def get_predictions(self, instance, parts, inst_scores):
+    def decode_parts(self, instance, parts, inst_scores):
         """
         Return the predicted output.
 
@@ -657,15 +668,17 @@ class StructuredClassifier(object):
             In neural models, features is a list of None.
         """
         all_parts = []
-        all_gold = []
+        all_gold_parts = []
+        all_gold_labels = []
         all_features = []
         formatted_instances = []
 
         for instance in instances:
             f_instance, parts = self.make_parts(instance)
-            gold = parts.get_gold_output()
-            if gold is not None:
-                gold = np.array(gold, dtype=np.float)
+            gold_parts = parts.get_gold_output()
+            gold_labels = self.get_gold_labels(instance)
+            if gold_parts is not None:
+                gold_parts = np.array(gold_parts, dtype=np.float)
 
             if self.options.neural:
                 features = None
@@ -680,13 +693,23 @@ class StructuredClassifier(object):
 
             formatted_instances.append(f_instance)
             all_parts.append(parts)
-            all_gold.append(gold)
+            all_gold_parts.append(gold_parts)
+            all_gold_labels.append(gold_labels)
             all_features.append(features)
 
         self._report_make_parts(instances, all_parts)
         data = InstanceData(formatted_instances, all_parts,
-                            all_features, all_gold)
+                            all_features, all_gold_parts, all_gold_labels)
         return data
+
+    def get_gold_labels(self, instance):
+        """
+        Return a list of dictionary mapping the name of each target to a numpy
+        vector with the gold values.
+
+        :return: dict
+        """
+        return {}
 
     def run_batch(self, instance_data, return_loss=False):
         """
@@ -711,32 +734,36 @@ class StructuredClassifier(object):
                                                   inst_features)
                 scores.append(inst_scores)
 
-        predictions = []
-        losses = []
+        predicted_parts = []
         for i in range(len(instance_data)):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
-            gold = instance_data.gold_labels[i]
             inst_scores = scores[i]
+            part_scores = self.get_parts_scores(inst_scores)
 
-            predicted_output = self.get_predictions(instance, parts,
-                                                    inst_scores)
-            predictions.append(predicted_output)
+            inst_predicted_parts = self.decode_parts(instance, parts,
+                                                     part_scores)
+            predicted_parts.append(inst_predicted_parts)
 
             # if self.options.evaluate:
             #     self.evaluate_instance(parts, gold, predicted_output)
 
-            if return_loss:
-                loss = self.compute_loss(gold, predicted_output, inst_scores)
-                losses.append(loss)
+        predictions = {self.structured_target: predicted_parts}
+        predictions.update(self.decode_unstructured(scores))
 
         if return_loss:
+            losses = self.compute_loss(instance_data.gold_parts,
+                                       predicted_parts,
+                                       scores, instance_data.gold_labels)
             return predictions, losses
 
         return predictions
 
-    def compute_loss(self, gold, predicted_output, scores):
-        return self.decoder.compute_loss(gold, predicted_output, scores)
+    def decode_unstructured(self, scores):
+        return []
+
+    def compute_loss(self, gold_parts, predicted_parts, scores, gold_labels):
+        return self.decoder.compute_loss(gold_parts, predicted_parts, scores)
 
     def run(self):
         '''Run the structured classifier on test data.'''

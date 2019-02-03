@@ -139,20 +139,27 @@ class DependencyNeuralModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         # POS tags
-        if predict_tags:
+        if predict_upos:
             self.upos_mlp = self._create_mlp(
-                hidden_size=pos_mlp_size, num_layers=1,
+                hidden_size=tag_mlp_size, num_layers=1,
                 output_activation=self.relu)
             num_tags = token_dictionary.get_num_upos_tags()
-            self.upos_scorer = self._create_scorer(pos_mlp_size, num_tags,
+            self.upos_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                    bias=True)
-
+        if predict_xpos:
             self.xpos_mlp = self._create_mlp(
-                hidden_size=pos_mlp_size, num_layers=1,
+                hidden_size=tag_mlp_size, num_layers=1,
                 output_activation=self.relu)
             num_tags = token_dictionary.get_num_xpos_tags()
-            self.xpos_scorer = self._create_scorer(pos_mlp_size, num_tags,
+            self.xpos_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                    bias=True)
+        if predict_morph:
+            self.morph_mlp = self._create_mlp(
+                hidden_size=tag_mlp_size, num_layers=1,
+                output_activation=self.relu)
+            num_tags = token_dictionary.get_num_morph_singletons()
+            self.morph_scorer = self._create_scorer(tag_mlp_size, num_tags,
+                                                    bias=True)
 
         # first order
         self.head_mlp = self._create_mlp()
@@ -675,7 +682,7 @@ class DependencyNeuralModel(nn.Module):
         # instances = [instances[i] for i in inds]
         max_length = sorted_lengths[0].item()
         max_num_parts = max(len(p) for p in parts)
-        batch_scores = torch.zeros(batch_size, max_num_parts)
+        dependency_scores = torch.zeros(batch_size, max_num_parts)
         embeddings = self.get_word_representation(instances, max_length)
         sorted_embeddings = embeddings[inds]
 
@@ -690,42 +697,41 @@ class DependencyNeuralModel(nn.Module):
 
         # return to the original ordering
         batch_states = batch_states[rev_inds]
+        self.scores = {}
+        if self.predict_upos:
+            # ignore root
+            hidden = self.upos_mlp(batch_states[1:])
+            self.scores['upos'] = self.upos_scorer(hidden)
 
-        if self.predict_tags:
-            self.upos_logits = []
-            self.xpos_logits = []
+        if self.predict_xpos:
+            hidden = self.xpos_mlp(batch_states[1:])
+            self.scores['xpos'] = self.xpos_scorer(hidden)
+
+        if self.predict_morph:
+            hidden = self.morph_mlp(batch_states[1:])
+            self.scores['morph'] = self.morph_scorer(hidden)
 
         # now go through each batch item
         for i in range(batch_size):
             length = lengths[i].item()
             states = batch_states[i, :length]
-            scores = batch_scores[i]
+            sent_scores = dependency_scores[i]
             sent_parts = parts[i]
 
-            self._compute_arc_scores(states, sent_parts, scores)
+            self._compute_arc_scores(states, sent_parts, sent_scores)
 
             if sent_parts.has_type(NextSibling):
                 self._compute_consecutive_sibling_scores(states, sent_parts,
-                                                         scores)
+                                                         sent_scores)
 
             if sent_parts.has_type(Grandparent):
-                self._compute_grandparent_scores(states, sent_parts, scores)
+                self._compute_grandparent_scores(states, sent_parts,
+                                                 sent_scores)
 
             if sent_parts.has_type(GrandSibling):
-                self._compute_grandsibling_scores(states, sent_parts, scores)
+                self._compute_grandsibling_scores(states, sent_parts,
+                                                  sent_scores)
 
-            if self.predict_tags:
-                # ignore root
-                hidden = self.upos_mlp(states[1:])
+        self.scores['dependency'] = dependency_scores
 
-                # pos_logits is (batch, num_tokens, num_tags)
-                # shorter sentences in the batch have *no* spurious logits
-                logits = self.upos_scorer(hidden)
-                self.upos_logits.append(logits)
-
-                hidden = self.xpos_mlp(states[1:])
-                logits = self.xpos_scorer(hidden)
-                self.xpos_logits.append(logits)
-                # TODO: use some CRF decoder
-
-        return batch_scores
+        return self.scores

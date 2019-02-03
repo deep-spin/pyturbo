@@ -1,5 +1,6 @@
 from ..classifier.structured_classifier import StructuredClassifier
 from ..classifier import utils
+from ..classifier.instance import InstanceData
 from .dependency_reader import DependencyReader
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
@@ -17,6 +18,7 @@ from .dependency_neural_model import DependencyNeuralModel
 import numpy as np
 import pickle
 import logging
+from sklearn.metrics import f1_score
 
 
 class ModelType(object):
@@ -53,6 +55,7 @@ class TurboParser(StructuredClassifier):
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.parameters = None
+        self.structured_target = 'dependency'
         self._set_options()
 
         if options.neural:
@@ -286,11 +289,12 @@ class TurboParser(StructuredClassifier):
         """
         self.accumulated_uas = 0.
         self.accumulated_las = 0.
-        self.accumulated_pos = 0
+        self.accumulated_upos = 0
+        self.accumulated_xpos = 0
+        self.accumulated_morph = 0
         self.total_tokens = 0
         self.validation_uas = 0.
         self.validation_las = 0.
-        self.validation_pos = 0.
 
     def _get_task_train_report(self):
         """
@@ -304,6 +308,16 @@ class TurboParser(StructuredClassifier):
             las = self.accumulated_las / self.total_tokens
             msg += '\tNaive train LAS: %f' % las
 
+        if self.options.predict_upos:
+            acc = self.accumulated_upos / self.total_tokens
+            msg += '\tUPOS train acc: %f' % acc
+        if self.options.predict_xpos:
+            acc = self.accumulated_xpos / self.total_tokens
+            msg += '\tXPOS train acc: %f' % acc
+        if self.options.predict_morph:
+            acc =  self.accumulated_morph / self.total_tokens
+            msg += '\tUFeats train acc: %f' % acc
+
         return msg
 
     def _get_task_valid_report(self):
@@ -315,8 +329,12 @@ class TurboParser(StructuredClassifier):
         msg = 'Naive validation UAS: %f' % self.validation_uas
         if not self.options.unlabeled:
             msg += '\tNaive validation LAS: %f' % self.validation_las
-        if self.options.predict_tags:
-            msg += '\tUPOS accuracy: %f' % self.validation_pos
+        if self.options.predict_upos:
+            msg += '\tUPOS accuracy: %f' % self.validation_upos
+        if self.options.predict_xpos:
+            msg += '\tXPOS accuracy: %f' % self.validation_xpos
+        if self.options.predict_morph:
+            msg += '\tUFeats accuracy: %f' % self.validation_morph
 
         return msg
 
@@ -330,7 +348,24 @@ class TurboParser(StructuredClassifier):
 
         return msg
 
-    def _decode_unstructured_train(self, instances, scores, gold_labels):
+    def get_gold_labels(self, instance):
+        """
+        Return a list of dictionary mapping the name of each target to a numpy
+        vector with the gold values.
+
+        :param instance: DependencyInstanceNumeric
+        :return: dict
+        """
+        gold_dict = {}
+        if self.options.predict_upos:
+            gold_dict['upos'] = instance.get_all_upos()
+        if self.options.predict_xpos:
+            gold_dict['xpos'] = instance.get_all_xpos()
+        if self.options.predict_morph:
+            gold_dict['morph'] = instance.get_all_morph_singletons()
+        return gold_dict
+
+    def decode_unstructured(self, scores):
         """
         Decode tag labes for a list of instances.
 
@@ -347,51 +382,51 @@ class TurboParser(StructuredClassifier):
 
         return predictions
 
-    def _decode_train(self, instance, parts, scores, gold_output,
-                      features=None, t=None):
+    def _decode_unstructured_train(self, instances, scores, gold_labels):
         """
-        Decode the scores at training time for one instance..
+        Decode tag labes for a list of instances.
 
-        This function takes care of the cases when POS tags are also predicted.
-
-        Return the predicted output and eta.
+        :return: a dictionary mapping the name of each tag to a vector of
+            predictions
         """
-        if self.options.predict_tags:
-            dep_scores, pos_scores = scores
-        else:
-            dep_scores = scores
+        return self.decode_unstructured(scores)
 
-        # network scores are as long as the instance with most parts
-        dep_scores = dep_scores[:len(parts)]
-        dep_output, eta = super(TurboParser, self)._decode_train(
-            instance, parts, dep_scores, gold_output, features, t)
-
-        if self.options.predict_tags:
-            pos_output = pos_scores.argmax(1)
-            return (dep_output, pos_output), eta
-
-        return dep_output, eta
-
-    def _update_task_metrics(self, predicted, gold, instance, parts):
+    def _update_task_metrics(self, predicted_parts, instance, scores, parts,
+                             gold_parts, gold_labels):
         """
-        Update the accumulated UAS and LAS count. It sums the metrics for each
+        Update the accumulated UAS, LAS and other targets count.
+
+        It sums the metrics for each
         sentence scaled by its number of tokens; when reporting performance,
         this value is divided by the total number of tokens seen in all
         sentences combined.
-        """
-        if self.options.predict_tags:
-            dep_predicted, pos_predicted = predicted
-        else:
-            dep_predicted = predicted
 
+        :type predicted_parts: list
+        :type scores: dict
+        """
         # UAS doesn't consider the root
         length = len(instance) - 1
-        uas, las = get_naive_metrics(dep_predicted, gold, parts, length)
+        uas, las = get_naive_metrics(predicted_parts, gold_parts, parts,
+                                     length)
 
-        if self.options.predict_tags:
-            gold_pos = np.array(instance.get_all_upos()[1:])
-            pos_hits = np.sum(pos_predicted == gold_pos)
-            self.accumulated_pos += pos_hits
+        predicted_labels = self.decode_unstructured(scores)
+        if self.options.predict_upos:
+            gold = gold_labels['upos']
+            pred = predicted_labels['upos']
+            hits = (gold == pred)[:len(gold)]
+            self.accumulated_upos += hits
+
+        if self.options.predict_xpos:
+            gold = gold_labels['xpos']
+            pred = predicted_labels['xpos']
+            hits = (gold == pred)[:len(gold)]
+            self.accumulated_xpos += hits
+
+        if self.options.predict_morph:
+            gold = gold_labels['morph']
+            pred = predicted_labels['morph']
+            hits = (gold == pred)[:len(gold)]
+            self.accumulated_morph += hits
 
         self.accumulated_uas += length * uas
         self.accumulated_las += length * las
@@ -505,7 +540,7 @@ class TurboParser(StructuredClassifier):
         return score_dict['dependency']
 
     def make_gradient_step(self, gold_parts, predicted_parts,
-                           gold_additional_labels=None, predicted_labels=None,
+                           gold_additional_labels=None,
                            parts=None, features=None, eta=None, t=None,
                            instances=None):
         """
@@ -514,17 +549,9 @@ class TurboParser(StructuredClassifier):
 
         The inputs are a batch.
         """
-        if self.options.predict_tags:
-            dep_prediction, pos_prediction = list(zip(*predicted_output))
-            predicted_output = dep_prediction
-
-            # skip root
-            pos_gold_output = [np.array(inst.get_all_upos()[1:])
-                               for inst in instances]
-            self.neural_scorer.compute_pos_gradients(pos_gold_output)
-
+        self.neural_scorer.compute_tag_gradients(gold_additional_labels)
         super(TurboParser, self).make_gradient_step(
-            gold_parts, predicted_parts, None, None, parts, features, eta, t,
+            gold_parts, predicted_parts, None, parts, features, eta, t,
             instances)
 
     def create_gold_targets(self, instance):
@@ -907,50 +934,24 @@ class TurboParser(StructuredClassifier):
 
             parts.append(part, gold)
 
-    def get_predictions(self, instance, parts, scores):
+    def compute_loss(self, gold_parts, predicted_parts, scores, gold_labels):
         """
-        Find the predictions for an instance.
-
-        If using POS tags, predictions are the dependency tree and tags, if not,
-        only the tree.
+        Compute the loss for a batch of predicted parts and label scores.
         """
-        if self.options.predict_tags:
-            dep_scores, pos_scores = scores
-            pos_scores = pos_scores[:len(instance)]
+        loss = 0
+        for i in enumerate(predicted_parts):
+            parts = predicted_parts[i]
+            gold = gold_parts[i]
+            loss += self.decoder.compute_loss(gold, parts,
+                                              scores['dependency'][i])
 
-            #TODO: use structured prediction for POS
-            pos_predictions = pos_scores.argmax(1)
-        else:
-            dep_scores = scores
+        for target in self.additional_targets:
+            target_scores = scores[target]
+            gold_labels_target = [x[target] for x in gold_labels]
+            loss += self.neural_scorer.compute_tag_loss(target_scores,
+                                                        gold_labels_target)
 
-        dep_scores = dep_scores[:len(parts)]
-        dep_predictions = self.decoder.decode(instance, parts, dep_scores)
-
-        if self.options.predict_tags:
-            return dep_predictions, pos_predictions
-
-        return dep_predictions
-
-    def compute_loss(self, gold, predicted_output, scores):
-        if self.options.predict_tags:
-            dep_scores, pos_scores = scores
-            dep_pred, pos_pred = predicted_output
-            pos_scores = pos_scores[:len(pos_pred)]
-            dep_scores = dep_scores[:len(dep_pred)]
-
-            # TODO: compute loss
-            pos_loss = 0
-        else:
-            dep_scores = scores
-            dep_pred = predicted_output
-
-        dep_scores = dep_scores[:len(dep_pred)]
-        dep_loss = self.decoder.compute_loss(gold, dep_pred, dep_scores)
-
-        if self.options.predict_tags:
-            return dep_loss, pos_loss
-
-        return dep_loss
+        return loss
 
     def _get_task_validation_metrics(self, valid_data, valid_pred):
         """
@@ -961,23 +962,28 @@ class TurboParser(StructuredClassifier):
         POS accuracy.
 
         :param valid_data: InstanceData
+        :type valid_data: InstanceData
         :param valid_pred: list with predicted outputs (decoded) for each item
             in the data. Each item may be a tuple with parser and POS output.
         """
         accumulated_uas = 0.
         accumulated_las = 0.
-        accumulated_pos = 0.
+        accumulated_tag_hits = {target: 0.
+                                for target in self.additional_targets}
         total_tokens = 0
+
+        def count_tag_hits(gold, predicted, target_name):
+            gold_tags = gold_labels[target_name]
+            pred_tags = valid_pred['upos'][i]
+            hits = gold_tags == pred_tags
+            num_hits = np.sum(hits)
 
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
             parts = valid_data.parts[i]
-            predictions = valid_pred[i]
-            if self.options.predict_tags:
-                dep_prediction, pos_prediction = predictions
-            else:
-                dep_prediction = predictions
+            gold_labels = valid_data.gold_labels[i]
 
+            dep_prediction = valid_pred['dependency'][i]
             offset = parts.get_type_offset(Arc)
             num_arcs = parts.get_num_type(Arc)
             arcs = parts.get_parts_of_type(Arc)
@@ -1000,16 +1006,20 @@ class TurboParser(StructuredClassifier):
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
-            if self.options.predict_tags:
-                # skip root
-                gold = np.array(instance.get_all_upos())[1:]
-                pos_prediction = pos_prediction[:len(gold)]
-                hits = gold == pos_prediction
-                accumulated_pos += np.sum(hits)
+            for target in self.additional_targets:
+                target_gold = gold_labels[target]
+                target_pred = valid_pred[target][i][:len(target_gold)]
+                hits = target_gold == target_pred
+                accumulated_tag_hits[target] += np.sum(hits)
 
         self.validation_uas = accumulated_uas / total_tokens
         self.validation_las = accumulated_las / total_tokens
-        self.validation_pos = accumulated_pos / total_tokens
+        if 'upos' in self.additional_targets:
+            self.validation_upos = accumulated_tag_hits['upos'] / total_tokens
+        if 'xpos' in self.additional_targets:
+            self.validation_xpos = accumulated_tag_hits['xpos'] / total_tokens
+        if 'morph' in self.additional_targets:
+            self.validation_morph = accumulated_tag_hits['morph'] / total_tokens
 
         # always update UAS; use it as a criterion for saving if no LAS
         if self.validation_uas > self.best_validation_uas:
