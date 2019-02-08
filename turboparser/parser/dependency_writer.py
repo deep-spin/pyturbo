@@ -41,11 +41,16 @@ class DependencyWriter(Writer):
                 xpos = instance.output.xpos
             else:
                 xpos = instance.input.xpos
+
+            if instance.output.morph_singletons is not None:
+                morph = instance.output.morph_singletons
+            else:
+                morph = instance.input.morph_singletons
+
             line = '\t'.join([str(i),
                               instance.input.forms[i],
                               instance.input.lemmas[i],
-                              upos[i], xpos[i],
-                              '_',
+                              upos[i], xpos[i], morph[i],
                               str(instance.output.heads[i]),
                               instance.output.relations[i],
                               '_', '_'],) + '\n'

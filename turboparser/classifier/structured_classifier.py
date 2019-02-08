@@ -392,7 +392,7 @@ class StructuredClassifier(object):
         """
         Return the scores of the structured parts inside the score dictionary.
         """
-        return score_dict['parts']
+        return score_dict[self.structured_target]
 
     def train_batch(self, instance_data, t):
         '''
@@ -413,7 +413,6 @@ class StructuredClassifier(object):
             parts = instance_data.parts[i]
             features = instance_data.features[i]
             gold_parts = instance_data.gold_parts[i]
-            gold_labels = instance_data.gold_labels[i]
 
             start_scores = time.time()
             scores = self.compute_scores(instance, parts, features)
@@ -438,6 +437,7 @@ class StructuredClassifier(object):
             self.neural_scorer.train_mode()
 
             start_time = time.time()
+            # scores is a list of dictionaries [target] -> score array
             scores = self.neural_scorer.compute_scores(instance_data.instances,
                                                        instance_data.parts)
             end_time = time.time()
@@ -450,15 +450,17 @@ class StructuredClassifier(object):
                 parts = instance_data.parts[i]
                 gold_parts = instance_data.gold_parts[i]
                 gold_labels = instance_data.gold_labels[i]
+                inst_scores = scores[i]
 
-                score_parts = self.get_parts_scores(scores)[i][:len(parts)]
+                score_parts = self.get_parts_scores(inst_scores)[:len(parts)]
                 predicted_parts, _ = self._decode_structured_train(
                     instance, parts, score_parts, gold_parts)
 
                 all_predicted_parts.append(predicted_parts)
 
-                self._update_task_metrics(predicted_parts, instance, scores,
-                                          parts, gold_parts, gold_labels)
+                self._update_task_metrics(
+                    predicted_parts, instance, inst_scores, parts,
+                    gold_parts, gold_labels)
 
             # run the gradient step for the whole batch
             start_time = time.time()
@@ -677,7 +679,7 @@ class StructuredClassifier(object):
         for instance in instances:
             f_instance, parts = self.make_parts(instance)
             gold_parts = parts.get_gold_output()
-            gold_labels = self.get_gold_labels(instance)
+            gold_labels = self.get_gold_labels(f_instance)
             if gold_parts is not None:
                 gold_parts = np.array(gold_parts, dtype=np.float)
 
@@ -726,7 +728,6 @@ class StructuredClassifier(object):
         if self.options.neural:
             scores = self.neural_scorer.compute_scores(instance_data.instances,
                                                        instance_data.parts)
-            part_scores = self.get_parts_scores(scores)
         else:
             scores = []
             zipped = zip(instance_data.instances,
@@ -735,33 +736,55 @@ class StructuredClassifier(object):
                 inst_scores = self.compute_scores(instance, inst_parts,
                                                   inst_features)
                 scores.append(inst_scores)
-            part_scores = scores
 
-        predicted_parts = []
+        predictions = []
         for i in range(len(instance_data)):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
+            inst_scores = scores[i]
+            part_scores = self.get_parts_scores(inst_scores)
 
-            inst_predicted_parts = self.decode_parts(instance, parts,
-                                                     part_scores[i])
-            predicted_parts.append(inst_predicted_parts)
+            predicted_parts = self.decode_parts(instance, parts, part_scores)
+            inst_prediction = {self.structured_target: predicted_parts}
+            inst_prediction.update(self.decode_unstructured(inst_scores))
+
+            predictions.append(inst_prediction)
 
             # if self.options.evaluate:
             #     self.evaluate_instance(parts, gold, predicted_output)
 
-        predictions = {self.structured_target: predicted_parts}
-        predictions.update(self.decode_unstructured(scores))
-
         if return_loss:
             losses = self.compute_loss_batch(instance_data.gold_parts,
-                                             predicted_parts,
+                                             predictions,
                                              scores, instance_data.gold_labels)
             return predictions, losses
 
         return predictions
 
     def decode_unstructured(self, scores):
-        return []
+        return {target: scores[target].argmax(-1)
+                for target in self.additional_targets}
+
+    def decode_unstructured_batch(self, scores):
+        """
+        Decode tag labes for a one instance.
+
+        :return: a dictionary mapping the name of each tag to a vector of
+            predictions
+        """
+        # predictions = {}
+        #
+        # # iterate over upos, xpos, morph
+        # for target_name in self.additional_targets:
+        #     # target_scores is (batch, length, num_classes)
+        #     target_scores = scores[target_name]
+        #     predictions[target_name] = target_scores.argmax(-1)
+
+        predictions = [{target: inst_scores[target].argmax()
+                        for target in self.additional_targets}
+                       for inst_scores in scores]
+
+        return predictions
 
     def compute_loss_batch(self, gold_parts, predicted_parts, scores,
                            gold_labels):

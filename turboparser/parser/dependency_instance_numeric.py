@@ -1,25 +1,29 @@
 from .dependency_instance import DependencyInstance, \
     DependencyInstanceInput, DependencyInstanceOutput
 
+import numpy as np
+
 
 class DependencyInstanceNumericInput(DependencyInstanceInput):
     def __init__(self, input, token_dictionary):
+        length = len(input.forms)
+
         self.characters = [None for _ in range(len(input.forms))]
-        self.embedding_ids = [-1] * len(input.forms)
-        self.forms = [-1] * len(input.forms)
-        self.forms_lower = [-1] * len(input.forms)
-        self.lemmas = [-1] * len(input.lemmas)
-        self.prefixes = [-1] * len(input.forms)
-        self.suffixes = [-1] * len(input.forms)
-        self.upos = [-1] * len(input.upos)
-        self.xpos = [-1] * len(input.xpos)
+        self.forms = np.full(length, -1, np.int32)
+        self.forms_lower = self.forms.copy()
+        self.embedding_ids = self.forms.copy()
+        self.lemmas = self.forms.copy()
+        self.prefixes = self.forms.copy()
+        self.suffixes = self.forms.copy()
+        self.upos = self.forms.copy()
+        self.xpos = self.forms.copy()
         self.morph_tags = [[-1] * len(morph_tags)
                            for morph_tags in input.morph_tags]
-        self.morph_singletons = [-1] * len(input.forms)
-        self.is_noun = [False] * len(input.forms)
-        self.is_verb = [False] * len(input.forms)
-        self.is_punc = [False] * len(input.forms)
-        self.is_coord = [False] * len(input.forms)
+        self.morph_singletons = self.forms.copy()
+        # self.is_noun = [False] * len(input.forms)
+        # self.is_verb = [False] * len(input.forms)
+        # self.is_punc = [False] * len(input.forms)
+        # self.is_coord = [False] * len(input.forms)
 
         for i in range(len(input.forms)):
             # Form and lower-case form.
@@ -93,30 +97,30 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
             # self.is_coord[i] = input.upos[i] in ['Conj', 'KON', 'conj',
             #                                      'Conjunction', 'CC', 'cc']
 
-
+#TODO: merge input and output in a single class
 class DependencyInstanceNumericOutput(DependencyInstanceOutput):
     def __init__(self, output, token_dictionary, relation_dictionary):
-        self.heads = [-1] * len(output.heads)
-        self.relations = [-1] * len(output.relations)
-        self.upos = output.upos
-        self.xpos = output.xpos
-        self.morph_singletons = output.morph_singletons
+        length = len(output.heads)
+        self.heads = np.full(length, -1, np.int32)
+        self.relations = self.heads.copy()
+        self.upos = self.heads.copy()
+        self.xpos = self.heads.copy()
+        self.morph_singletons = self.heads.copy()
 
         for i in range(len(output.heads)):
             self.heads[i] = output.heads[i]
             relation = output.relations[i]
             self.relations[i] = relation_dictionary.get_relation_id(relation)
-            if self.upos is not None:
+            if output.upos is not None:
                 tag = output.upos[i]
                 self.upos[i] = token_dictionary.get_upos_id(tag)
-            if self.xpos is not None:
+            if output.xpos is not None:
                 tag = output.xpos[i]
                 self.xpos[i] = token_dictionary.get_xpos_id(tag)
-            if self.morph_singletons is not None:
+            if output.morph_singletons is not None:
                 tag = output.morph_singletons[i]
                 self.morph_singletons[i] = token_dictionary.\
                     get_morph_singleton_id(tag)
-
 
 class DependencyInstanceNumeric(DependencyInstance):
     '''An dependency parsing instance with numeric fields.'''
@@ -145,6 +149,9 @@ class DependencyInstanceNumeric(DependencyInstance):
 
     def get_embedding_id(self, i):
         return self.input.embedding_ids[i]
+
+    def get_all_embedding_ids(self):
+        return self.input.embedding_ids
 
     def get_form_lower(self, i):
         return self.input.forms_lower[i]

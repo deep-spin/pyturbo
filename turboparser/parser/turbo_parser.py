@@ -363,24 +363,8 @@ class TurboParser(StructuredClassifier):
             gold_dict['xpos'] = instance.get_all_xpos()
         if self.options.predict_morph:
             gold_dict['morph'] = instance.get_all_morph_singletons()
+
         return gold_dict
-
-    def decode_unstructured(self, scores):
-        """
-        Decode tag labes for a list of instances.
-
-        :return: a dictionary mapping the name of each tag to a vector of
-            predictions
-        """
-        predictions = {}
-
-        # iterate over upos, xpos, morph
-        for target_name in self.additional_targets:
-            # target_scores is (batch, length, num_classes)
-            target_scores = scores[target_name]
-            predictions[target_name] = target_scores.argmax(-1)
-
-        return predictions
 
     def _decode_unstructured_train(self, instances, scores, gold_labels):
         """
@@ -394,13 +378,16 @@ class TurboParser(StructuredClassifier):
     def _update_task_metrics(self, predicted_parts, instance, scores, parts,
                              gold_parts, gold_labels):
         """
-        Update the accumulated UAS, LAS and other targets count.
+        Update the accumulated UAS, LAS and other targets count for one
+        sentence.
 
-        It sums the metrics for each
+        It sums the metrics for one
         sentence scaled by its number of tokens; when reporting performance,
         this value is divided by the total number of tokens seen in all
         sentences combined.
 
+        :param predicted_parts: predicted parts of one sentence.
+        :param scores: dictionary mapping target names to scores
         :type predicted_parts: list
         :type scores: dict
         """
@@ -412,20 +399,20 @@ class TurboParser(StructuredClassifier):
         predicted_labels = self.decode_unstructured(scores)
         if self.options.predict_upos:
             gold = gold_labels['upos']
-            pred = predicted_labels['upos']
-            hits = (gold == pred)[:len(gold)]
+            pred = predicted_labels['upos'][:len(gold)]
+            hits = np.sum(gold == pred)
             self.accumulated_upos += hits
 
         if self.options.predict_xpos:
             gold = gold_labels['xpos']
-            pred = predicted_labels['xpos']
-            hits = (gold == pred)[:len(gold)]
+            pred = predicted_labels['xpos'][:len(gold)]
+            hits = np.sum(gold == pred)
             self.accumulated_xpos += hits
 
         if self.options.predict_morph:
             gold = gold_labels['morph']
-            pred = predicted_labels['morph']
-            hits = (gold == pred)[:len(gold)]
+            pred = predicted_labels['morph'][:len(gold)]
+            hits = np.sum(gold == pred)
             self.accumulated_morph += hits
 
         self.accumulated_uas += length * uas
@@ -530,14 +517,6 @@ class TurboParser(StructuredClassifier):
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
-
-    def get_parts_scores(self, score_dict):
-        """
-        Return the scores of the structured parts inside the score dictionary.
-
-        These are the scores for the parts of the parse tree.
-        """
-        return score_dict['dependency']
 
     def create_gold_targets(self, instance):
         """
@@ -919,28 +898,31 @@ class TurboParser(StructuredClassifier):
 
             parts.append(part, gold)
 
-    def compute_loss_batch(self, gold_parts, predicted_parts, scores,
+    def compute_loss_batch(self, gold_parts, predictions, scores,
                            gold_labels):
         """
         Compute the loss for a batch of predicted parts and label scores.
 
-        :param scores: a dictionary mapping target names to arrays of scores
+        :param scores: a list of dictionaries mapping target names to scores
         """
         losses = np.zeros(len(gold_parts), np.float)
 
-        dep_scores = self.get_parts_scores(scores)
-        for i, parts in enumerate(predicted_parts):
-            gold = gold_parts[i]
-            inst_dep_scores = dep_scores[i]
-            loss = self.decoder.compute_loss(gold, parts, inst_dep_scores)
+        for i, inst_predictions in enumerate(predictions):
+            pred_parts = inst_predictions[i]
+            inst_gold_parts = gold_parts[i]
+            inst_gold_labels = gold_labels[i]
+            inst_scores = scores[i]
+            dep_scores = self.get_parts_scores(inst_scores)
+            loss = self.decoder.compute_loss(inst_gold_parts, pred_parts,
+                                             dep_scores)
             losses[i] = loss
 
-        for target in self.additional_targets:
-            target_scores = scores[target]
-            gold_labels_target = [x[target] for x in gold_labels]
-            target_losses = self.neural_scorer.compute_tag_loss(
-                target_scores, gold_labels_target)
-            losses += np.array(target_losses)
+            for target in self.additional_targets:
+                target_scores = inst_scores[target]
+                gold_labels_target = inst_gold_labels[target]
+                target_losses = self.neural_scorer.compute_tag_loss(
+                    target_scores, gold_labels_target)
+                losses += np.array(target_losses)
 
         return losses
 
@@ -1130,8 +1112,8 @@ class TurboParser(StructuredClassifier):
         """
         :type instance: DependencyInstance
         :type parts: DependencyParts
-        :param output: array with predictions (decoder output) or tuples of
-            predictions (parse and POS)
+        :param output: lists with dictionaries mapping target names to
+            predictions
         :return:
         """
         heads = [-1 for i in range(len(instance))]
@@ -1141,10 +1123,7 @@ class TurboParser(StructuredClassifier):
         root = -1
         root_score = -1
 
-        if self.options.predict_tags:
-            dep_output, pos_output = output
-        else:
-            dep_output = output
+        dep_output = self.get_parts_scores(output)
 
         offset = parts.get_type_offset(Arc)
         num_arcs = parts.get_num_type(Arc)
@@ -1180,11 +1159,22 @@ class TurboParser(StructuredClassifier):
                 label_name = self.dictionary.get_relation_name(label)
                 instance.output.relations[m] = label_name
 
-            if self.options.predict_tags and m > 0:
-                tag = pos_output[m - 1]
-                tag_name = self.token_dictionary.\
-                    tag_alphabet.get_label_name(tag)
-                instance.output.tags[m] = tag_name
+            if m > 0:
+                if self.options.predict_upos:
+                    tag = output['upos'][m - 1]
+                    tag_name = self.token_dictionary.\
+                        upos_alphabet.get_label_name(tag)
+                    instance.output.upos[m] = tag_name
+                if self.options.predict_xpos:
+                    tag = output['xpos'][m - 1]
+                    tag_name = self.token_dictionary.\
+                        xpos_alphabet.get_label_name(tag)
+                    instance.output.xpos[m] = tag_name
+                if self.options.predict_morph:
+                    tag = output['morph'][m - 1]
+                    tag_name = self.token_dictionary.\
+                        morph_singleton_alphabet.get_label_name(tag)
+                    instance.output.morph_singletons[m] = tag_name
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):

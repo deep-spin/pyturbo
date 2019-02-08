@@ -569,13 +569,12 @@ class DependencyNeuralModel(nn.Module):
                                   dtype=torch.long)
         for i, instance in enumerate(instances):
             if word_or_tag == 'word':
-                getter = instance.get_embedding_id
+                indices = instance.get_all_embedding_ids()
             elif word_or_tag == 'upos':
-                getter = instance.get_upos
+                indices = instance.get_all_upos()
             else:
-                getter = instance.get_xpos
+                indices = instance.get_all_xpos()
 
-            indices = [getter(j) for j in range(len(instance))]
             index_matrix[i, :len(instance)] = torch.tensor(indices)
 
         if word_or_tag == 'word':
@@ -700,15 +699,15 @@ class DependencyNeuralModel(nn.Module):
         self.scores = {}
         if self.predict_upos:
             # ignore root
-            hidden = self.upos_mlp(batch_states[1:])
+            hidden = self.upos_mlp(batch_states[:, 1:])
             self.scores['upos'] = self.upos_scorer(hidden)
 
         if self.predict_xpos:
-            hidden = self.xpos_mlp(batch_states[1:])
+            hidden = self.xpos_mlp(batch_states[:, 1:])
             self.scores['xpos'] = self.xpos_scorer(hidden)
 
         if self.predict_morph:
-            hidden = self.morph_mlp(batch_states[1:])
+            hidden = self.morph_mlp(batch_states[:, 1:])
             self.scores['morph'] = self.morph_scorer(hidden)
 
         # now go through each batch item

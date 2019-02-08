@@ -20,10 +20,6 @@ class DependencyNeuralScorer(NeuralScorer):
             list with the gold targets for the sentences in the batch.
             Each array is as long as its sentence.
         """
-        if len(gold_labels[0]) == 0:
-            # this model does not output tags
-            return
-
         def _compute_loss(target_gold, logits):
             targets = self.pad_labels(target_gold)
 
@@ -69,8 +65,7 @@ class DependencyNeuralScorer(NeuralScorer):
         """
         Compute the scores for all the targets this scorer
 
-        :return: a dictionary mapping each target name to a numpy array with
-            the scores.
+        :return: a list of dictionaries mapping each target name to its scores
         """
         if not isinstance(instances, list):
             instances = [instances]
@@ -78,8 +73,11 @@ class DependencyNeuralScorer(NeuralScorer):
 
         model_scores = self.model(instances, parts)
         self.part_scores = model_scores['dependency']
-        scores = {}
-        for target in model_scores:
-            scores[target] = model_scores[target].detach().numpy()
 
-        return scores
+        score_list = []
+        for i in range(len(self.part_scores)):
+            instance_scores = {target: model_scores[target][i].detach().numpy()
+                               for target in model_scores}
+            score_list.append(instance_scores)
+
+        return score_list
