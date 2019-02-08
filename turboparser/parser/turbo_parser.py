@@ -539,21 +539,6 @@ class TurboParser(StructuredClassifier):
         """
         return score_dict['dependency']
 
-    def make_gradient_step(self, gold_parts, predicted_parts,
-                           gold_additional_labels=None,
-                           parts=None, features=None, eta=None, t=None,
-                           instances=None):
-        """
-        Perform a gradient step minimizing both parsing error and all tagging
-        errors.
-
-        The inputs are a batch.
-        """
-        self.neural_scorer.compute_tag_gradients(gold_additional_labels)
-        super(TurboParser, self).make_gradient_step(
-            gold_parts, predicted_parts, None, parts, features, eta, t,
-            instances)
-
     def create_gold_targets(self, instance):
         """
         Create the gold targets of an instance that do not depend on parts.
@@ -934,24 +919,30 @@ class TurboParser(StructuredClassifier):
 
             parts.append(part, gold)
 
-    def compute_loss(self, gold_parts, predicted_parts, scores, gold_labels):
+    def compute_loss_batch(self, gold_parts, predicted_parts, scores,
+                           gold_labels):
         """
         Compute the loss for a batch of predicted parts and label scores.
+
+        :param scores: a dictionary mapping target names to arrays of scores
         """
-        loss = 0
-        for i in enumerate(predicted_parts):
-            parts = predicted_parts[i]
+        losses = np.zeros(len(gold_parts), np.float)
+
+        dep_scores = self.get_parts_scores(scores)
+        for i, parts in enumerate(predicted_parts):
             gold = gold_parts[i]
-            loss += self.decoder.compute_loss(gold, parts,
-                                              scores['dependency'][i])
+            inst_dep_scores = dep_scores[i]
+            loss = self.decoder.compute_loss(gold, parts, inst_dep_scores)
+            losses[i] = loss
 
         for target in self.additional_targets:
             target_scores = scores[target]
             gold_labels_target = [x[target] for x in gold_labels]
-            loss += self.neural_scorer.compute_tag_loss(target_scores,
-                                                        gold_labels_target)
+            target_losses = self.neural_scorer.compute_tag_loss(
+                target_scores, gold_labels_target)
+            losses += np.array(target_losses)
 
-        return loss
+        return losses
 
     def _get_task_validation_metrics(self, valid_data, valid_pred):
         """

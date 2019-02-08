@@ -127,7 +127,8 @@ class StructuredClassifier(object):
         TODO: use "FeatureVector *difference" as input (see function
         MakeFeatureDifference(...) instead of computing on the fly).'''
         if self.options.neural:
-            self.neural_scorer.compute_gradients(gold_parts, predicted_parts)
+            self.neural_scorer.compute_gradients(gold_parts, predicted_parts,
+                                                 gold_additional_labels)
             self.neural_scorer.make_gradient_step()
         else:
             for r in range(len(parts)):
@@ -725,6 +726,7 @@ class StructuredClassifier(object):
         if self.options.neural:
             scores = self.neural_scorer.compute_scores(instance_data.instances,
                                                        instance_data.parts)
+            part_scores = self.get_parts_scores(scores)
         else:
             scores = []
             zipped = zip(instance_data.instances,
@@ -733,16 +735,15 @@ class StructuredClassifier(object):
                 inst_scores = self.compute_scores(instance, inst_parts,
                                                   inst_features)
                 scores.append(inst_scores)
+            part_scores = scores
 
         predicted_parts = []
         for i in range(len(instance_data)):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
-            inst_scores = scores[i]
-            part_scores = self.get_parts_scores(inst_scores)
 
             inst_predicted_parts = self.decode_parts(instance, parts,
-                                                     part_scores)
+                                                     part_scores[i])
             predicted_parts.append(inst_predicted_parts)
 
             # if self.options.evaluate:
@@ -752,9 +753,9 @@ class StructuredClassifier(object):
         predictions.update(self.decode_unstructured(scores))
 
         if return_loss:
-            losses = self.compute_loss(instance_data.gold_parts,
-                                       predicted_parts,
-                                       scores, instance_data.gold_labels)
+            losses = self.compute_loss_batch(instance_data.gold_parts,
+                                             predicted_parts,
+                                             scores, instance_data.gold_labels)
             return predictions, losses
 
         return predictions
@@ -762,8 +763,26 @@ class StructuredClassifier(object):
     def decode_unstructured(self, scores):
         return []
 
-    def compute_loss(self, gold_parts, predicted_parts, scores, gold_labels):
-        return self.decoder.compute_loss(gold_parts, predicted_parts, scores)
+    def compute_loss_batch(self, gold_parts, predicted_parts, scores,
+                           gold_labels):
+        """
+        Compute a list with the loss for each instance.
+
+        :param gold_parts:
+        :param predicted_parts:
+        :param scores: dictionary mapping target names to arrays of scores
+        :param gold_labels: list of dictionaries with gold labels for each
+            instance
+        :return: list of losses
+        """
+        losses = []
+        part_scores = self.get_parts_scores(scores)
+        for i, parts in enumerate(predicted_parts):
+            loss = self.decoder.compute_loss(gold_parts[i], parts,
+                                             part_scores[i])
+            losses.append(loss)
+
+        return losses
 
     def run(self):
         '''Run the structured classifier on test data.'''

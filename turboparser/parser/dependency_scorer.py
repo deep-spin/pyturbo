@@ -9,10 +9,13 @@ class DependencyNeuralScorer(NeuralScorer):
     Subclass of neural scorer that can compute loss on both dependency parsing
     and POS tagging.
     """
-    def compute_tag_gradients(self, gold_labels):
+    def compute_gradients(self, gold_parts, predicted_parts, gold_labels):
         """
-        Compute the gradients for the tagging tasks.
+        Compute the error gradients for parsing and tagging.
 
+        :param gold_parts: either a numpy 1d array for a single item or a list
+            of 1d arrays for a batch.
+        :param predicted_parts: same as gold_output
         :param gold_labels: list of dictionaries mapping each target name to a
             list with the gold targets for the sentences in the batch.
             Each array is as long as its sentence.
@@ -43,6 +46,8 @@ class DependencyNeuralScorer(NeuralScorer):
             loss += _compute_loss(target_gold, logits)
 
         loss.backward(retain_graph=True)
+        super(DependencyNeuralScorer, self).compute_gradients(
+            gold_parts, predicted_parts, None)
 
     def pad_labels(self, labels):
         """Pad labels with -1 so that all of them have the same length"""
@@ -58,7 +63,7 @@ class DependencyNeuralScorer(NeuralScorer):
     def compute_tag_loss(self, scores, gold_output):
         """Compute the loss for any tagging subtask"""
         gold_output = self.pad_labels(gold_output)
-        return F.cross_entropy(scores, gold_output)
+        return F.cross_entropy(scores, gold_output, reduction='none')
 
     def compute_scores(self, instances, parts):
         """
@@ -71,9 +76,10 @@ class DependencyNeuralScorer(NeuralScorer):
             instances = [instances]
             parts = [parts]
 
-        self.scores = self.model(instances, parts)
+        model_scores = self.model(instances, parts)
+        self.part_scores = model_scores['dependency']
         scores = {}
-        for target in self.scores:
-            scores[target] = self.scores[target].detach().numpy()
+        for target in model_scores:
+            scores[target] = model_scores[target].detach().numpy()
 
         return scores

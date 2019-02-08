@@ -5,7 +5,7 @@ import torch.optim.lr_scheduler as scheduler
 
 class NeuralScorer(object):
     def __init__(self):
-        self.scores = None
+        self.part_scores = None
         self.model = None
 
     def initialize(self, model, learning_rate=0.001, decay=1,
@@ -28,8 +28,8 @@ class NeuralScorer(object):
             instances = [instances]
             parts = [parts]
 
-        self.scores = self.model(instances, parts)
-        return self.scores.detach().numpy()
+        self.part_scores = self.model(instances, parts)
+        return self.part_scores.detach().numpy()
 
     def train_mode(self):
         """
@@ -49,28 +49,29 @@ class NeuralScorer(object):
         """
         self.scheduler.step(accuracy)
 
-    def compute_gradients(self, gold_output, predicted_output):
+    def compute_gradients(self, gold_parts, predicted_parts, gold_labels):
         """
         Compute the error gradient.
 
-        :param gold_output: either a numpy 1d array for a single item or a list
+        :param gold_parts: either a numpy 1d array for a single item or a list
             of 1d arrays for a batch.
-        :param predicted_output: same as gold_output
+        :param predicted_parts: same as gold_output
+        :param gold_labels: labels for additional targets, if used
         """
-        if isinstance(gold_output, list):
-            batch_size = len(gold_output)
-            max_length = max(len(g) for g in gold_output)
+        if isinstance(gold_parts, list):
+            batch_size = len(gold_parts)
+            max_length = max(len(g) for g in gold_parts)
             shape = [batch_size, max_length]
             diff = torch.zeros(shape, dtype=torch.float)
             for i in range(batch_size):
-                gold_item = gold_output[i]
-                pred_item = predicted_output[i]
+                gold_item = gold_parts[i]
+                pred_item = predicted_parts[i]
                 diff[i, :len(gold_item)] = torch.tensor(pred_item - gold_item)
         else:
-            diff = torch.tensor(predicted_output - gold_output,
+            diff = torch.tensor(predicted_parts - gold_parts,
                                 dtype=torch.float)
 
-        error = (self.scores * diff).sum()
+        error = (self.part_scores * diff).sum()
         # Backpropagate to accumulate gradients.
         error.backward()
 

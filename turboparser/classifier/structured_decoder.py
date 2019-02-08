@@ -42,7 +42,13 @@ class StructuredDecoder(object):
                                 old_mira=False)
 
     def compute_loss(self, gold_output, predicted_output, scores):
-        '''Compute the cost-augmented loss for the given prediction'''
+        '''
+        Compute the cost-augmented loss for the given prediction
+
+        :return:
+        '''
+        # there might be spurious scores for padding
+        scores = scores[:len(gold_output)]
         p = 0.5 - gold_output
         q = 0.5 * np.sum(gold_output)
         cost = p.dot(predicted_output) + q
