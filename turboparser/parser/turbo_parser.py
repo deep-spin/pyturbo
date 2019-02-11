@@ -898,34 +898,6 @@ class TurboParser(StructuredClassifier):
 
             parts.append(part, gold)
 
-    def compute_loss_batch(self, gold_parts, predictions, scores,
-                           gold_labels):
-        """
-        Compute the loss for a batch of predicted parts and label scores.
-
-        :param scores: a list of dictionaries mapping target names to scores
-        """
-        losses = np.zeros(len(gold_parts), np.float)
-
-        for i, inst_predictions in enumerate(predictions):
-            pred_parts = inst_predictions[i]
-            inst_gold_parts = gold_parts[i]
-            inst_gold_labels = gold_labels[i]
-            inst_scores = scores[i]
-            dep_scores = self.get_parts_scores(inst_scores)
-            loss = self.decoder.compute_loss(inst_gold_parts, pred_parts,
-                                             dep_scores)
-            losses[i] = loss
-
-            for target in self.additional_targets:
-                target_scores = inst_scores[target]
-                gold_labels_target = inst_gold_labels[target]
-                target_losses = self.neural_scorer.compute_tag_loss(
-                    target_scores, gold_labels_target)
-                losses += np.array(target_losses)
-
-        return losses
-
     def _get_task_validation_metrics(self, valid_data, valid_pred):
         """
         Compute and store internally validation metrics. Also call the neural
@@ -937,7 +909,8 @@ class TurboParser(StructuredClassifier):
         :param valid_data: InstanceData
         :type valid_data: InstanceData
         :param valid_pred: list with predicted outputs (decoded) for each item
-            in the data. Each item may be a tuple with parser and POS output.
+            in the data. Each item is a dictionary mapping target names to the
+            prediction vectors.
         """
         accumulated_uas = 0.
         accumulated_las = 0.
@@ -955,8 +928,9 @@ class TurboParser(StructuredClassifier):
             instance = valid_data.instances[i]
             parts = valid_data.parts[i]
             gold_labels = valid_data.gold_labels[i]
+            inst_pred = valid_pred[i]
 
-            dep_prediction = valid_pred['dependency'][i]
+            dep_prediction = inst_pred['dependency']
             offset = parts.get_type_offset(Arc)
             num_arcs = parts.get_num_type(Arc)
             arcs = parts.get_parts_of_type(Arc)
@@ -973,15 +947,15 @@ class TurboParser(StructuredClassifier):
             total_tokens += real_length
 
             if not self.options.unlabeled:
-                gold_labels = instance.output.relations[1:]
+                deprel_gold = instance.output.relations[1:]
                 pred_labels = get_predicted_labels(pred_heads, parts)
-                label_hits = gold_labels == pred_labels
+                label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
             for target in self.additional_targets:
-                target_gold = gold_labels[target]
-                target_pred = valid_pred[target][i][:len(target_gold)]
+                target_gold = gold_labels[target][1:]
+                target_pred = inst_pred[target][:len(target_gold)]
                 hits = target_gold == target_pred
                 accumulated_tag_hits[target] += np.sum(hits)
 

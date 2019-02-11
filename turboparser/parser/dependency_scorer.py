@@ -21,7 +21,8 @@ class DependencyNeuralScorer(NeuralScorer):
             Each array is as long as its sentence.
         """
         def _compute_loss(target_gold, logits):
-            targets = self.pad_labels(target_gold)
+            # ignore root
+            targets = self.pad_labels(target_gold)[:, 1:]
 
             # cross_entropy expects (batch, n_classes, ...)
             logits = logits.transpose(1, 2)
@@ -46,7 +47,11 @@ class DependencyNeuralScorer(NeuralScorer):
             gold_parts, predicted_parts, None)
 
     def pad_labels(self, labels):
-        """Pad labels with -1 so that all of them have the same length"""
+        """
+        Pad labels with -1 so that all of them have the same length
+
+        :param labels: a list (batch) of lists of labels
+        """
         batch_size = len(labels)
         max_length = max(len(a) for a in labels)
         shape = [batch_size, max_length]
@@ -56,10 +61,22 @@ class DependencyNeuralScorer(NeuralScorer):
 
         return padded
 
-    def compute_tag_loss(self, scores, gold_output):
-        """Compute the loss for any tagging subtask"""
-        gold_output = self.pad_labels(gold_output)
-        return F.cross_entropy(scores, gold_output, reduction='none')
+    def compute_tag_loss(self, scores, gold_output,
+                         reduction='elementwise_mean'):
+        """Compute the loss for any tagging subtask
+
+        scores and gold_output may be either a batch or a single instance.
+        """
+        if isinstance(gold_output[0], list):
+            gold_output = self.pad_labels(gold_output)[:, 1:]
+            loss = F.cross_entropy(scores, gold_output, ignore_index=-1,
+                                   reduction=reduction)
+        else:
+            gold_output = torch.tensor(gold_output[1:], dtype=torch.long)
+            scores = torch.tensor(scores[:len(gold_output)])
+            loss = F.cross_entropy(scores, gold_output, reduction=reduction)
+
+        return loss
 
     def compute_scores(self, instances, parts):
         """

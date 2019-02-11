@@ -487,10 +487,7 @@ class StructuredClassifier(object):
             the list of predictions and the list of losses.
         """
         batch_index = 0
-        predictions = {self.structured_target: []}
-        for key in self.additional_targets:
-            predictions[key] = []
-
+        predictions = []
         losses = []
 
         while batch_index < len(instance_data):
@@ -503,9 +500,7 @@ class StructuredClassifier(object):
             else:
                 batch_predictions = result
 
-            for key in batch_predictions:
-                predictions[key].extend(batch_predictions[key])
-
+            predictions.extend(batch_predictions)
             batch_index = next_index
 
         if return_loss:
@@ -723,6 +718,8 @@ class StructuredClassifier(object):
             instance_data has the gold outputs) as a list of values
         :return: a list of arrays with the predicted outputs if return_loss is
             False. If it's True, a tuple with predictions and losses.
+            Each prediction is a dictionary mapping a target name to the
+            prediction vector.
         """
         self.eval_mode()
         if self.options.neural:
@@ -786,24 +783,32 @@ class StructuredClassifier(object):
 
         return predictions
 
-    def compute_loss_batch(self, gold_parts, predicted_parts, scores,
+    def compute_loss_batch(self, gold_parts, predictions, scores,
                            gold_labels):
         """
-        Compute a list with the loss for each instance.
+        Compute the loss for a batch of predicted parts and label scores.
 
-        :param gold_parts:
-        :param predicted_parts:
-        :param scores: dictionary mapping target names to arrays of scores
-        :param gold_labels: list of dictionaries with gold labels for each
-            instance
-        :return: list of losses
+        :param scores: a list of dictionaries mapping target names to scores
         """
-        losses = []
-        part_scores = self.get_parts_scores(scores)
-        for i, parts in enumerate(predicted_parts):
-            loss = self.decoder.compute_loss(gold_parts[i], parts,
-                                             part_scores[i])
-            losses.append(loss)
+        losses = np.zeros(len(gold_parts), np.float)
+
+        for i, inst_predictions in enumerate(predictions):
+            pred_parts = inst_predictions[self.structured_target]
+            inst_gold_parts = gold_parts[i]
+            inst_gold_labels = gold_labels[i]
+            inst_scores = scores[i]
+            inst_part_scores = self.get_parts_scores(inst_scores)
+            loss = self.decoder.compute_loss(inst_gold_parts, pred_parts,
+                                             inst_part_scores)
+            losses[i] = loss
+
+            for target in self.additional_targets:
+                target_scores = inst_scores[target]
+                gold_labels_target = inst_gold_labels[target]
+
+                target_losses = self.neural_scorer.compute_tag_loss(
+                    target_scores, gold_labels_target)
+                losses += np.array(target_losses)
 
         return losses
 
