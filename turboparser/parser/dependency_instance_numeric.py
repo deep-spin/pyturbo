@@ -97,6 +97,7 @@ class DependencyInstanceNumericInput(DependencyInstanceInput):
             # self.is_coord[i] = input.upos[i] in ['Conj', 'KON', 'conj',
             #                                      'Conjunction', 'CC', 'cc']
 
+
 #TODO: merge input and output in a single class
 class DependencyInstanceNumericOutput(DependencyInstanceOutput):
     def __init__(self, output, token_dictionary, relation_dictionary):
@@ -121,6 +122,7 @@ class DependencyInstanceNumericOutput(DependencyInstanceOutput):
                 tag = output.morph_singletons[i]
                 self.morph_singletons[i] = token_dictionary.\
                     get_morph_singleton_id(tag)
+
 
 class DependencyInstanceNumeric(DependencyInstance):
     '''An dependency parsing instance with numeric fields.'''

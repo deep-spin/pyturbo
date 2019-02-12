@@ -18,7 +18,6 @@ from .dependency_neural_model import DependencyNeuralModel
 import numpy as np
 import pickle
 import logging
-from sklearn.metrics import f1_score
 
 
 class ModelType(object):
@@ -917,12 +916,6 @@ class TurboParser(StructuredClassifier):
         accumulated_tag_hits = {target: 0.
                                 for target in self.additional_targets}
         total_tokens = 0
-
-        def count_tag_hits(gold, predicted, target_name):
-            gold_tags = gold_labels[target_name]
-            pred_tags = valid_pred['upos'][i]
-            hits = gold_tags == pred_tags
-            num_hits = np.sum(hits)
 
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]

@@ -291,7 +291,8 @@ class TokenDictionary(Dictionary):
 
         # Now adjust the cutoffs if necessary.
         for label, alphabet, counter, cutoff, max_length in \
-            zip(['char', 'form', 'form_lower', 'lemma', 'tag', 'morph_tag'],
+            zip(['char', 'form', 'form_lower', 'lemma', 'upos', 'xpos',
+                 'morph_tag', 'morph_singleton'],
                 [self.character_alphabet, self.form_alphabet,
                  self.form_lower_alphabet, self.lemma_alphabet,
                  self.upos_alphabet, self.xpos_alphabet,

@@ -87,6 +87,7 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
         if heads[1] == -1:
             output = None
         else:
-            output = DependencyInstanceOutput(heads, relations, upos)
+            output = DependencyInstanceOutput(heads, relations, upos, xpos,
+                                              morph_singletons)
 
         return DependencyInstance(input_, output)
