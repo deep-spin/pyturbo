@@ -42,7 +42,9 @@ class DependencyNeuralScorer(NeuralScorer):
             logits = self.model.scores[target]
             loss += _compute_loss(target_gold, logits)
 
-        loss.backward(retain_graph=True)
+        if loss > 0:
+            # TODO: a better way to skip backprop when there's no additional target
+            loss.backward(retain_graph=True)
         super(DependencyNeuralScorer, self).compute_gradients(
             gold_parts, predicted_parts, None)
 
@@ -58,6 +60,9 @@ class DependencyNeuralScorer(NeuralScorer):
         padded = torch.full(shape, -1, dtype=torch.long)
         for i in range(batch_size):
             padded[i, :len(labels[i])] = torch.tensor(labels[i])
+
+        if torch.cuda.is_available():
+            padded = padded.cuda()
 
         return padded
 
@@ -90,11 +95,13 @@ class DependencyNeuralScorer(NeuralScorer):
 
         model_scores = self.model(instances, parts)
         self.part_scores = model_scores['dependency']
+        numpy_scores = {target: model_scores[target].detach().cpu().numpy()
+                        for target in model_scores}
 
         score_list = []
         for i in range(len(self.part_scores)):
-            instance_scores = {target: model_scores[target][i].detach().numpy()
-                               for target in model_scores}
+            instance_scores = {target: numpy_scores[target][i]
+                               for target in numpy_scores}
             score_list.append(instance_scores)
 
         return score_list
