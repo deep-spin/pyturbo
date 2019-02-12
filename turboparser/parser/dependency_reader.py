@@ -1,6 +1,5 @@
 from ..classifier.reader import AuxiliaryReader, Reader
-from .dependency_instance import DependencyInstance, \
-    DependencyInstanceInput, DependencyInstanceOutput, MultiwordSpan
+from .dependency_instance import DependencyInstance, MultiwordSpan
 
 
 class DependencyReader(Reader):
@@ -81,13 +80,9 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
                         'Invalid value of head (%d) not in range [1..%d]'
                         % (heads[i], length))
             relations[i] = info[7]
-        input_ = DependencyInstanceInput(forms, lemmas, upos, xpos,
-                                         morph_tags, morph_singletons,
-                                         multiwords)
-        if heads[1] == -1:
-            output = None
-        else:
-            output = DependencyInstanceOutput(heads, relations, upos, xpos,
-                                              morph_singletons)
 
-        return DependencyInstance(input_, output)
+        instance = DependencyInstance(forms, lemmas, upos, xpos, morph_tags,
+                                      morph_singletons, heads, relations,
+                                      multiwords)
+
+        return instance

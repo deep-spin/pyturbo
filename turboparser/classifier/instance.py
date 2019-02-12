@@ -16,8 +16,8 @@ class InstanceData(object):
     def __init__(self, instances, parts, features=None, gold_parts=None,
                  gold_labels=None):
         """
-        :param instances: a list of Instance objects
-        :type instances: list[Instance]
+        :param instances: a list of instances
+        :type instances: list
         :param parts: a list of the parts of each instance
         :type parts: list
         :param gold_parts: list of numpy arrays with gold labels (1 and 0)

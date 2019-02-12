@@ -7,7 +7,6 @@ from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
     make_score_matrix
 from .dependency_scorer import DependencyNeuralScorer
 from .dependency_dictionary import DependencyDictionary
-from .dependency_instance import DependencyInstanceOutput
 from .dependency_instance_numeric import DependencyInstanceNumeric
 from .token_dictionary import TokenDictionary
 from .dependency_parts import DependencyParts, Arc, LabeledArc, Grandparent, \
@@ -159,7 +158,7 @@ class TurboParser(StructuredClassifier):
             self.additional_targets.append('xpos')
 
     def save(self, model_path=None):
-        '''Save the full configuration and model.'''
+        """Save the full configuration and model."""
         if not model_path:
             model_path = self.options.model_path
         with open(model_path, 'wb') as f:
@@ -188,7 +187,7 @@ class TurboParser(StructuredClassifier):
                 self.neural_scorer.model.save(f)
 
     def load(self, model_path=None):
-        '''Load the full configuration and model.'''
+        """Load the full configuration and model."""
         if not model_path:
             model_path = self.options.model_path
         with open(model_path, 'rb') as f:
@@ -457,7 +456,7 @@ class TurboParser(StructuredClassifier):
 
         if self.options.train:
             for m in range(1, len(instance)):
-                h = instance.output.heads[m]
+                h = instance.heads[m]
                 if new_parts.find_arc_index(h, m) < 0:
                     new_parts.append(Arc(h, m), 1)
 
@@ -468,7 +467,7 @@ class TurboParser(StructuredClassifier):
                     # also add all labels if doing labeled parsing
                     if not self.options.unlabeled:
                         for label in range(self.dictionary.get_num_labels()):
-                            if instance.output.relations[m] == label:
+                            if instance.relations[m] == label:
                                 gold = 1
                             else:
                                 gold = 0
@@ -486,7 +485,6 @@ class TurboParser(StructuredClassifier):
         num_arcs = 0
         num_tokens = 0
         num_possible_arcs = 0
-        output_available = instances[0].output is not None
 
         for instance, inst_parts in zip(instances, parts):
             inst_len = len(instance)
@@ -499,7 +497,7 @@ class TurboParser(StructuredClassifier):
                     r = inst_parts.find_arc_index(h, m)
                     if r < 0:
                         # pruned
-                        if output_available and instance.output.heads[m] == h:
+                        if self.options.train and instance.heads[m] == h:
                             self.pruner_mistakes += 1
                         continue
 
@@ -512,7 +510,7 @@ class TurboParser(StructuredClassifier):
               (num_arcs, num_possible_arcs, num_arcs / num_possible_arcs)
         logging.info(msg)
 
-        if output_available:
+        if self.options.train:
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
@@ -583,7 +581,7 @@ class TurboParser(StructuredClassifier):
             pruned.
         :type parts: DependencyParts
         """
-        make_gold = instance.output is not None
+        make_gold = self.options.train
 
         for h in range(len(instance)):
 
@@ -595,7 +593,7 @@ class TurboParser(StructuredClassifier):
                     # pruned out
                     continue
 
-                gold_hm = m == h or _check_gold_arc(instance, h, m)
+                gold_hm = m == h or self._check_gold_arc(instance, h, m)
                 arc_between = False
 
                 # when s = length, it signals that m encodes the last child
@@ -606,7 +604,7 @@ class TurboParser(StructuredClassifier):
 
                     if make_gold:
                         gold_hs = s == len(instance) or \
-                                    _check_gold_arc(instance, h, s)
+                                    self._check_gold_arc(instance, h, s)
 
                         if gold_hm and gold_hs and not arc_between:
                             gold = 1
@@ -623,7 +621,7 @@ class TurboParser(StructuredClassifier):
                     # pruned out
                     continue
 
-                gold_hm = m == h or _check_gold_arc(instance, h, m)
+                gold_hm = m == h or self._check_gold_arc(instance, h, m)
                 arc_between = False
 
                 # when s = 0, it signals that m encoded the leftmost child
@@ -633,7 +631,8 @@ class TurboParser(StructuredClassifier):
                         continue
 
                     if make_gold:
-                        gold_hs = s == -1 or _check_gold_arc(instance, h, s)
+                        gold_hs = s == -1 or self._check_gold_arc(instance,
+                                                                  h, s)
 
                         if gold_hm and gold_hs and not arc_between:
                             gold = 1
@@ -654,7 +653,7 @@ class TurboParser(StructuredClassifier):
         :param instance: DependencyInstance
         :param parts: DependencyParts, already pruned
         """
-        make_gold = instance.output is not None
+        make_gold = self.options.train
 
         for g in range(len(instance)):
             for h in range(1, len(instance)):
@@ -665,7 +664,7 @@ class TurboParser(StructuredClassifier):
                     # pruned
                     continue
 
-                gold_gh = _check_gold_arc(instance, g, h)
+                gold_gh = self._check_gold_arc(instance, g, h)
 
                 # check modifiers to the right
                 for m in range(h, len(instance)):
@@ -673,7 +672,7 @@ class TurboParser(StructuredClassifier):
                         # pruned; h == m signals first child
                         continue
 
-                    gold_hm = m == h or _check_gold_arc(instance, h, m)
+                    gold_hm = m == h or self._check_gold_arc(instance, h, m)
                     arc_between = False
 
                     for s in range(m + 1, len(instance) + 1):
@@ -682,7 +681,7 @@ class TurboParser(StructuredClassifier):
                             continue
 
                         gold_hs = s == len(instance) or \
-                            _check_gold_arc(instance, h, s)
+                            self._check_gold_arc(instance, h, s)
 
                         if make_gold:
                             gold = 0
@@ -703,7 +702,7 @@ class TurboParser(StructuredClassifier):
                         # pruned; h == m signals last child
                         continue
 
-                    gold_hm = m == h or _check_gold_arc(instance, h, m)
+                    gold_hm = m == h or self._check_gold_arc(instance, h, m)
                     arc_between = False
 
                     for s in range(m - 1, -2, -1):
@@ -711,7 +710,8 @@ class TurboParser(StructuredClassifier):
                             # pruned out
                             continue
 
-                        gold_hs = s == -1 or _check_gold_arc(instance, h, s)
+                        gold_hs = s == -1 or self._check_gold_arc(instance,
+                                                                  h, s)
                         if make_gold:
                             gold = 0
                             if gold_hm and gold_hs and not arc_between:
@@ -736,7 +736,7 @@ class TurboParser(StructuredClassifier):
             pruned.
         :type parts: DependencyParts
         """
-        make_gold = instance.output is not None
+        make_gold = self.options.train
 
         for g in range(len(instance)):
             for h in range(1, len(instance)):
@@ -747,7 +747,7 @@ class TurboParser(StructuredClassifier):
                     # the arc g -> h has been pruned out
                     continue
 
-                gold_gh = _check_gold_arc(instance, g, h)
+                gold_gh = self._check_gold_arc(instance, g, h)
 
                 for m in range(1, len(instance)):
                     if h == m:
@@ -777,7 +777,7 @@ class TurboParser(StructuredClassifier):
         :param parts: DependencyParts
         :type parts: DependencyParts
         """
-        make_gold = instance.output is not None
+        make_gold = self.options.train
 
         for h in range(len(instance)):
             for m in range(1, len(instance)):
@@ -836,7 +836,7 @@ class TurboParser(StructuredClassifier):
 
             If `instances` doesn't have the attribute `output`, return None.
         """
-        make_gold = instance.output is not None
+        make_gold = self.options.train
 
         for h in range(len(instance)):
             for m in range(1, len(instance)):
@@ -928,7 +928,7 @@ class TurboParser(StructuredClassifier):
             num_arcs = parts.get_num_type(Arc)
             arcs = parts.get_parts_of_type(Arc)
             arc_scores = dep_prediction[offset:offset + num_arcs]
-            gold_heads = instance.output.heads[1:]
+            gold_heads = instance.heads[1:]
 
             score_matrix = make_score_matrix(len(instance), arcs, arc_scores)
             pred_heads = chu_liu_edmonds(score_matrix)[1:]
@@ -940,7 +940,7 @@ class TurboParser(StructuredClassifier):
             total_tokens += real_length
 
             if not self.options.unlabeled:
-                deprel_gold = instance.output.relations[1:]
+                deprel_gold = instance.relations[1:]
                 pred_labels = get_predicted_labels(pred_heads, parts)
                 label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
@@ -980,6 +980,24 @@ class TurboParser(StructuredClassifier):
                 self._should_save = False
 
         self.neural_scorer.lr_scheduler_step(acc)
+
+    def _check_gold_arc(self, instance, head, modifier):
+        """
+        Auxiliar function to check whether there is an arc from head to
+        modifier in the gold output in instance.
+
+        If instance has no gold output, return False.
+
+        :param instance: a DependencyInstance
+        :param head: integer, index of the head
+        :param modifier: integer
+        :return: boolean
+        """
+        if not self.options.train:
+            return False
+        if instance.get_head(modifier) == head:
+            return True
+        return False
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
@@ -1060,7 +1078,7 @@ class TurboParser(StructuredClassifier):
         super(TurboParser, self).begin_evaluation()
 
     def end_evaluation(self, num_instances):
-        #TODO: evaluation that takes into account parsing and POS tagging
+        # TODO: evaluation that takes into account parsing and POS tagging
         # super(TurboParser, self).end_evaluation(num_instances)
         pass
 
@@ -1083,10 +1101,6 @@ class TurboParser(StructuredClassifier):
             predictions
         :return:
         """
-        heads = [-1 for i in range(len(instance))]
-        relations = ['NULL' for i in range(len(instance))]
-        tags = ['NULL' for i in range(len(instance))]
-        instance.output = DependencyInstanceOutput(heads, relations, tags)
         root = -1
         root_score = -1
 
@@ -1100,7 +1114,7 @@ class TurboParser(StructuredClassifier):
         heads = chu_liu_edmonds(score_matrix)
 
         for m, h in enumerate(heads):
-            instance.output.heads[m] = h
+            instance.heads[m] = h
             if h == 0:
                 index = parts.find_arc_index(h, m)
                 score = dep_output[index]
@@ -1110,12 +1124,12 @@ class TurboParser(StructuredClassifier):
                     if score > root_score:
                         # this token is better scored for root
                         # attach the previous root candidate to it
-                        instance.output.heads[root] = m
+                        instance.heads[root] = m
                         root = m
                         root_score = score
                     else:
                         # attach it to the other root
-                        instance.output.heads[m] = root
+                        instance.heads[m] = root
                 else:
                     root = m
                     root_score = score
@@ -1124,52 +1138,33 @@ class TurboParser(StructuredClassifier):
                 index = parts.find_arc_index(h, m) - offset
                 label = parts.best_labels[index]
                 label_name = self.dictionary.get_relation_name(label)
-                instance.output.relations[m] = label_name
+                instance.relations[m] = label_name
 
             if m > 0:
                 if self.options.predict_upos:
                     tag = output['upos'][m - 1]
                     tag_name = self.token_dictionary.\
                         upos_alphabet.get_label_name(tag)
-                    instance.output.upos[m] = tag_name
+                    instance.upos[m] = tag_name
                 if self.options.predict_xpos:
                     tag = output['xpos'][m - 1]
                     tag_name = self.token_dictionary.\
                         xpos_alphabet.get_label_name(tag)
-                    instance.output.xpos[m] = tag_name
+                    instance.xpos[m] = tag_name
                 if self.options.predict_morph:
                     tag = output['morph'][m - 1]
                     tag_name = self.token_dictionary.\
                         morph_singleton_alphabet.get_label_name(tag)
-                    instance.output.morph_singletons[m] = tag_name
+                    instance.morph_singletons[m] = tag_name
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):
             if instance.get_head(m) < 0:
                 logging.info('Word without head.')
-                instance.output.heads[m] = root
+                instance.heads[m] = root
                 if not self.options.unlabeled:
-                    instance.output.relations[m] = \
+                    instance.relations[m] = \
                         self.dictionary.get_relation_name(0)
-
-
-def _check_gold_arc(instance, head, modifier):
-    """
-    Auxiliar function to check whether there is an arc from head to
-    modifier in the gold output in instance.
-
-    If instance has no gold output, return False.
-
-    :param instance: a DependencyInstance
-    :param head: integer, index of the head
-    :param modifier: integer
-    :return: boolean
-    """
-    if instance.output is None:
-        return False
-    if instance.get_head(modifier) == head:
-        return True
-    return False
 
 
 def get_naive_metrics(predicted, gold_output, parts, length):
