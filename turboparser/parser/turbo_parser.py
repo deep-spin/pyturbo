@@ -198,7 +198,6 @@ class TurboParser(StructuredClassifier):
             self.options.model_type = model_options.model_type
             self.options.unlabeled = model_options.unlabeled
             self.options.projective = model_options.projective
-            self.options.predict_tags = model_options.predict_tags
 
             # prune arcs with label/head POS/modifier POS unseen in training
             self.options.prune_relations = model_options.prune_relations
