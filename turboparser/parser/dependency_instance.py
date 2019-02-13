@@ -1,6 +1,3 @@
-from ..classifier.instance import Instance
-
-
 class MultiwordSpan(object):
     """
     Class for storing a multiword token, including its text form and text span.
@@ -23,74 +20,61 @@ class MultiwordSpan(object):
         self.form = form
 
 
-class DependencyInstanceInput(object):
+class DependencyInstance():
+    '''An dependency parsing instance.'''
     def __init__(self, forms, lemmas, upos, xpos, morph_tags, morph_singletons,
-                 multiwords):
+                 heads, relations, multiwords):
         self.forms = forms
         self.lemmas = lemmas
         self.upos = upos
         self.xpos = xpos
         self.morph_tags = morph_tags
         self.morph_singletons = morph_singletons
-        self.multiwords = multiwords
-
-
-class DependencyInstanceOutput(object):
-    def __init__(self, heads, relations, upos=None, xpos=None,
-                 morph_singletons=None):
         self.heads = heads
         self.relations = relations
-        self.upos = upos
-        self.xpos = xpos
-        self.morph_singletons = morph_singletons
-
-
-class DependencyInstance(Instance):
-    '''An dependency parsing instance.'''
-    def __init__(self, input, output=None):
-        Instance.__init__(self, input, output)
+        self.multiwords = multiwords
 
     def __len__(self):
-        return len(self.input.forms)
+        return len(self.forms)
 
     def get_form(self, i):
-        return self.input.forms[i]
+        return self.forms[i]
 
     def get_lemma(self, i):
-        return self.input.lemmas[i]
+        return self.lemmas[i]
 
     def get_upos(self, i):
-        return self.input.upos[i]
+        return self.upos[i]
 
     def get_all_upos(self):
-        return self.input.upos
+        return self.upos
 
     def get_xpos(self, i):
-        return self.input.xpos[i]
+        return self.xpos[i]
 
     def get_all_xpos(self):
-        return self.input.xpos
+        return self.xpos
 
     def get_all_morph_singletons(self):
-        return self.input.morph_singletons
+        return self.morph_singletons
 
     def get_num_morph_tags(self, i):
-        return len(self.input.morph_tags[i])
+        return len(self.morph_tags[i])
 
     def get_morph_tag(self, i, j):
         """
         Return the j-th morphological attribute of the i-th word
         """
-        return self.input.morph_tags[i][j]
+        return self.morph_tags[i][j]
 
     def get_morph_singleton(self, i):
         """
         Return the singleton morphological data of the i-th word
         """
-        return self.input.morph_singletons[i]
+        return self.morph_singletons[i]
 
     def get_head(self, i):
-        return self.output.heads[i]
+        return self.heads[i]
 
     def get_relation(self, i):
-        return self.output.relations[i]
+        return self.relations[i]
