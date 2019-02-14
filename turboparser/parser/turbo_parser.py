@@ -359,12 +359,14 @@ class TurboParser(StructuredClassifier):
         :return: dict
         """
         gold_dict = {}
+
+        # [1:] to skip root symbol
         if self.options.predict_upos:
-            gold_dict['upos'] = instance.get_all_upos()
+            gold_dict['upos'] = instance.get_all_upos()[1:]
         if self.options.predict_xpos:
-            gold_dict['xpos'] = instance.get_all_xpos()
+            gold_dict['xpos'] = instance.get_all_xpos()[1:]
         if self.options.predict_morph:
-            gold_dict['morph'] = instance.get_all_morph_singletons()
+            gold_dict['morph'] = instance.get_all_morph_singletons()[1:]
 
         return gold_dict
 
@@ -951,7 +953,7 @@ class TurboParser(StructuredClassifier):
                 accumulated_las += np.sum(label_head_hits)
 
             for target in self.additional_targets:
-                target_gold = gold_labels[target][1:]
+                target_gold = gold_labels[target]
                 target_pred = inst_pred[target][:len(target_gold)]
                 hits = target_gold == target_pred
                 accumulated_tag_hits[target] += np.sum(hits)
@@ -1115,9 +1117,9 @@ class TurboParser(StructuredClassifier):
         arcs = parts.get_parts_of_type(Arc)
         scores = dep_output[offset:offset + num_arcs]
         score_matrix = make_score_matrix(len(instance), arcs, scores)
-        heads = chu_liu_edmonds(score_matrix)
+        heads = chu_liu_edmonds(score_matrix)[1:]
 
-        for m, h in enumerate(heads):
+        for m, h in enumerate(heads, 1):
             instance.heads[m] = h
             if h == 0:
                 index = parts.find_arc_index(h, m)
@@ -1144,22 +1146,22 @@ class TurboParser(StructuredClassifier):
                 label_name = self.dictionary.get_relation_name(label)
                 instance.relations[m] = label_name
 
-            if m > 0:
-                if self.options.predict_upos:
-                    tag = output['upos'][m - 1]
-                    tag_name = self.token_dictionary.\
-                        upos_alphabet.get_label_name(tag)
-                    instance.upos[m] = tag_name
-                if self.options.predict_xpos:
-                    tag = output['xpos'][m - 1]
-                    tag_name = self.token_dictionary.\
-                        xpos_alphabet.get_label_name(tag)
-                    instance.xpos[m] = tag_name
-                if self.options.predict_morph:
-                    tag = output['morph'][m - 1]
-                    tag_name = self.token_dictionary.\
-                        morph_singleton_alphabet.get_label_name(tag)
-                    instance.morph_singletons[m] = tag_name
+            if self.options.predict_upos:
+                # -1 because there's no tag for the root
+                tag = output['upos'][m - 1]
+                tag_name = self.token_dictionary.\
+                    upos_alphabet.get_label_name(tag)
+                instance.upos[m] = tag_name
+            if self.options.predict_xpos:
+                tag = output['xpos'][m - 1]
+                tag_name = self.token_dictionary.\
+                    xpos_alphabet.get_label_name(tag)
+                instance.xpos[m] = tag_name
+            if self.options.predict_morph:
+                tag = output['morph'][m - 1]
+                tag_name = self.token_dictionary.\
+                    morph_singleton_alphabet.get_label_name(tag)
+                instance.morph_singletons[m] = tag_name
 
         # assign words without heads to the root word
         for m in range(1, len(instance)):

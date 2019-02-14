@@ -21,8 +21,7 @@ class DependencyNeuralScorer(NeuralScorer):
             Each array is as long as its sentence.
         """
         def _compute_loss(target_gold, logits):
-            # ignore root
-            targets = self.pad_labels(target_gold)[:, 1:]
+            targets = self.pad_labels(target_gold)
 
             # cross_entropy expects (batch, n_classes, ...)
             logits = logits.transpose(1, 2)
@@ -73,11 +72,11 @@ class DependencyNeuralScorer(NeuralScorer):
         scores and gold_output may be either a batch or a single instance.
         """
         if isinstance(gold_output[0], list):
-            gold_output = self.pad_labels(gold_output)[:, 1:]
+            gold_output = self.pad_labels(gold_output)
             loss = F.cross_entropy(scores, gold_output, ignore_index=-1,
                                    reduction=reduction)
         else:
-            gold_output = torch.tensor(gold_output[1:], dtype=torch.long)
+            gold_output = torch.tensor(gold_output, dtype=torch.long)
             scores = torch.tensor(scores[:len(gold_output)])
             loss = F.cross_entropy(scores, gold_output, reduction=reduction)
 
