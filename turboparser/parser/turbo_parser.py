@@ -191,12 +191,17 @@ class TurboParser(StructuredClassifier):
         if not model_path:
             model_path = self.options.model_path
         with open(model_path, 'rb') as f:
+            # TODO: treat differently options inherent to the model vs execution
+            # options (file paths, single_root, etc)
             model_options = pickle.load(f)
 
             self.options.neural = model_options.neural
             self.options.model_type = model_options.model_type
             self.options.unlabeled = model_options.unlabeled
             self.options.projective = model_options.projective
+            self.options.predict_morph = model_options.predict_morph
+            self.options.predict_xpos = model_options.predict_xpos
+            self.options.predict_upos = model_options.predict_upos
 
             # prune arcs with label/head POS/modifier POS unseen in training
             self.options.prune_relations = model_options.prune_relations

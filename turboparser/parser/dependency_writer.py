@@ -16,7 +16,7 @@ class DependencyWriter(Writer):
 
     def write(self, instance):
         # keep track of multiword tokens
-        multiwords = instance.input.multiwords
+        multiwords = instance.multiwords
         multiword = multiwords[0] if len(multiwords) else None
         multiword_idx = 0
 
@@ -32,27 +32,14 @@ class DependencyWriter(Writer):
                 else:
                     multiword = multiwords[multiword_idx]
 
-            if instance.output.upos is not None:
-                upos = instance.output.upos
-            else:
-                upos = instance.input.upos
-
-            if instance.output.xpos is not None:
-                xpos = instance.output.xpos
-            else:
-                xpos = instance.input.xpos
-
-            if instance.output.morph_singletons is not None:
-                morph = instance.output.morph_singletons
-            else:
-                morph = instance.input.morph_singletons
-
             line = '\t'.join([str(i),
-                              instance.input.forms[i],
-                              instance.input.lemmas[i],
-                              upos[i], xpos[i], morph[i],
-                              str(instance.output.heads[i]),
-                              instance.output.relations[i],
+                              instance.forms[i],
+                              instance.lemmas[i],
+                              instance.upos[i],
+                              instance.xpos[i],
+                              instance.morph_singletons[i],
+                              str(instance.heads[i]),
+                              instance.relations[i],
                               '_', '_'],) + '\n'
             self.file.write(line)
         self.file.write('\n')
