@@ -3,6 +3,7 @@ import torch.nn as nn
 from .dependency_parts import Arc, DependencyParts, NextSibling, Grandparent, \
     GrandSibling, LabeledArc
 from .token_dictionary import TokenDictionary, UNKNOWN, PADDING
+from ..classifier.lstm import LSTM
 import numpy as np
 
 #TODO: maybe this should be elsewhere?
@@ -79,15 +80,9 @@ class DependencyNeuralModel(nn.Module):
             char_vocab = token_dictionary.get_num_characters()
             self.char_embeddings = nn.Embedding(char_vocab, char_embedding_size)
 
-            self.char_rnn = nn.LSTM(
-                input_size=char_embedding_size, hidden_size=char_embedding_size,
-                bidirectional=True, batch_first=True)
+            self.char_rnn = LSTM(
+                input_size=char_embedding_size, hidden_size=char_embedding_size)
             char_based_embedding_size = char_embedding_size
-
-            # shape is (num_directions, batch, num_units)
-            shape = (2, 1, char_embedding_size)
-            self.initial_char_rnn_h = nn.Parameter(torch.zeros(shape))
-            self.initial_char_rnn_c = nn.Parameter(torch.zeros(shape))
         else:
             self.char_embeddings = None
             self.char_rnn = None
@@ -131,16 +126,11 @@ class DependencyNeuralModel(nn.Module):
 
         input_size = self.word_embedding_size + total_tag_embedding_size + \
                      (2 * char_based_embedding_size)
-        self.rnn = nn.LSTM(
-            input_size=input_size,
-            hidden_size=rnn_size,
-            num_layers=rnn_layers,
-            dropout=dropout,
-            bidirectional=True,
-            batch_first=True)
-        shape = (rnn_layers * 2, 1, rnn_size)
-        self.initial_rnn_h = nn.Parameter(torch.zeros(shape))
-        self.initial_rnn_c = nn.Parameter(torch.zeros(shape))
+        self.rnn = LSTM(input_size=input_size, hidden_size=rnn_size,
+                        num_layers=rnn_layers, dropout=dropout)
+        self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
+        self.parser_rnn = LSTM(rnn_size, rnn_size, dropout=dropout)
+        self.tagger_rnn = LSTM(rnn_size, rnn_size, dropout=dropout)
         self.rnn_hidden_size = 2 * rnn_size
         self.tanh = nn.Tanh()
         self.relu = nn.ReLU()
@@ -658,14 +648,7 @@ class DependencyNeuralModel(nn.Module):
         embedded = self.char_embeddings(sorted_token_inds)
         packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lengths,
                                                    batch_first=True)
-        # initial states must be (num_directions * layer, batch, num_hidden)
-        inner_batch_size = len(sorted_lengths)
-        batch_initial_h = self.initial_char_rnn_h.expand(
-            -1, inner_batch_size, -1)
-        batch_initial_c = self.initial_char_rnn_c.expand(
-            -1, inner_batch_size, -1)
-        outputs, (last_output, cell) = self.char_rnn(
-            packed, (batch_initial_h, batch_initial_c))
+        outputs, (last_output, cell) = self.char_rnn(packed)
 
         # concatenate the last outputs of both directions
         last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
@@ -704,12 +687,7 @@ class DependencyNeuralModel(nn.Module):
         # pack to account for variable lengths
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
             sorted_embeddings, sorted_lengths, batch_first=True)
-
-        # initial states must be (num_directions * layers, batch, num_units)
-        batch_initial_h = self.initial_rnn_h.expand(-1, batch_size, -1)
-        batch_initial_c = self.initial_rnn_c.expand(-1, batch_size, -1)
-        batch_packed_states, _ = self.rnn(
-            packed_embeddings, (batch_initial_h, batch_initial_c))
+        batch_packed_states, _ = self.rnn(packed_embeddings)
 
         # batch_states is (batch, num_tokens, hidden_size)
         batch_states, _ = nn.utils.rnn.pad_packed_sequence(
