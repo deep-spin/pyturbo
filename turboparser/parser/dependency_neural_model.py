@@ -83,6 +83,11 @@ class DependencyNeuralModel(nn.Module):
                 input_size=char_embedding_size, hidden_size=char_embedding_size,
                 bidirectional=True, batch_first=True)
             char_based_embedding_size = char_embedding_size
+
+            # shape is (num_directions, batch, num_units)
+            shape = (2, 1, char_embedding_size)
+            self.initial_char_rnn_h = nn.Parameter(torch.zeros(shape))
+            self.initial_char_rnn_c = nn.Parameter(torch.zeros(shape))
         else:
             self.char_embeddings = None
             self.char_rnn = None
@@ -133,6 +138,9 @@ class DependencyNeuralModel(nn.Module):
             dropout=dropout,
             bidirectional=True,
             batch_first=True)
+        shape = (rnn_layers * 2, 1, rnn_size)
+        self.initial_rnn_h = nn.Parameter(torch.zeros(shape))
+        self.initial_rnn_c = nn.Parameter(torch.zeros(shape))
         self.rnn_hidden_size = 2 * rnn_size
         self.tanh = nn.Tanh()
         self.relu = nn.ReLU()
@@ -607,17 +615,18 @@ class DependencyNeuralModel(nn.Module):
         :param instances:
         :return: a tensor with shape (batch, sequence, embedding size)
         """
+        batch_size = len(instances)
         token_lengths_ = [[len(inst.get_characters(i))
                            for i in range(len(inst))]
                           for inst in instances]
         max_token_length = max(max(inst_lengths)
                                for inst_lengths in token_lengths_)
 
-        shape = [len(instances), max_sentence_length]
+        shape = [batch_size, max_sentence_length]
         token_lengths = torch.zeros(shape, dtype=torch.long)
 
-        shape = [len(instances), max_sentence_length, max_token_length]
-        token_indices = torch.full(shape, 0, dtype=torch.long)
+        shape = [batch_size, max_sentence_length, max_token_length]
+        char_indices = torch.full(shape, 0, dtype=torch.long)
 
         for i, instance in enumerate(instances):
             token_lengths[i, :len(instance)] = torch.tensor(token_lengths_[i])
@@ -625,23 +634,23 @@ class DependencyNeuralModel(nn.Module):
             for j in range(len(instance)):
                 # each j is a token
                 chars = instance.get_characters(j)
-                token_indices[i, j, :len(chars)] = torch.tensor(chars)
+                char_indices[i, j, :len(chars)] = torch.tensor(chars)
 
-        # now we have a 3d matrix with token indices. let's reshape it to 2d,
+        # now we have a 3d matrix with char indices. let's reshape it to 2d,
         # stacking all tokens with no sentence separation
-        new_shape = [len(instances) * max_sentence_length, max_token_length]
-        token_indices = token_indices.view(new_shape)
+        new_shape = [batch_size * max_sentence_length, max_token_length]
+        char_indices = char_indices.view(new_shape)
         lengths1d = token_lengths.view(-1)
 
         # now order by descending length and keep track of the originals
         sorted_lengths, sorted_inds = lengths1d.sort(descending=True)
 
-        # we can't pass 0-length tensors to the LSTM
+        # we can't pass 0-length tensors to the LSTM (they're the padding)
         nonzero = sorted_lengths > 0
         sorted_lengths = sorted_lengths[nonzero]
         sorted_inds = sorted_inds[nonzero]
 
-        sorted_token_inds = token_indices[sorted_inds]
+        sorted_token_inds = char_indices[sorted_inds]
         if self.on_gpu:
             sorted_token_inds = sorted_token_inds.cuda()
 
@@ -649,18 +658,25 @@ class DependencyNeuralModel(nn.Module):
         embedded = self.char_embeddings(sorted_token_inds)
         packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lengths,
                                                    batch_first=True)
-        outputs, (last_output, cell) = self.char_rnn(packed)
+        # initial states must be (num_directions * layer, batch, num_hidden)
+        inner_batch_size = len(sorted_lengths)
+        batch_initial_h = self.initial_char_rnn_h.expand(
+            -1, inner_batch_size, -1)
+        batch_initial_c = self.initial_char_rnn_c.expand(
+            -1, inner_batch_size, -1)
+        outputs, (last_output, cell) = self.char_rnn(
+            packed, (batch_initial_h, batch_initial_c))
 
         # concatenate the last outputs of both directions
         last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
-        shape = [len(instances) * max_sentence_length,
+        shape = [batch_size * max_sentence_length,
                  2 * self.char_rnn.hidden_size]
         char_representation = torch.zeros(shape)
         if self.on_gpu:
             char_representation = char_representation.cuda()
         char_representation[sorted_inds] = last_output_bi
 
-        return char_representation.view([len(instances), max_sentence_length,
+        return char_representation.view([batch_size, max_sentence_length,
                                          -1])
 
     def forward(self, instances, parts):
@@ -689,8 +705,13 @@ class DependencyNeuralModel(nn.Module):
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
             sorted_embeddings, sorted_lengths, batch_first=True)
 
+        # initial states must be (num_directions * layers, batch, num_units)
+        batch_initial_h = self.initial_rnn_h.expand(-1, batch_size, -1)
+        batch_initial_c = self.initial_rnn_c.expand(-1, batch_size, -1)
+        batch_packed_states, _ = self.rnn(
+            packed_embeddings, (batch_initial_h, batch_initial_c))
+
         # batch_states is (batch, num_tokens, hidden_size)
-        batch_packed_states, _ = self.rnn(packed_embeddings)
         batch_states, _ = nn.utils.rnn.pad_packed_sequence(
             batch_packed_states, batch_first=True)
 
