@@ -13,8 +13,8 @@ class LSTM(nn.Module):
                             bidirectional=True, batch_first=True,
                             num_layers=num_layers, dropout=dropout)
 
-        # shape is (num_directions, batch, num_units)
-        shape = (2, 1, hidden_size)
+        # shape is (num_layers * num_directions, batch, num_units)
+        shape = (2 * num_layers, 1, hidden_size)
         self.initial_h = nn.Parameter(torch.zeros(shape))
         self.initial_c = nn.Parameter(torch.zeros(shape))
 
@@ -36,6 +36,6 @@ class LSTM(nn.Module):
         batch_size = x[1][0].item()
 
         # initial states must be (num_directions * layers, batch, num_units)
-        batch_initial_h = self.initial_h.expand(-1, batch_size, -1)
-        batch_initial_c = self.initial_c.expand(-1, batch_size, -1)
+        batch_initial_h = self.initial_h.expand(-1, batch_size, -1).contiguous()
+        batch_initial_c = self.initial_c.expand(-1, batch_size, -1).contiguous()
         return self.lstm(x, (batch_initial_h, batch_initial_c))
