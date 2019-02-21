@@ -454,7 +454,7 @@ class TurboParser(StructuredClassifier):
         :return: a new DependencyParts object contained the kept arcs
         """
         instance = self.pruner.format_instance(instance)
-        scores = self.pruner.compute_scores(instance, parts)[0]
+        scores = self.pruner.compute_scores(instance, parts)[0]['dependency']
         new_parts = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores,
             self.options.pruner_max_heads,
