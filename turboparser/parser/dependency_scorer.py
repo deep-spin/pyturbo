@@ -65,8 +65,7 @@ class DependencyNeuralScorer(NeuralScorer):
 
         return padded
 
-    def compute_tag_loss(self, scores, gold_output,
-                         reduction='elementwise_mean'):
+    def compute_tag_loss(self, scores, gold_output, reduction='mean'):
         """Compute the loss for any tagging subtask
 
         scores and gold_output may be either a batch or a single instance.
