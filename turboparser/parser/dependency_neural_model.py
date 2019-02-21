@@ -71,6 +71,7 @@ class DependencyNeuralModel(nn.Module):
         self.predict_upos = predict_upos
         self.predict_xpos = predict_xpos
         self.predict_morph = predict_morph
+        self.predict_tags = predict_upos or predict_xpos or predict_morph
 
         word_embeddings = torch.tensor(word_embeddings, dtype=torch.float32)
         self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings,
@@ -128,7 +129,8 @@ class DependencyNeuralModel(nn.Module):
                      (2 * char_based_embedding_size)
         self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
         self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
-        self.tagger_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
+        if self.predict_tags:
+            self.tagger_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         self.rnn_hidden_size = 2 * rnn_size
         self.tanh = nn.Tanh()
         self.relu = nn.ReLU()
@@ -666,6 +668,7 @@ class DependencyNeuralModel(nn.Module):
         :param parts: a list of DependencyParts objects
         :return: a score matrix with shape (num_instances, longest_length)
         """
+        self.scores = {}
         batch_size = len(instances)
         lengths = torch.tensor([len(instance) for instance in instances],
                                dtype=torch.long)
@@ -687,30 +690,32 @@ class DependencyNeuralModel(nn.Module):
             sorted_embeddings, sorted_lengths, batch_first=True)
         shared_states, _ = self.shared_rnn(packed_embeddings)
         parser_packed_states, _ = self.parser_rnn(shared_states)
-        tagger_packed_states, _ = self.tagger_rnn(shared_states)
 
         # batch_states is (batch, num_tokens, hidden_size)
         parser_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
             parser_packed_states, batch_first=True)
-        tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
-            tagger_packed_states, batch_first=True)
 
         # return to the original ordering
         parser_batch_states = parser_batch_states[rev_inds]
-        tagger_batch_states = tagger_batch_states[rev_inds]
-        self.scores = {}
-        if self.predict_upos:
-            # ignore root
-            hidden = self.upos_mlp(tagger_batch_states[:, 1:])
-            self.scores['upos'] = self.upos_scorer(hidden)
 
-        if self.predict_xpos:
-            hidden = self.xpos_mlp(tagger_batch_states[:, 1:])
-            self.scores['xpos'] = self.xpos_scorer(hidden)
+        if self.predict_tags:
+            tagger_packed_states, _ = self.tagger_rnn(shared_states)
+            tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
+                tagger_packed_states, batch_first=True)
+            tagger_batch_states = tagger_batch_states[rev_inds]
+            
+            if self.predict_upos:
+                # ignore root
+                hidden = self.upos_mlp(tagger_batch_states[:, 1:])
+                self.scores['upos'] = self.upos_scorer(hidden)
 
-        if self.predict_morph:
-            hidden = self.morph_mlp(tagger_batch_states[:, 1:])
-            self.scores['morph'] = self.morph_scorer(hidden)
+            if self.predict_xpos:
+                hidden = self.xpos_mlp(tagger_batch_states[:, 1:])
+                self.scores['xpos'] = self.xpos_scorer(hidden)
+
+            if self.predict_morph:
+                hidden = self.morph_mlp(tagger_batch_states[:, 1:])
+                self.scores['morph'] = self.morph_scorer(hidden)
 
         # now go through each batch item
         for i in range(batch_size):
