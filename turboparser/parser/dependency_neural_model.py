@@ -210,6 +210,14 @@ class DependencyNeuralModel(nn.Module):
         # Clear out the gradients before the next batch.
         self.zero_grad()
 
+    def _packed_dropout(self, states):
+        """Apply dropout to packed states"""
+        # shared_states is a packed tuple; (data, lengths)
+        states_data, states_lengths = states
+        states_data = self.dropout(states_data)
+        states = nn.utils.rnn.PackedSequence(states_data, states_lengths)
+        return states
+
     def _create_parameter_tensor(self, shape=None):
         """
         Create a tensor for representing some special token. It is included in
@@ -689,6 +697,8 @@ class DependencyNeuralModel(nn.Module):
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
             sorted_embeddings, sorted_lengths, batch_first=True)
         shared_states, _ = self.shared_rnn(packed_embeddings)
+        shared_states = self._packed_dropout(shared_states)
+
         parser_packed_states, _ = self.parser_rnn(shared_states)
 
         # batch_states is (batch, num_tokens, hidden_size)
@@ -703,7 +713,7 @@ class DependencyNeuralModel(nn.Module):
             tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
                 tagger_packed_states, batch_first=True)
             tagger_batch_states = tagger_batch_states[rev_inds]
-            
+
             if self.predict_upos:
                 # ignore root
                 hidden = self.upos_mlp(tagger_batch_states[:, 1:])
@@ -741,3 +751,5 @@ class DependencyNeuralModel(nn.Module):
         self.scores['dependency'] = dependency_scores
 
         return self.scores
+
+
