@@ -11,7 +11,9 @@ def main():
 
     random.seed(6)
     torch.manual_seed(6)
+    torch.cuda.manual_seed(6)
     np.random.seed(6)
+    torch.backends.cudnn.deterministic = True
 
     # Parse arguments.
     parser = DependencyOptionParser()
