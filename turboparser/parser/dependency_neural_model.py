@@ -557,6 +557,7 @@ class DependencyNeuralModel(nn.Module):
 
         # each embedding tensor is (batch, num_tokens, embedding_size)
         embeddings = torch.cat(all_embeddings, dim=2)
+        embeddings = self.dropout(embeddings)
 
         return embeddings
 
