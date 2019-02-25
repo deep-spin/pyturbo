@@ -329,7 +329,9 @@ class TokenDictionary(Dictionary):
         # update the embedding vocabulary with new words found in training data
         dataset_words = self.form_alphabet.keys()
         embedding_words = self.embedding_alphabet.keys()
-        new_words = dataset_words - embedding_words
+
+        # get a deterministic ordering
+        new_words = sorted(dataset_words - embedding_words)
         for new_word in new_words:
             self.embedding_alphabet.insert(new_word)
         self.embedding_alphabet.stop_growth()
