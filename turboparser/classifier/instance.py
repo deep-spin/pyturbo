@@ -45,10 +45,18 @@ class InstanceData(object):
     def __len__(self):
         return len(self.instances)
 
-    def shuffle(self):
+    def sort_by_size(self, descending=False):
         """
-        Shuffle the data stored by this object.
+        Sort the instances in-place from longest to shortest (or the opposite if
+        descending is True).
         """
+        zipped = self._zip_data()
+        sorted_data = sorted(zipped, key=lambda x: len(x[0]),
+                             reverse=descending)
+        self._unzip_data(sorted_data)
+
+    def _zip_data(self):
+        """Auxiliary internal function"""
         # zip the attributes together so they are shuffled in the same order
         data = [self.instances, self.parts]
         if self.features is not None:
@@ -59,10 +67,12 @@ class InstanceData(object):
             data.append(self.gold_labels)
 
         zipped = list(zip(*data))
-        random.shuffle(zipped)
-        shuffled_data = zip(*zipped)
+        return zipped
 
-        it = iter(shuffled_data)
+    def _unzip_data(self, zipped_data):
+        """Auxiliary internal function"""
+        unzipped_data = zip(*zipped_data)
+        it = iter(unzipped_data)
 
         self.instances = list(next(it))
         self.parts = list(next(it))
@@ -72,3 +82,11 @@ class InstanceData(object):
             self.gold_parts = list(next(it))
         if self.gold_labels is not None:
             self.gold_labels = list(next(it))
+
+    def shuffle(self):
+        """
+        Shuffle the data stored by this object.
+        """
+        zipped = self._zip_data()
+        random.shuffle(zipped)
+        self._unzip_data(zipped)

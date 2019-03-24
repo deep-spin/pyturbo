@@ -215,6 +215,7 @@ class StructuredClassifier(object):
         train_instances, valid_instances = self.read_train_instances()
         train_data = self.make_parts_batch(train_instances)
         valid_data = self.make_parts_batch(valid_instances)
+        train_data.sort_by_size()
         self.parameters = Parameters(use_average=self.options.use_averaging)
         self._reset_best_validation_metric()
         self.lambda_coeff = 1.0 / (self.options.regularization_constant *
@@ -546,7 +547,6 @@ class StructuredClassifier(object):
         self.dictionary.stop_growth()
 
         t = len(train_data) * epoch
-        train_data.shuffle()
         batch_index = 0
         batch_size = self.options.batch_size
         while batch_index < len(train_data):
