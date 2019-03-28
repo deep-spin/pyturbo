@@ -626,7 +626,7 @@ def _populate_structure_list(left_list, right_list, parts, scores,
 def make_score_matrix(length, arcs, scores):
     """
     Makes a score matrix from an array of scores ordered in the same way as a
-    list of DependencyPartArcs. Positions [h, m] corresponding to non-existing
+    list of DependencyPartArcs. Positions [m, h] corresponding to non-existing
     arcs have score of -inf.
 
     :param length: length of the sentence, including the root pseudo-token
@@ -639,7 +639,7 @@ def make_score_matrix(length, arcs, scores):
     for arc, score in zip(arcs, scores):
         h = arc.head
         m = arc.modifier
-        score_matrix[h, m] = score
+        score_matrix[m, h] = score
 
     return score_matrix
 
@@ -648,165 +648,137 @@ def chu_liu_edmonds(score_matrix):
     """
     Run the Chu-Liu-Edmonds' algorithm to find the maximum spanning tree.
 
-    :param score_matrix: a matrix such that cell [h, m] has the score for the
-        arc (h, m).
+    :param score_matrix: a matrix such that cell [m, h] has the score for the
+        arc (m, h).
     :return: an array heads, such that heads[m] contains the head of token m.
         The root is in position 0 and has head -1.
     """
-    while True:
-        # pick the highest score head for each modifier
-        heads = score_matrix.argmax(0)
+    # avoid loops to self
+    np.fill_diagonal(score_matrix, -np.inf)
 
-        # find and solve cycles
-        cycle = find_cycle(heads)
+    # head doesn't point to anything
+    score_matrix[0] = -np.inf
+    score_matrix[0, 0] = 0
 
-        if cycle is None:
-            break
-        solve_cycle(heads, cycle, score_matrix)
+    # pick the highest score head for each modifier and look for cycles
+    heads = score_matrix.argmax(1)
+    cycles = tarjan(heads)
 
-    # set the head of the root pseudo token to -1
-    heads[0] = -1
+    if cycles:
+        # t = len(tree); c = len(cycle); n = len(noncycle)
+        # locations of cycle; (t) in [0,1]
+        cycle = cycles.pop()
+        # indices of cycle in original tree; (c) in t
+        cycle_locs = np.where(cycle)[0]
+        # heads of cycle in original tree; (c) in t
+        cycle_subtree = heads[cycle]
+        # scores of cycle in original tree; (c) in R
+        cycle_scores = score_matrix[cycle, cycle_subtree]
+        # total score of cycle; () in R
+        cycle_score = cycle_scores.sum()
+
+        # locations of noncycle; (t) in [0,1]
+        noncycle = np.logical_not(cycle)
+        # indices of noncycle in original tree; (n) in t
+        noncycle_locs = np.where(noncycle)[0]
+
+        # scores of cycle's potential heads; (c x n) - (c) + () -> (n x c) in R
+        metanode_head_scores = score_matrix[cycle][:, noncycle] - \
+            cycle_scores[:, None] + cycle_score
+        # scores of cycle's potential dependents; (n x c) in R
+        metanode_dep_scores = score_matrix[noncycle][:,cycle]
+        # best noncycle head for each cycle dependent; (n) in c
+        metanode_heads = np.argmax(metanode_head_scores, axis=0)
+        # best cycle head for each noncycle dependent; (n) in c
+        metanode_deps = np.argmax(metanode_dep_scores, axis=1)
+
+        # scores of noncycle graph; (n x n) in R
+        subscores = score_matrix[noncycle][:,noncycle]
+        # pad to contracted graph; (n+1 x n+1) in R
+        subscores = np.pad(subscores, ((0, 1), (0, 1)), 'constant')
+        # set the contracted graph scores of cycle's potential heads;
+        # (c x n)[:, (n) in n] in R -> (n) in R
+        subscores[-1, :-1] = metanode_head_scores[metanode_heads,
+                                                  np.arange(len(noncycle_locs))]
+        # set the contracted graph scores of cycle's potential dependents;
+        # (n x c)[(n) in n] in R-> (n) in R
+        subscores[:-1, -1] = metanode_dep_scores[np.arange(len(noncycle_locs)),
+                                                 metanode_deps]
+
+        # MST with contraction; (n+1) in n+1
+        contracted_tree = chu_liu_edmonds(subscores)
+        # head of the cycle; () in n
+        cycle_head = contracted_tree[-1]
+        # fixed tree: (n) in n+1
+        contracted_tree = contracted_tree[:-1]
+        # initialize new tree; (t) in 0
+        new_heads = -np.ones_like(heads)
+
+        # fixed tree with no heads coming from the cycle: (n) in [0,1]
+        contracted_subtree = contracted_tree < len(contracted_tree)
+        # add the nodes to the new tree (t)
+        # [(n)[(n) in [0,1]] in t] in t = (n)[(n)[(n) in [0,1]] in n] in t
+        new_heads[noncycle_locs[contracted_subtree]] = \
+            noncycle_locs[contracted_tree[contracted_subtree]]
+
+        # fixed tree with heads coming from the cycle: (n) in [0,1]
+        contracted_subtree = np.logical_not(contracted_subtree)
+        # add the nodes to the tree (t)
+        # [(n)[(n) in [0,1]] in t] in t = (c)[(n)[(n) in [0,1]] in c] in t
+        new_heads[noncycle_locs[contracted_subtree]] = \
+            cycle_locs[metanode_deps[contracted_subtree]]
+        # add the old cycle to the tree; (t)[(c) in t] in t = (t)[(c) in t] in t
+        new_heads[cycle_locs] = heads[cycle_locs]
+        # root of the cycle; (n)[() in n] in c = () in c
+        cycle_root = metanode_heads[cycle_head]
+        # add the root of the cycle to the new tree;
+        # (t)[(c)[() in c] in t] = (c)[() in c]
+        new_heads[cycle_locs[cycle_root]] = noncycle_locs[cycle_head]
+
+        heads = new_heads
 
     return heads
 
 
-def find_cycle(heads):
-    """
-    Finds and returns the first cycle in the given list of heads, or None if
-    there is no cycle.
+def tarjan(heads):
+    """Tarjan's algorithm for finding cycles"""
+    indices = -np.ones_like(heads)
+    lowlinks = -np.ones_like(heads)
+    onstack = np.zeros_like(heads, dtype=bool)
+    stack = []
+    _index = [0]
+    cycles = []
 
-    :param heads: candidate heads for each word in a sentence; i.e., heads[i]
-        contains the head for modifier i. heads[0] is ignored (0 is the root).
-    :return:
-    """
-    # this set stores all vertices with a valid path to the root
-    reachable_vertices = {0}
+    def strong_connect(i):
+        _index[0] += 1
+        index = _index[-1]
+        indices[i] = lowlinks[i] = index - 1
+        stack.append(i)
+        onstack[i] = True
+        dependents = np.where(np.equal(heads, i))[0]
+        for j in dependents:
+            if indices[j] == -1:
+                strong_connect(j)
+                lowlinks[i] = min(lowlinks[i], lowlinks[j])
+            elif onstack[j]:
+                lowlinks[i] = min(lowlinks[i], indices[j])
 
-    # vertices known to be unreachable from the root, i.e., in a cycle
-    vertices_in_cycles = set()
+        # There's a cycle!
+        if lowlinks[i] == indices[i]:
+            cycle = np.zeros_like(indices, dtype=bool)
+            while stack[-1] != i:
+                j = stack.pop()
+                onstack[j] = False
+                cycle[j] = True
+            stack.pop()
+            onstack[i] = False
+            cycle[i] = True
+            if cycle.sum() > 1:
+                cycles.append(cycle)
+        return
 
-    # vertices currently being evaluated, not known if they're reachable
-    visited = set()
+    for i in range(len(heads)):
+        if indices[i] == -1:
+            strong_connect(i)
 
-    # the directions of the edges don't matter if we only want to find cycles
-    for vertex in range(len(heads)):
-        if vertex in reachable_vertices or vertex in vertices_in_cycles:
-            continue
-
-        cycle = _find_cycle_recursive(heads, vertex, visited,
-                                      reachable_vertices, vertices_in_cycles)
-        if cycle is not None:
-            return cycle
-
-    return None
-
-
-def _find_cycle_recursive(heads, token, visited_tokens, reachable_tokens,
-                          tokens_in_cycles):
-    """
-    Return the first cycle it finds starting from the given token.
-
-    :param heads: heads for each token; heads[i] has the head of token i
-    :param token: which token is being currently visited
-    :param visited_tokens: set of tokens already visited in this round of
-        recursive calls
-    :param reachable_tokens: set of tokens known to be reachable from the root
-    :param tokens_in_cycles: set of tokens known to be unreachable from the
-        root
-    :return:
-    """
-    next_token = heads[token]
-    visited_tokens.add(token)
-
-    if next_token in reachable_tokens:
-        reachable_tokens.update(visited_tokens)
-        visited_tokens.clear()
-        cycle = None
-
-    elif next_token in visited_tokens:
-        # we found a cycle. return the tokens that are part of it.
-        visited_tokens.clear()
-        cycle = {token}
-        while next_token != token:
-            cycle.add(next_token)
-            next_token = heads[next_token]
-
-        tokens_in_cycles.update(cycle)
-
-    elif next_token in tokens_in_cycles:
-        # vertex linked to an existing cycle, but not part of it
-        visited_tokens.clear()
-        cycle = None
-
-    else:
-        # we still don't know if it's reachable or not, continue exploring
-        cycle = _find_cycle_recursive(heads, next_token, visited_tokens,
-                                      reachable_tokens, tokens_in_cycles)
-
-    return cycle
-
-
-def solve_cycle(heads, cycle, scores):
-    """
-    Resolve a cycle in the dependency tree.
-
-    :param heads: heads for each token; heads[i] has the head of token i
-    :param cycle: set of tokens which make up a cycle
-    :param scores: 2d numpy array with the scores for each [h, m] arc
-    :return:
-    """
-    num_tokens = len(heads)
-
-    # tokens outside this cycle. 0 (root) is always outside
-    tokens_outside = np.array([x for x in range(num_tokens) if x not in cycle])
-
-    cycle = np.array(list(cycle))
-
-    # first, pick an arc from the cycle to the outside tokens
-    # if len(outside) == 1, all vertices except for the root are in a cycle
-    if len(tokens_outside) > 1:
-        # make an Nx1 index array
-        cycle_inds = np.array([[i] for i in cycle])
-
-        # these are the weights of arcs connecting tokens in the cycle to the
-        # ones outside it. (-1 because we can't take the root now)
-        outgoing_weights = scores[cycle_inds, tokens_outside[1:]]
-
-        # find one outgoing arc for each token outside the cycle
-        max_outgoing_inds = outgoing_weights.argmax(0)
-        max_outgoing_weights = outgoing_weights.max(0)
-
-        # set every outgoing weight to -inf and then restore the highest ones
-        outgoing_weights[:] = -np.Infinity
-        inds_y = np.arange(len(tokens_outside) - 1)
-        outgoing_weights[max_outgoing_inds, inds_y] = max_outgoing_weights
-        scores[cycle_inds, tokens_outside[1:]] = outgoing_weights
-
-    # now, adjust incoming arcs. Each arc from a token v (outside the cycle)
-    # to v' (inside) is reweighted as:
-    # s(v, v') = s(v, v') + s(head(v'), v')
-    # and then we pick the highest arc for each outside token
-    token_inds = np.array([[i] for i in tokens_outside])
-    incoming_weights = scores[token_inds, cycle]
-
-    for i, token in enumerate(cycle):
-        head_to_t = scores[heads[token], token]
-        incoming_weights[:, i] += head_to_t
-
-    max_incoming_inds = incoming_weights.argmax(1)
-    max_incoming_weights = incoming_weights.max(1)
-
-    # analogous to the outgoing weights
-    incoming_weights[:] = -np.Infinity
-    incoming_weights[np.arange(len(tokens_outside)),
-                     max_incoming_inds] = max_incoming_weights
-    scores[token_inds, cycle] = incoming_weights
-
-    # the token with the maximum weighted incoming edge now changes
-    # its head, thus breaking the cycle
-    new_head_ind = max_incoming_weights.argmax()
-    token_leaving_cycle_ind = max_incoming_inds[new_head_ind]
-
-    token_leaving_cycle = cycle[token_leaving_cycle_ind]
-    old_head = heads[token_leaving_cycle]
-    scores[old_head, token_leaving_cycle] = -np.Infinity
+    return cycles
