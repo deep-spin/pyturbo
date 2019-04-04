@@ -62,7 +62,8 @@ class DependencyNeuralScorer(object):
             diff = torch.tensor(predicted_parts - gold_parts,
                                 dtype=torch.float)
 
-        loss += (self.part_scores * diff).sum()
+        parts_loss = (self.part_scores * diff).sum()
+        loss += parts_loss.to(loss.device)
         # Backpropagate to accumulate gradients.
         loss.backward()
 
