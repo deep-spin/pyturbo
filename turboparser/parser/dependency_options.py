@@ -124,33 +124,6 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--learning_rate', type=float, default=0.001,
                             help='Neural model learning rate')
 
-        """
-// Options for pruner training.
-// TODO: implement these options.
-DEFINE_string(pruner_train_algorithm, "crf_mira",
-              "Training algorithm for the pruner. Options are perceptron, mira, "
-              "svm_mira, crf_mira, svm_sgd, crf_sgd.");
-DEFINE_bool(pruner_only_supported_features, true,
-            "True for the pruner to use supported features only (should be true"
-            "for CRFs).");
-DEFINE_bool(pruner_use_averaging, true,
-            "True for the pruner to average the weight vector at the end of"
-            "training.");
-DEFINE_int32(pruner_train_epochs, 10,
-             "Number of training epochs for the pruner.");
-DEFINE_double(pruner_train_regularization_constant, 0.001,
-              "Regularization parameter C for the pruner.");
-DEFINE_bool(pruner_labeled, false,
-            "True if pruner is a labeled parser. Currently, must be set to false.");
-DEFINE_double(pruner_train_initial_learning_rate, 0.01,
-              "Initial learning rate of pruner (for SGD only).");
-DEFINE_string(pruner_train_learning_rate_schedule, "invsqrt",
-              "Learning rate annealing schedule of pruner (for SGD only). "
-              "Options are fixed, lecun, invsqrt, inv.");
-DEFINE_bool(pruner_large_feature_set, false,
-            "True for using a large feature set in the pruner.");
-        """
-
     def parse_args(self):
         options = super(DependencyOptionParser, self).parse_args()
         args = self.args

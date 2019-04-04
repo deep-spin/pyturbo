@@ -1,23 +1,19 @@
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from .dependency_parts import Arc, DependencyParts, NextSibling, Grandparent, \
     GrandSibling, LabeledArc
-from .token_dictionary import TokenDictionary, UNKNOWN, PADDING
+from .token_dictionary import TokenDictionary, UNKNOWN
+from .constants import Target
 from ..classifier.lstm import LSTM
 import numpy as np
-
-#TODO: maybe this should be elsewhere?
-# special pseudo-tokens to index embeddings
-# root is not one of these since it is a token in the sentences
-NULL_SIBLING = '_NULL_SIBLING_'
-special_tokens = [NULL_SIBLING]
+import pickle
 
 
 class DependencyNeuralModel(nn.Module):
     def __init__(self,
                  model_type,
                  token_dictionary,
-                 dependency_dictionary,
                  word_embeddings,
                  char_embedding_size,
                  tag_embedding_size,
@@ -38,13 +34,11 @@ class DependencyNeuralModel(nn.Module):
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
         :type token_dictionary: TokenDictionary
-        :param dependency_dictionary: DependencyDictionary object
         :param word_embeddings: numpy or torch embedding matrix
         :param word_dropout: probability of replacing a word with the unknown
             token
         :param tag_dropout: probability of replacing a POS tag with the unknown
             tag
-        :param predict_tags: whether to train the model to predict POS tags
         """
         super(DependencyNeuralModel, self).__init__()
         self.embedding_vocab_size = word_embeddings.shape[0]
@@ -61,17 +55,13 @@ class DependencyNeuralModel(nn.Module):
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
         self.tag_dropout_rate = tag_dropout
-        self.num_labels = dependency_dictionary.get_num_labels()
-        self.padding_word = token_dictionary.get_embedding_id(PADDING)
-        self.padding_tag = token_dictionary.get_upos_id(PADDING)
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
-        self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
-        self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
         self.predict_upos = predict_upos
         self.predict_xpos = predict_xpos
         self.predict_morph = predict_morph
         self.predict_tags = predict_upos or predict_xpos or predict_morph
+        self.model_type = model_type
 
         word_embeddings = torch.tensor(word_embeddings, dtype=torch.float32)
         self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings,
@@ -168,8 +158,9 @@ class DependencyNeuralModel(nn.Module):
             hidden_size=self.label_mlp_size)
         self.label_modifier_mlp = self._create_mlp(
             hidden_size=self.label_mlp_size)
+        num_labels = token_dictionary.get_num_deprels()
         self.label_scorer = self._create_scorer(self.label_mlp_size,
-                                                self.num_labels)
+                                                num_labels)
 
         if model_type.grandparents:
             self.gp_grandparent_mlp = self._create_mlp()
@@ -294,20 +285,77 @@ class DependencyNeuralModel(nn.Module):
         return mlp
 
     def save(self, file):
+        pickle.dump(self.embedding_vocab_size, file)
+        pickle.dump(self.word_embedding_size, file)
+        pickle.dump(self.char_embedding_size, file)
+        pickle.dump(self.tag_embedding_size, file)
+        pickle.dump(self.distance_embedding_size, file)
+        pickle.dump(self.rnn_size, file)
+        pickle.dump(self.mlp_size, file)
+        pickle.dump(self.tag_mlp_size, file)
+        pickle.dump(self.label_mlp_size, file)
+        pickle.dump(self.rnn_layers, file)
+        pickle.dump(self.mlp_layers, file)
+        pickle.dump(self.dropout_rate, file)
+        pickle.dump(self.word_dropout_rate, file)
+        pickle.dump(self.tag_dropout_rate, file)
+        pickle.dump(self.predict_upos, file)
+        pickle.dump(self.predict_xpos, file)
+        pickle.dump(self.predict_morph, file)
+        pickle.dump(self.model_type, file)
         torch.save(self.state_dict(), file)
 
-    def load(self, file):
-        if self.on_gpu:
+    @classmethod
+    def load(cls, file, token_dictionary):
+        embedding_vocab_size = pickle.load(file)
+        word_embedding_size = pickle.load(file)
+        char_embedding_size = pickle.load(file)
+        tag_embedding_size = pickle.load(file)
+        distance_embedding_size = pickle.load(file)
+        rnn_size = pickle.load(file)
+        mlp_size = pickle.load(file)
+        tag_mlp_size = pickle.load(file)
+        label_mlp_size = pickle.load(file)
+        rnn_layers = pickle.load(file)
+        mlp_layers = pickle.load(file)
+        dropout = pickle.load(file)
+        word_dropout = pickle.load(file)
+        tag_dropout = pickle.load(file)
+        predict_upos = pickle.load(file)
+        predict_xpos = pickle.load(file)
+        predict_morph = pickle.load(file)
+        model_type = pickle.load(file)
+
+        dummy_embeddings = np.empty([embedding_vocab_size,
+                                     word_embedding_size], np.float32)
+        model = DependencyNeuralModel(
+            model_type, token_dictionary, dummy_embeddings, char_embedding_size,
+            tag_embedding_size=tag_embedding_size,
+            distance_embedding_size=distance_embedding_size,
+            rnn_size=rnn_size,
+            mlp_size=mlp_size,
+            tag_mlp_size=tag_mlp_size,
+            label_mlp_size=label_mlp_size,
+            rnn_layers=rnn_layers,
+            mlp_layers=mlp_layers,
+            dropout=dropout,
+            word_dropout=word_dropout, tag_dropout=tag_dropout,
+            predict_upos=predict_upos, predict_xpos=predict_xpos,
+            predict_morph=predict_morph)
+
+        if model.on_gpu:
             state_dict = torch.load(file)
         else:
             state_dict = torch.load(file, map_location='cpu')
 
         # kind of a hack to allow compatibility with previous versions
-        own_state_dict = self.state_dict()
+        own_state_dict = model.state_dict()
         pretrained_dict = {k: v for k, v in state_dict.items() if
                            k in own_state_dict}
         own_state_dict.update(pretrained_dict)
-        self.load_state_dict(own_state_dict)
+        model.load_state_dict(own_state_dict)
+
+        return model
 
     def _compute_arc_scores(self, states, parts, scores):
         """
@@ -718,15 +766,15 @@ class DependencyNeuralModel(nn.Module):
             if self.predict_upos:
                 # ignore root
                 hidden = self.upos_mlp(tagger_batch_states[:, 1:])
-                self.scores['upos'] = self.upos_scorer(hidden)
+                self.scores[Target.UPOS] = self.upos_scorer(hidden)
 
             if self.predict_xpos:
                 hidden = self.xpos_mlp(tagger_batch_states[:, 1:])
-                self.scores['xpos'] = self.xpos_scorer(hidden)
+                self.scores[Target.XPOS] = self.xpos_scorer(hidden)
 
             if self.predict_morph:
                 hidden = self.morph_mlp(tagger_batch_states[:, 1:])
-                self.scores['morph'] = self.morph_scorer(hidden)
+                self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
         # now go through each batch item
         for i in range(batch_size):
@@ -749,7 +797,7 @@ class DependencyNeuralModel(nn.Module):
                 self._compute_grandsibling_scores(states, sent_parts,
                                                   sent_scores)
 
-        self.scores['dependency'] = dependency_scores
+        self.scores[Target.DEPENDENCY_PARTS] = dependency_scores
 
         return self.scores
 

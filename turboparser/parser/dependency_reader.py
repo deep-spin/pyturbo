@@ -2,15 +2,15 @@ from ..classifier.reader import AuxiliaryReader, Reader
 from .dependency_instance import DependencyInstance, MultiwordSpan
 
 
-class DependencyReader(Reader):
+class ConllReader(Reader):
     """
     Reader class for reading dependency trees from conllu files.
     """
     def __init__(self):
-        super(DependencyReader, self).__init__(AuxiliaryDependencyReader)
+        super(ConllReader, self).__init__(AuxiliaryConllReader)
 
 
-class AuxiliaryDependencyReader(AuxiliaryReader):
+class AuxiliaryConllReader(AuxiliaryReader):
 
     def __next__(self):
         sentence_fields = []
@@ -86,3 +86,24 @@ class AuxiliaryDependencyReader(AuxiliaryReader):
                                       multiwords)
 
         return instance
+
+
+def read_instances(path):
+    """
+    Read instances from the given path and change them to the format
+    used internally.
+
+    Returned instances are not formatted; i.e., they have non-numeric
+    attributes.
+
+    :param path: path to a file
+    :return: list of instances (not formatted)
+    """
+    instances = []
+    reader = ConllReader()
+
+    with reader.open(path) as r:
+        for instance in r:
+            instances.append(instance)
+
+    return instances

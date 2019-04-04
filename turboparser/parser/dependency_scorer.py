@@ -1,14 +1,18 @@
-from ..classifier.neural_scorer import NeuralScorer
-
+from .constants import Target
 import torch
 from torch.nn import functional as F
+import torch.optim as optim
+import torch.optim.lr_scheduler as scheduler
 
 
-class DependencyNeuralScorer(NeuralScorer):
+class DependencyNeuralScorer(object):
     """
-    Subclass of neural scorer that can compute loss on both dependency parsing
-    and POS tagging.
+    Neural scorer for mediating the training of a Parser/Tagger neural model.
     """
+    def __init__(self):
+        self.part_scores = None
+        self.model = None
+
     def compute_gradients(self, gold_parts, predicted_parts, gold_labels):
         """
         Compute the error gradients for parsing and tagging.
@@ -33,7 +37,7 @@ class DependencyNeuralScorer(NeuralScorer):
         if torch.cuda.is_available():
             loss = loss.cuda()
 
-        for target in ['upos', 'xpos', 'morph']:
+        for target in [Target.UPOS, Target.XPOS, Target.MORPH]:
             if target not in gold_labels[0]:
                 continue
 
@@ -44,8 +48,23 @@ class DependencyNeuralScorer(NeuralScorer):
         if loss > 0:
             # TODO: a better way to skip backprop when there's no additional target
             loss.backward(retain_graph=True)
-        super(DependencyNeuralScorer, self).compute_gradients(
-            gold_parts, predicted_parts, None)
+
+        if isinstance(gold_parts, list):
+            batch_size = len(gold_parts)
+            max_length = max(len(g) for g in gold_parts)
+            shape = [batch_size, max_length]
+            diff = torch.zeros(shape, dtype=torch.float)
+            for i in range(batch_size):
+                gold_item = gold_parts[i]
+                pred_item = predicted_parts[i]
+                diff[i, :len(gold_item)] = torch.tensor(pred_item - gold_item)
+        else:
+            diff = torch.tensor(predicted_parts - gold_parts,
+                                dtype=torch.float)
+
+        loss += (self.part_scores * diff).sum()
+        # Backpropagate to accumulate gradients.
+        loss.backward()
 
     def pad_labels(self, labels):
         """
@@ -92,7 +111,7 @@ class DependencyNeuralScorer(NeuralScorer):
             parts = [parts]
 
         model_scores = self.model(instances, parts)
-        self.part_scores = model_scores['dependency']
+        self.part_scores = model_scores[Target.DEPENDENCY_PARTS]
         numpy_scores = {target: model_scores[target].detach().cpu().numpy()
                         for target in model_scores}
 
@@ -103,3 +122,40 @@ class DependencyNeuralScorer(NeuralScorer):
             score_list.append(instance_scores)
 
         return score_list
+
+    def initialize(self, model, learning_rate=0.001, decay=1,
+                   beta1=0.9, beta2=0.999):
+        self.set_model(model)
+        params = [p for p in model.parameters() if p.requires_grad]
+        self.optimizer = optim.Adam(
+            params, lr=learning_rate, betas=(beta1, beta2))
+        self.scheduler = scheduler.ReduceLROnPlateau(
+            self.optimizer, 'max', factor=decay, patience=0, verbose=True)
+
+    def set_model(self, model):
+        self.model = model
+        if torch.cuda.is_available():
+            self.model.cuda()
+
+    def train_mode(self):
+        """
+        Set the neural model to training mode
+        """
+        self.model.train()
+
+    def eval_mode(self):
+        """
+        Set the neural model to eval mode
+        """
+        self.model.eval()
+
+    def lr_scheduler_step(self, accuracy):
+        """
+        Perform a step of the learning rate scheduler, based on accuracy.
+        """
+        self.scheduler.step(accuracy)
+
+    def make_gradient_step(self):
+        self.optimizer.step()
+        # Clear out the gradients before the next batch.
+        self.model.zero_grad()

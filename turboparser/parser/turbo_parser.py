@@ -1,22 +1,27 @@
-from ..classifier.structured_classifier import StructuredClassifier
+# -*- coding: utf-8 -*-
+
 from ..classifier import utils
 from ..classifier.instance import InstanceData
-from .dependency_reader import DependencyReader
+from .token_dictionary import TokenDictionary
+from .constants import Target
+from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
     make_score_matrix
-from .dependency_scorer import DependencyNeuralScorer
-from .dependency_dictionary import DependencyDictionary
-from .dependency_instance_numeric import DependencyInstanceNumeric
-from .token_dictionary import TokenDictionary
 from .dependency_parts import DependencyParts, Arc, LabeledArc, Grandparent, \
     NextSibling, GrandSibling
-from .dependency_features import DependencyFeatures
 from .dependency_neural_model import DependencyNeuralModel
+from .dependency_scorer import DependencyNeuralScorer
+from .dependency_instance_numeric import DependencyInstanceNumeric
 
-import numpy as np
+import sys
 import pickle
+import numpy as np
 import logging
+import time
+
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 class ModelType(object):
@@ -43,59 +48,54 @@ class ModelType(object):
         self.trisiblings = 'ts' in codes
 
 
-class TurboParser(StructuredClassifier):
+class TurboParser(object):
     '''Dependency parser.'''
     def __init__(self, options):
-        StructuredClassifier.__init__(self, options)
+        self.options = options
         self.token_dictionary = TokenDictionary(self)
-        self.dictionary = DependencyDictionary(self)
-        self.reader = DependencyReader()
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
-        self.parameters = None
-        self.structured_target = 'dependency'
+        self.model = None
         self._set_options()
-
-        if options.neural:
-            self.neural_scorer = DependencyNeuralScorer()
+        self.neural_scorer = DependencyNeuralScorer()
 
         if self.options.train:
             word_indices, embeddings = self._load_embeddings()
             self.token_dictionary.initialize(
-                self.reader, self.options.form_case_sensitive, word_indices)
+                self.options.training_path, self.options.form_case_sensitive,
+                word_indices)
             embeddings = self._update_embeddings(embeddings)
-            self.dictionary.create_relation_dictionary(self.reader)
 
-            if self.options.neural:
-                if embeddings is None:
-                    embeddings = self._create_random_embeddings()
+            if embeddings is None:
+                embeddings = self._create_random_embeddings()
 
-                model = DependencyNeuralModel(
-                    self.model_type,
-                    self.token_dictionary, self.dictionary, embeddings,
-                    char_embedding_size=self.options.char_embedding_size,
-                    tag_embedding_size=self.options.tag_embedding_size,
-                    distance_embedding_size=self.options.
-                    distance_embedding_size,
-                    rnn_size=self.options.rnn_size,
-                    mlp_size=self.options.mlp_size,
-                    label_mlp_size=self.options.label_mlp_size,
-                    rnn_layers=self.options.rnn_layers,
-                    mlp_layers=self.options.mlp_layers,
-                    dropout=self.options.dropout,
-                    word_dropout=options.word_dropout,
-                    tag_dropout=options.tag_dropout,
-                    tag_mlp_size=options.tag_mlp_size,
-                    predict_upos=options.predict_upos,
-                    predict_xpos=options.predict_xpos,
-                    predict_morph=options.predict_morph)
+            model = DependencyNeuralModel(
+                self.model_type,
+                self.token_dictionary, embeddings,
+                char_embedding_size=self.options.char_embedding_size,
+                tag_embedding_size=self.options.tag_embedding_size,
+                distance_embedding_size=self.options.
+                distance_embedding_size,
+                rnn_size=self.options.rnn_size,
+                mlp_size=self.options.mlp_size,
+                label_mlp_size=self.options.label_mlp_size,
+                rnn_layers=self.options.rnn_layers,
+                mlp_layers=self.options.mlp_layers,
+                dropout=self.options.dropout,
+                word_dropout=options.word_dropout,
+                tag_dropout=options.tag_dropout,
+                tag_mlp_size=options.tag_mlp_size,
+                predict_upos=options.predict_upos,
+                predict_xpos=options.predict_xpos,
+                predict_morph=options.predict_morph)
 
-                print('Model summary:')
-                print(model)
+            self.neural_scorer.initialize(
+                model, self.options.learning_rate, options.decay,
+                options.beta1, options.beta2)
 
-                self.neural_scorer.initialize(
-                    model, self.options.learning_rate, options.decay,
-                    options.beta1, options.beta2)
+            if self.options.verbose:
+                print('Model summary:', file=sys.stderr)
+                print(model, file=sys.stderr)
 
     def _create_random_embeddings(self):
         """
@@ -145,17 +145,17 @@ class TurboParser(StructuredClassifier):
         self.has_pruner = bool(self.options.pruner_path)
 
         if self.has_pruner:
-            self.pruner = self.load_pruner(self.options.pruner_path)
+            self.pruner = load_pruner(self.options.pruner_path)
         else:
             self.pruner = None
 
         self.additional_targets = []
         if self.options.predict_morph:
-            self.additional_targets.append('morph')
+            self.additional_targets.append(Target.MORPH)
         if self.options.predict_upos:
-            self.additional_targets.append('upos')
+            self.additional_targets.append(Target.UPOS)
         if self.options.predict_xpos:
-            self.additional_targets.append('xpos')
+            self.additional_targets.append(Target.XPOS)
 
     def save(self, model_path=None):
         """Save the full configuration and model."""
@@ -164,27 +164,7 @@ class TurboParser(StructuredClassifier):
         with open(model_path, 'wb') as f:
             pickle.dump(self.options, f)
             self.token_dictionary.save(f)
-            self.dictionary.save(f)
-            pickle.dump(self.parameters, f)
-            if self.options.neural:
-                pickle.dump(self.neural_scorer.model.embedding_vocab_size, f)
-                pickle.dump(self.neural_scorer.model.word_embedding_size, f)
-                pickle.dump(self.neural_scorer.model.char_embedding_size, f)
-                pickle.dump(self.neural_scorer.model.tag_embedding_size, f)
-                pickle.dump(self.neural_scorer.model.distance_embedding_size, f)
-                pickle.dump(self.neural_scorer.model.rnn_size, f)
-                pickle.dump(self.neural_scorer.model.mlp_size, f)
-                pickle.dump(self.neural_scorer.model.tag_mlp_size, f)
-                pickle.dump(self.neural_scorer.model.label_mlp_size, f)
-                pickle.dump(self.neural_scorer.model.rnn_layers, f)
-                pickle.dump(self.neural_scorer.model.mlp_layers, f)
-                pickle.dump(self.neural_scorer.model.dropout_rate, f)
-                pickle.dump(self.neural_scorer.model.word_dropout_rate, f)
-                pickle.dump(self.neural_scorer.model.tag_dropout_rate, f)
-                pickle.dump(self.neural_scorer.model.predict_upos, f)
-                pickle.dump(self.neural_scorer.model.predict_xpos, f)
-                pickle.dump(self.neural_scorer.model.predict_morph, f)
-                self.neural_scorer.model.save(f)
+            self.neural_scorer.model.save(f)
 
     def load(self, model_path=None):
         """Load the full configuration and model."""
@@ -218,64 +198,17 @@ class TurboParser(StructuredClassifier):
             self._set_options()
 
             self.token_dictionary.load(f)
-            self.dictionary.load(f)
-            self.parameters = pickle.load(f)
-            if model_options.neural:
-                embedding_vocab_size = pickle.load(f)
-                word_embedding_size = pickle.load(f)
-                char_embedding_size = pickle.load(f)
-                tag_embedding_size = pickle.load(f)
-                distance_embedding_size = pickle.load(f)
-                rnn_size = pickle.load(f)
-                mlp_size = pickle.load(f)
-                tag_mlp_size = pickle.load(f)
-                label_mlp_size = pickle.load(f)
-                rnn_layers = pickle.load(f)
-                mlp_layers = pickle.load(f)
-                dropout = pickle.load(f)
-                word_dropout = pickle.load(f)
-                tag_dropout = pickle.load(f)
-                predict_upos = pickle.load(f)
-                predict_xpos = pickle.load(f)
-                predict_morph = pickle.load(f)
-                dummy_embeddings = np.empty([embedding_vocab_size,
-                                             word_embedding_size], np.float32)
-                neural_model = DependencyNeuralModel(
-                    self.model_type,
-                    self.token_dictionary,
-                    self.dictionary, dummy_embeddings,
-                    char_embedding_size,
-                    tag_embedding_size=tag_embedding_size,
-                    distance_embedding_size=distance_embedding_size,
-                    rnn_size=rnn_size,
-                    mlp_size=mlp_size,
-                    tag_mlp_size=tag_mlp_size,
-                    label_mlp_size=label_mlp_size,
-                    rnn_layers=rnn_layers,
-                    mlp_layers=mlp_layers,
-                    dropout=dropout,
-                    word_dropout=word_dropout, tag_dropout=tag_dropout,
-                    predict_upos=predict_upos, predict_xpos=predict_xpos,
-                    predict_morph=predict_morph)
-                neural_model.load(f)
-                self.neural_scorer = DependencyNeuralScorer()
-                self.neural_scorer.set_model(neural_model)
+            neural_model = DependencyNeuralModel.load(f, self.token_dictionary)
 
-                print('Model summary:')
-                print(neural_model)
+            self.neural_scorer = DependencyNeuralScorer()
+            self.neural_scorer.set_model(neural_model)
+
+            if self.options.verbose:
+                print('Model summary:', file=sys.stderr)
+                print(neural_model, file=sys.stderr)
 
         # most of the time, we load a model to run its predictions
-        self.eval_mode()
-
-    def should_save(self, validation_loss):
-        """
-        Return a bool for whether the model should be saved. This function
-        should be called after running on validation data.
-
-        It returns True if validation UAS increased in the last epoch, False
-        otherwise.
-        """
-        return self._should_save
+        self.neural_scorer.eval_mode()
 
     def _reset_best_validation_metric(self):
         """
@@ -289,11 +222,12 @@ class TurboParser(StructuredClassifier):
         """
         Reset the accumulated UAS counter
         """
+        self.accumulated_hits = {}
+        for target in self.additional_targets:
+            self.accumulated_hits[target] = 0
+
         self.accumulated_uas = 0.
         self.accumulated_las = 0.
-        self.accumulated_upos = 0
-        self.accumulated_xpos = 0
-        self.accumulated_morph = 0
         self.total_tokens = 0
         self.validation_uas = 0.
         self.validation_las = 0.
@@ -310,15 +244,9 @@ class TurboParser(StructuredClassifier):
             las = self.accumulated_las / self.total_tokens
             msg += '\tNaive train LAS: %f' % las
 
-        if self.options.predict_upos:
-            acc = self.accumulated_upos / self.total_tokens
-            msg += '\tUPOS train acc: %f' % acc
-        if self.options.predict_xpos:
-            acc = self.accumulated_xpos / self.total_tokens
-            msg += '\tXPOS train acc: %f' % acc
-        if self.options.predict_morph:
-            acc =  self.accumulated_morph / self.total_tokens
-            msg += '\tUFeats train acc: %f' % acc
+        for target in self.additional_targets:
+            acc = self.accumulated_hits[target] / self.total_tokens
+            msg += '\t%s train acc: %f' % (target, acc)
 
         return msg
 
@@ -362,22 +290,16 @@ class TurboParser(StructuredClassifier):
 
         # [1:] to skip root symbol
         if self.options.predict_upos:
-            gold_dict['upos'] = instance.get_all_upos()[1:]
+            gold_dict[Target.UPOS] = instance.get_all_upos()[1:]
         if self.options.predict_xpos:
-            gold_dict['xpos'] = instance.get_all_xpos()[1:]
+            gold_dict[Target.XPOS] = instance.get_all_xpos()[1:]
         if self.options.predict_morph:
-            gold_dict['morph'] = instance.get_all_morph_singletons()[1:]
+            gold_dict[Target.MORPH] = instance.get_all_morph_singletons()[1:]
+
+        gold_dict[Target.HEADS] = instance.get_all_heads()[1:]
+        gold_dict[Target.RELATIONS] = instance.get_all_relations()[1:]
 
         return gold_dict
-
-    def _decode_unstructured_train(self, instances, scores, gold_labels):
-        """
-        Decode tag labes for a list of instances.
-
-        :return: a dictionary mapping the name of each tag to a vector of
-            predictions
-        """
-        return self.decode_unstructured(scores)
 
     def _update_task_metrics(self, predicted_parts, instance, scores, parts,
                              gold_parts, gold_labels):
@@ -394,55 +316,40 @@ class TurboParser(StructuredClassifier):
         :param scores: dictionary mapping target names to scores
         :type predicted_parts: list
         :type scores: dict
+        :param gold_labels: dictionary mapping targets to the gold output
         """
         # UAS doesn't consider the root
         length = len(instance) - 1
-        uas, las = get_naive_metrics(predicted_parts, gold_parts, parts,
-                                     length)
+        pred_heads, pred_labels = self.decode_predictions(
+            len(instance), predicted_parts, parts)
 
-        predicted_labels = self.decode_unstructured(scores)
-        if self.options.predict_upos:
-            gold = gold_labels['upos']
-            pred = predicted_labels['upos'][:len(gold)]
-            hits = np.sum(gold == pred)
-            self.accumulated_upos += hits
+        gold_heads = gold_labels[Target.HEADS]
+        gold_deprel = gold_labels[Target.RELATIONS]
 
-        if self.options.predict_xpos:
-            gold = gold_labels['xpos']
-            pred = predicted_labels['xpos'][:len(gold)]
-            hits = np.sum(gold == pred)
-            self.accumulated_xpos += hits
+        head_hits = pred_heads == gold_heads
+        uas = np.mean(head_hits)
 
-        if self.options.predict_morph:
-            gold = gold_labels['morph']
-            pred = predicted_labels['morph'][:len(gold)]
-            hits = np.sum(gold == pred)
-            self.accumulated_morph += hits
+        if not self.options.unlabeled:
+            label_hits = gold_deprel == gold_deprel
+            las = np.logical_and(head_hits, label_hits).mean()
+        else:
+            las = 0
+
+        for target in self.additional_targets:
+            gold = gold_labels[target]
+            predicted = scores[target].argmax(-1)
+
+            # remove padding
+            predicted = predicted[:len(gold)]
+            hits = np.sum(gold == predicted)
+            self.accumulated_hits[target] += hits
 
         self.accumulated_uas += length * uas
         self.accumulated_las += length * las
         self.total_tokens += length
 
-    def load_pruner(self, model_path):
-        """
-        Load and return a pruner model.
-
-        This function takes care of keeping the main parser and the pruner
-        configurations separate.
-        """
-        logging.info('Loading pruner from %s' % model_path)
-        with open(model_path, 'rb') as f:
-            pruner_options = pickle.load(f)
-
-        pruner_options.train = False
-        pruner = TurboParser(pruner_options)
-        pruner.load(model_path)
-
-        return pruner
-
     def format_instance(self, instance):
-        return DependencyInstanceNumeric(instance, self.token_dictionary,
-                                         self.dictionary)
+        return DependencyInstanceNumeric(instance, self.token_dictionary)
 
     def prune(self, instance, parts):
         """
@@ -454,7 +361,7 @@ class TurboParser(StructuredClassifier):
         :return: a new DependencyParts object contained the kept arcs
         """
         instance = self.pruner.format_instance(instance)
-        scores = self.pruner.compute_scores(instance, parts)[0]['dependency']
+        scores = self.pruner.compute_scores(instance, parts)[0][Target.HEADS]
         new_parts = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores,
             self.options.pruner_max_heads,
@@ -472,7 +379,8 @@ class TurboParser(StructuredClassifier):
 
                     # also add all labels if doing labeled parsing
                     if not self.options.unlabeled:
-                        for label in range(self.dictionary.get_num_labels()):
+                        for label in range(
+                                self.token_dictionary.get_num_deprels()):
                             if instance.relations[m] == label:
                                 gold = 1
                             else:
@@ -534,13 +442,14 @@ class TurboParser(StructuredClassifier):
         """
         targets = {}
         if self.options.predict_upos:
-            targets['upos'] = np.array([instance.get_all_upos()])
+            targets[Target.UPOS] = np.array([instance.get_all_upos()])
         if self.options.predict_xpos:
-            targets['xpos'] = np.array([instance.get_all_xpos()])
+            targets[Target.XPOS] = np.array([instance.get_all_xpos()])
         if self.options.predict_morph:
             # TODO: combine singleton morph tags (containing all morph
             # information) with separate tags
-            targets['morph'] = np.array([instance.get_all_morph_singletons()])
+            targets[Target.MORPH] = np.array(
+                [instance.get_all_morph_singletons()])
 
         return targets
 
@@ -798,8 +707,11 @@ class TurboParser(StructuredClassifier):
                 # determine which relations are allowed between h and m
                 modifier_tag = instance.get_upos(m)
                 head_tag = instance.get_upos(h)
-                allowed_relations = self.dictionary.get_existing_relations(
-                    modifier_tag, head_tag)
+
+                #TODO: use pruned relations
+                allowed_relations = self.token_dictionary.get_deprel_tags()
+                # allowed_relations = self.dictionary.get_existing_relations(
+                #     modifier_tag, head_tag)
 
                 # If there is no allowed relation for this arc, but the
                 # unlabeled arc was added, then it was forced to be present
@@ -807,8 +719,8 @@ class TurboParser(StructuredClassifier):
                 # should be pretty rare) consider all the possible
                 # relations.
                 if not allowed_relations:
-                    allowed_relations = range(self.dictionary.get_num_labels())
-                for l in allowed_relations:
+                    allowed_relations = self.token_dictionary.get_deprel_tags()
+                for l in range(len(allowed_relations)):
                     part = LabeledArc(h, m, l)
 
                     if make_gold:
@@ -850,27 +762,29 @@ class TurboParser(StructuredClassifier):
                     continue
 
                 if h and self.options.prune_distances:
-                    modifier_tag = instance.get_upos(m)
-                    head_tag = instance.get_upos(h)
-                    if h < m:
-                        # Right attachment.
-                        if m - h > \
-                           self.dictionary.get_maximum_right_distance(
-                               modifier_tag, head_tag):
-                            continue
-                    else:
-                        # Left attachment.
-                        if h - m > \
-                           self.dictionary.get_maximum_left_distance(
-                               modifier_tag, head_tag):
-                            continue
+                    raise NotImplementedError()
+                    # modifier_tag = instance.get_upos(m)
+                    # head_tag = instance.get_upos(h)
+                    # if h < m:
+                    #     # Right attachment.
+                    #     if m - h > \
+                    #             self.dictionary.get_maximum_right_distance(
+                    #                 modifier_tag, head_tag):
+                    #         continue
+                    # else:
+                    #     # Left attachment.
+                    #     if h - m > \
+                    #             self.dictionary.get_maximum_left_distance(
+                    #                 modifier_tag, head_tag):
+                    #         continue
                 if self.options.prune_relations:
-                    modifier_tag = instance.get_upos(m)
-                    head_tag = instance.get_upos(h)
-                    allowed_relations = self.dictionary.get_existing_relations(
-                        modifier_tag, head_tag)
-                    if not allowed_relations:
-                        continue
+                    raise NotImplementedError()
+                    # modifier_tag = instance.get_upos(m)
+                    # head_tag = instance.get_upos(h)
+                    # allowed_relations = self.dictionary.get_existing_relations(
+                    #     modifier_tag, head_tag)
+                    # if not allowed_relations:
+                    #     continue
 
                 part = Arc(h, m)
                 if make_gold:
@@ -903,6 +817,39 @@ class TurboParser(StructuredClassifier):
 
             parts.append(part, gold)
 
+    def decode_predictions(self, length, predictions, parts):
+        """
+        Decode the predicted heads and labels after having running the decoder.
+
+        This function takes care of the cases when the variable assignments by
+        the decoder does not produce a valid tree running the Chu-Liu-Edmonds
+        algorithm.
+
+        :param length: length of the instance, including root
+        :param predictions: indicator array of predicted dependency parts (with
+            values between 0 and 1)
+        :param parts: the dependency parts
+        :return: a tuple (pred_heads, pred_labels)
+            The first is an array such that position heads[m] contains the head
+            for token m; it starts from the first actual word, not the root.
+            If the model is not trained for predicting labels, the second item
+            is None.
+        """
+        offset = parts.get_type_offset(Arc)
+        num_arcs = parts.get_num_type(Arc)
+        arcs = parts.get_parts_of_type(Arc)
+        arc_scores = predictions[offset:offset + num_arcs]
+
+        score_matrix = make_score_matrix(length, arcs, arc_scores)
+        pred_heads = chu_liu_edmonds(score_matrix)[1:]
+
+        if not self.options.unlabeled:
+            pred_labels = get_predicted_labels(pred_heads, parts)
+        else:
+            pred_labels = None
+
+        return pred_heads, pred_labels
+
     def _get_task_validation_metrics(self, valid_data, valid_pred):
         """
         Compute and store internally validation metrics. Also call the neural
@@ -929,7 +876,7 @@ class TurboParser(StructuredClassifier):
             gold_labels = valid_data.gold_labels[i]
             inst_pred = valid_pred[i]
 
-            dep_prediction = inst_pred['dependency']
+            dep_prediction = inst_pred[Target.DEPENDENCY_PARTS]
             offset = parts.get_type_offset(Arc)
             num_arcs = parts.get_num_type(Arc)
             arcs = parts.get_parts_of_type(Arc)
@@ -960,12 +907,15 @@ class TurboParser(StructuredClassifier):
 
         self.validation_uas = accumulated_uas / total_tokens
         self.validation_las = accumulated_las / total_tokens
-        if 'upos' in self.additional_targets:
-            self.validation_upos = accumulated_tag_hits['upos'] / total_tokens
-        if 'xpos' in self.additional_targets:
-            self.validation_xpos = accumulated_tag_hits['xpos'] / total_tokens
-        if 'morph' in self.additional_targets:
-            self.validation_morph = accumulated_tag_hits['morph'] / total_tokens
+        if Target.UPOS in self.additional_targets:
+            self.validation_upos = accumulated_tag_hits[
+                                       Target.UPOS] / total_tokens
+        if Target.XPOS in self.additional_targets:
+            self.validation_xpos = accumulated_tag_hits[
+                                       Target.XPOS] / total_tokens
+        if Target.MORPH in self.additional_targets:
+            self.validation_morph = accumulated_tag_hits[
+                                        Target.MORPH] / total_tokens
 
         # always update UAS; use it as a criterion for saving if no LAS
         if self.validation_uas > self.best_validation_uas:
@@ -1007,7 +957,7 @@ class TurboParser(StructuredClassifier):
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
-            return self.enforce_projective_graph(instance, arcs)
+            raise NotImplementedError
         else:
             return self.enforce_connected_graph(instance, arcs)
 
@@ -1046,51 +996,44 @@ class TurboParser(StructuredClassifier):
 
         return inserted_arcs
 
-    def enforce_projective_graph(self, instance, arcs):
-        raise NotImplementedError
-
-    def make_selected_features(self, instance, parts, selected_parts):
-        """
-        Create a DependencyFeatures object to store features describing the
-        instance.
-
-        :param instance: a DependencyInstance object
-        :param parts: a list of dependency arcs
-        :param selected_parts: a list of booleans, indicating for which parts
-            features should be computed
-        :return: a DependencyFeatures object containing a feature list for each
-            arc
-        """
-        features = DependencyFeatures(self, parts)
-        pruner = False
-
-        # Even in the case of labeled parsing, build features for unlabeled arcs
-        # only. They will later be conjoined with the labels.
-        offset, size = parts.get_offset(Arc)
-        for r in range(offset, offset + size):
-            if not selected_parts[r]:
-                continue
-            arc = parts[r]
-            assert arc.head >= 0
-            if pruner:
-                features.add_arc_features_light(instance, r, arc.head,
-                                                arc.modifier)
-            else:
-                features.add_arc_features(instance, r, arc.head, arc.modifier)
-
-        return features
-
-    def begin_evaluation(self):
-        super(TurboParser, self).begin_evaluation()
-
-    def end_evaluation(self, num_instances):
-        # TODO: evaluation that takes into account parsing and POS tagging
-        # super(TurboParser, self).end_evaluation(num_instances)
-        pass
-
     def run(self):
         self.reassigned_roots = 0
-        super(TurboParser, self).run()
+        tic = time.time()
+
+        instances = read_instances(self.options.test_path)
+        logging.info('Number of instances: %d' % len(instances))
+        data = self.make_parts_batch(instances)
+        predictions = []
+        batch_index = 0
+        while batch_index < len(instances):
+            next_index = batch_index + self.options.batch_size
+            batch_data = data[batch_index:next_index]
+            batch_predictions = self.run_batch(batch_data)
+            predictions.extend(batch_predictions)
+            batch_index = next_index
+
+        self.write_predictions(instances, data.parts, predictions)
+        toc = time.time()
+        logging.info('Time: %f' % (toc - tic))
+
+        self._run_report(len(instances))
+
+    def write_predictions(self, instances, parts, predictions):
+        """
+        Write predictions to a file.
+
+        :param instances: the instances in the original format (i.e., not the
+            "formatted" one, but retaining the original contents)
+        :param parts: list with the parts per instance
+        :param predictions: list with predictions per instance
+        """
+        self.writer.open(self.options.output_path)
+        for instance, inst_parts, inst_prediction in zip(instances,
+                                                         parts, predictions):
+            self.label_instance(instance, inst_parts, inst_prediction)
+            self.writer.write(instance)
+
+        self.writer.close()
 
     def _run_report(self, num_instances):
         if self.options.single_root:
@@ -1098,19 +1041,323 @@ class TurboParser(StructuredClassifier):
             msg = '%d reassgined roots (sentence had more than one), %f per ' \
                   'sentence' % (self.reassigned_roots, ratio)
             logging.info(msg)
-            
+
+    def read_train_instances(self):
+        '''Create batch of training and validation instances.'''
+        import time
+        tic = time.time()
+        logging.info('Creating instances...')
+
+        train_instances = read_instances(self.options.training_path)
+        valid_instances = read_instances(self.options.valid_path)
+        logging.info('Number of train instances: %d' % len(train_instances))
+        logging.info('Number of validation instances: %d'
+                     % len(valid_instances))
+        toc = time.time()
+        logging.info('Time: %f' % (toc - tic))
+        return train_instances, valid_instances
+
+    def make_parts_batch(self, instances):
+        """
+        Create parts for all instances in the batch.
+
+        :param instances: list of non-formatted Instance objects
+        :return: an InstanceData object.
+            It contains formatted instances.
+            In neural models, features is a list of None.
+        """
+        all_parts = []
+        all_gold_parts = []
+        all_gold_labels = []
+        formatted_instances = []
+
+        for instance in instances:
+            f_instance, parts = self.make_parts(instance)
+            gold_parts = parts.get_gold_output()
+            gold_labels = self.get_gold_labels(f_instance)
+            if gold_parts is not None:
+                gold_parts = np.array(gold_parts, dtype=np.float)
+
+            formatted_instances.append(f_instance)
+            all_parts.append(parts)
+            all_gold_parts.append(gold_parts)
+            all_gold_labels.append(gold_labels)
+
+        self._report_make_parts(instances, all_parts)
+        data = InstanceData(formatted_instances, all_parts, all_gold_parts,
+                            all_gold_labels)
+        return data
+
+    def train(self):
+        '''Train with a general online algorithm.'''
+        train_instances, valid_instances = self.read_train_instances()
+        train_data = self.make_parts_batch(train_instances)
+        valid_data = self.make_parts_batch(valid_instances)
+        train_data.sort_by_size()
+        self._reset_best_validation_metric()
+        self.lambda_coeff = 1.0 / (self.options.regularization_constant *
+                                   float(len(train_instances)))
+        self.num_bad_epochs = 0
+        for epoch in range(self.options.training_epochs):
+            self.train_epoch(epoch, train_data, valid_data)
+
+            if self.num_bad_epochs == self.options.patience:
+                break
+
+        logging.info(self._get_post_train_report())
+
+    def train_epoch(self, epoch, train_data, valid_data):
+        '''Run one epoch of an online algorithm.
+
+        :param epoch: the number of the epoch, starting from 0
+        :param train_data: InstanceData
+        :param valid_data: InstanceData
+        '''
+        import time
+        self.time_decoding = 0
+        self.time_scores = 0
+        self.time_gradient = 0
+        start = time.time()
+
+        self.total_loss = 0.
+        self._reset_task_metrics()
+
+        if epoch == 0:
+            logging.info('\t'.join(
+                ['Lambda: %f' % self.lambda_coeff,
+                 'Regularization constant: %f' %
+                 self.options.regularization_constant,
+                 'Number of instances: %d' % len(train_data)]))
+        logging.info(' Iteration #%d' % (epoch + 1))
+
+        batch_index = 0
+        batch_size = self.options.batch_size
+        while batch_index < len(train_data):
+            next_batch_index = batch_index + batch_size
+            batch = train_data[batch_index:next_batch_index]
+            self.train_batch(batch)
+            batch_index = next_batch_index
+
+        end = time.time()
+
+        valid_start = time.time()
+        self.neural_scorer.eval_mode()
+        valid_pred, valid_losses = self._run_batches(valid_data, 32,
+                                                     return_loss=True)
+        self._get_task_validation_metrics(valid_data, valid_pred)
+        valid_end = time.time()
+        time_validation = valid_end - valid_start
+        train_loss = self.total_loss / len(train_data)
+        validation_loss = np.array(valid_losses).mean()
+
+        logging.info('Time: %f' % (end - start))
+        logging.info('Time to score: %f' % self.time_scores)
+        logging.info('Time to decode: %f' % self.time_decoding)
+        logging.info('Time to do gradient step: %f' % self.time_gradient)
+        logging.info('Time to run on validation: %f' % time_validation)
+        if self._should_save:
+            self.save()
+            logging.info('Saved model')
+            self.num_bad_epochs = 0
+        else:
+            self.num_bad_epochs += 1
+
+        logging.info('\t'.join(['Total Train Loss (cost augmented): %f'
+                                % train_loss,
+                                self._get_task_train_report(),
+                                'Validation Loss: %f' % validation_loss,
+                                self._get_task_valid_report()]))
+
+    def _run_batches(self, instance_data, batch_size, return_loss=False):
+        """
+        Run the model for the given instances, one batch at a time. This is
+        useful when running on validation or test data.
+
+        :param instance_data: InstanceData
+        :param batch_size: the batch size at inference time; it doesn't need
+            to be the same as the one in self.options.batch_size (as a rule of
+            thumb, it can be the largest that fits in memory)
+        :param return_loss: if True, include the losses in the return. This
+            can only be True for data which have known gold output.
+        :return: a list of predictions. If return_loss is True, a tuple with
+            the list of predictions and the list of losses.
+        """
+        batch_index = 0
+        predictions = []
+        losses = []
+
+        while batch_index < len(instance_data):
+            next_index = batch_index + batch_size
+            batch_data = instance_data[batch_index:next_index]
+            result = self.run_batch(batch_data, return_loss)
+            if return_loss:
+                batch_predictions = result[0]
+                losses.extend(result[1])
+            else:
+                batch_predictions = result
+
+            predictions.extend(batch_predictions)
+            batch_index = next_index
+
+        if return_loss:
+            return predictions, losses
+
+        return predictions
+
+    def run_batch(self, instance_data, return_loss=False):
+        """
+        Predict the output for the given instances.
+
+        :type instance_data: InstanceData
+        :param return_loss: if True, also return the loss (only use if
+            instance_data has the gold outputs) as a list of values
+        :return: a list of arrays with the predicted outputs if return_loss is
+            False. If it's True, a tuple with predictions and losses.
+            Each prediction is a dictionary mapping a target name to the
+            prediction vector.
+        """
+        self.neural_scorer.eval_mode()
+        scores = self.neural_scorer.compute_scores(instance_data.instances,
+                                                   instance_data.parts)
+
+        predictions = []
+        for i in range(len(instance_data)):
+            instance = instance_data.instances[i]
+            parts = instance_data.parts[i]
+            inst_scores = scores[i]
+            part_scores = inst_scores[Target.DEPENDENCY_PARTS]
+
+            predicted_parts = self.decoder.decode(instance, parts, part_scores)
+            inst_prediction = {Target.DEPENDENCY_PARTS: predicted_parts}
+            for target in self.additional_targets:
+                model_answer = inst_scores[target].argmax(-1)
+                inst_prediction[target] = model_answer
+
+            predictions.append(inst_prediction)
+
+        if return_loss:
+            losses = self.compute_loss_batch(instance_data.gold_parts,
+                                             predictions,
+                                             scores, instance_data.gold_labels)
+            return predictions, losses
+
+        return predictions
+
+    def compute_loss_batch(self, gold_parts, predictions, scores,
+                           gold_labels):
+        """
+        Compute the loss for a batch of predicted parts and label scores.
+
+        :param scores: a list of dictionaries mapping target names to scores
+        """
+        losses = np.zeros(len(gold_parts), np.float)
+
+        for i, inst_predictions in enumerate(predictions):
+            pred_parts = inst_predictions[Target.DEPENDENCY_PARTS]
+            inst_gold_parts = gold_parts[i]
+            inst_gold_labels = gold_labels[i]
+            inst_scores = scores[i]
+            inst_part_scores = inst_scores[Target.DEPENDENCY_PARTS]
+            parser_loss = self.decoder.compute_loss(inst_gold_parts, pred_parts,
+                                                    inst_part_scores)
+            losses[i] = parser_loss
+
+            for target in self.additional_targets:
+                target_scores = inst_scores[target]
+                gold_labels_target = inst_gold_labels[target]
+
+                target_losses = self.neural_scorer.compute_tag_loss(
+                    target_scores, gold_labels_target)
+                losses += np.array(target_losses)
+
+        return losses
+
+    def train_batch(self, instance_data):
+        '''
+        Run one batch of a learning algorithm. If it is an online one, just
+        run through each instance.
+
+        :param instance_data: InstanceData object containing the instances of
+            the batch
+        '''
+        self.neural_scorer.train_mode()
+
+        start_time = time.time()
+        # scores is a list of dictionaries [target] -> score array
+        scores = self.neural_scorer.compute_scores(instance_data.instances,
+                                                   instance_data.parts)
+        end_time = time.time()
+        self.time_scores += end_time - start_time
+
+        all_predicted_parts = []
+        for i in range(len(instance_data)):
+            instance = instance_data.instances[i]
+            parts = instance_data.parts[i]
+            gold_parts = instance_data.gold_parts[i]
+            gold_labels = instance_data.gold_labels[i]
+            inst_scores = scores[i]
+
+            score_parts = inst_scores[Target.DEPENDENCY_PARTS][:len(parts)]
+            predicted_parts = self.decode_train(
+                instance, parts, score_parts, gold_parts)
+
+            all_predicted_parts.append(predicted_parts)
+
+            self._update_task_metrics(
+                predicted_parts, instance, inst_scores, parts,
+                gold_parts, gold_labels)
+
+        # run the gradient step for the whole batch
+        start_time = time.time()
+        self.make_gradient_step(instance_data.gold_parts, all_predicted_parts,
+                                instance_data.gold_labels)
+        end_time = time.time()
+        self.time_gradient += end_time - start_time
+
+    def make_gradient_step(self, gold_parts, pred_parts, gold_labels):
+        self.neural_scorer.compute_gradients(gold_parts, pred_parts,
+                                             gold_labels)
+        self.neural_scorer.make_gradient_step()
+
+    def decode_train(self, instance, parts, part_scores, gold_output):
+        """
+        Decode the scores for a structured problem at training time.
+
+        Return the predicted output (for each part) and eta.
+        """
+        # Do the decoding.
+        start_decoding = time.time()
+        predicted_output, cost, loss =  self.decoder.decode_cost_augmented(
+            instance, parts, part_scores, gold_output)
+
+        end_decoding = time.time()
+        self.time_decoding += end_decoding - start_decoding
+
+        # Update the total loss and cost.
+        if loss < 0.0:
+            if loss < -1e-6:
+                # len 2 means root + one word
+                msg_len_1 = '(sentence length 1)' \
+                    if len(instance) == 2 else ''
+                msg = 'Negative loss set to zero: %f %s' % (loss, msg_len_1)
+                logging.warning(msg)
+            loss = 0.0
+
+        self.total_loss += loss
+
+        return predicted_output
+
     def label_instance(self, instance, parts, output):
         """
         :type instance: DependencyInstance
         :type parts: DependencyParts
-        :param output: lists with dictionaries mapping target names to
-            predictions
+        :param output: dictionary mapping target names to predictions
         :return:
         """
         root = -1
         root_score = -1
 
-        dep_output = self.get_parts_scores(output)
+        dep_output = output[Target.DEPENDENCY_PARTS]
 
         offset = parts.get_type_offset(Arc)
         num_arcs = parts.get_num_type(Arc)
@@ -1143,23 +1390,24 @@ class TurboParser(StructuredClassifier):
             if not self.options.unlabeled:
                 index = parts.find_arc_index(h, m) - offset
                 label = parts.best_labels[index]
-                label_name = self.dictionary.get_relation_name(label)
+                label_name = self.token_dictionary.deprel_alphabet.\
+                    get_label_name(label)
                 instance.relations[m] = label_name
 
             if self.options.predict_upos:
                 # -1 because there's no tag for the root
-                tag = output['upos'][m - 1]
-                tag_name = self.token_dictionary.\
+                tag = output[Target.UPOS][m - 1]
+                tag_name = self.token_dictionary. \
                     upos_alphabet.get_label_name(tag)
                 instance.upos[m] = tag_name
             if self.options.predict_xpos:
-                tag = output['xpos'][m - 1]
-                tag_name = self.token_dictionary.\
+                tag = output[Target.XPOS][m - 1]
+                tag_name = self.token_dictionary. \
                     xpos_alphabet.get_label_name(tag)
                 instance.xpos[m] = tag_name
             if self.options.predict_morph:
-                tag = output['morph'][m - 1]
-                tag_name = self.token_dictionary.\
+                tag = output[Target.MORPH][m - 1]
+                tag_name = self.token_dictionary. \
                     morph_singleton_alphabet.get_label_name(tag)
                 instance.morph_singletons[m] = tag_name
 
@@ -1170,71 +1418,8 @@ class TurboParser(StructuredClassifier):
                 instance.heads[m] = root
                 if not self.options.unlabeled:
                     instance.relations[m] = \
-                        self.dictionary.get_relation_name(0)
-
-
-def get_naive_metrics(predicted, gold_output, parts, length):
-    """
-    Compute the UAS (unlabeled accuracy score) and LAS (labeled accuracy score)
-    naively, without considering tree constraints. It just takes the highest
-    scoring head and label for each token.
-
-    If the decoder predicted output is given, tree constraints have already been
-    imposed, except for single root (which is not necessary for some treebanks).
-
-    :param predicted: numpy array with scores for each part (can also be the
-        decoder output)
-    :param gold_output: same as predicted, with gold data. This
-    :param parts: DependencyParts
-    :type parts: DependencyParts
-    :param length: length of the sentence, excluding root
-    :return: UAS, LAS
-    """
-    # length + 1 to match the modifier indices
-    head_per_modifier = np.zeros(length + 1, np.int)
-    head_score_per_modifier = np.zeros(length + 1, np.float)
-    label_per_modifier = np.zeros(length + 1, np.float)
-    label_score_per_modifier = np.zeros(length + 1, np.float)
-    head_hits = np.zeros(length + 1, np.float)
-    label_hits = np.zeros(length + 1, np.float)
-
-    offset_arc = parts.get_type_offset(Arc)
-    for i, arc in enumerate(parts.iterate_over_type(Arc), offset_arc):
-        m = arc.modifier
-        score = predicted[i]
-        if score < head_score_per_modifier[m]:
-            continue
-
-        head_score_per_modifier[m] = score
-        head_per_modifier[m] = arc.head
-        if gold_output[i] == 1:
-            head_hits[m] = 1
-        else:
-            head_hits[m] = 0
-
-    offset_labeled = parts.get_type_offset(LabeledArc)
-    for i, arc in enumerate(parts.iterate_over_type(LabeledArc),
-                            offset_labeled):
-        m = arc.modifier
-        score = predicted[i]
-        if score < label_score_per_modifier[m]:
-            continue
-
-        label_score_per_modifier[m] = score
-        label_per_modifier[m] = arc.label
-        if gold_output[i] == 1:
-            label_hits[m] = 1
-        else:
-            label_hits[m] = 0
-
-    # LAS counts modifiers with correct label AND head
-    label_head_hits = np.logical_and(head_hits, label_hits)
-
-    # exclude root
-    uas = head_hits[1:].mean()
-    las = label_head_hits[1:].mean()
-
-    return uas, las
+                        self.token_dictionary.deprel_alphabet.\
+                            get_relation_name(0)
 
 
 def get_predicted_labels(predicted_heads, parts):
@@ -1253,3 +1438,21 @@ def get_predicted_labels(predicted_heads, parts):
         labels[modifier - 1] = parts.best_labels[i]
 
     return labels
+
+
+def load_pruner(model_path):
+    """
+    Load and return a pruner model.
+
+    This function takes care of keeping the main parser and the pruner
+    configurations separate.
+    """
+    logging.info('Loading pruner from %s' % model_path)
+    with open(model_path, 'rb') as f:
+        pruner_options = pickle.load(f)
+
+    pruner_options.train = False
+    pruner = TurboParser(pruner_options)
+    pruner.load(model_path)
+
+    return pruner

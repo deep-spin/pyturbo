@@ -649,14 +649,14 @@ def chu_liu_edmonds(score_matrix):
     Run the Chu-Liu-Edmonds' algorithm to find the maximum spanning tree.
 
     :param score_matrix: a matrix such that cell [m, h] has the score for the
-        arc (m, h).
+        arc (h, m).
     :return: an array heads, such that heads[m] contains the head of token m.
         The root is in position 0 and has head -1.
     """
     # avoid loops to self
     np.fill_diagonal(score_matrix, -np.inf)
 
-    # head doesn't point to anything
+    # no token points to the root but the root itself
     score_matrix[0] = -np.inf
     score_matrix[0, 0] = 0
 

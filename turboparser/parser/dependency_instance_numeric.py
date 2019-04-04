@@ -5,7 +5,7 @@ import numpy as np
 
 class DependencyInstanceNumeric(DependencyInstance):
     """An dependency parsing instance with numeric fields."""
-    def __init__(self, instance, token_dictionary, relation_dictionary):
+    def __init__(self, instance, token_dictionary):
         """
         :param instance: DependencyInstance
         :param token_dictionary: TokenDictionary
@@ -93,7 +93,7 @@ class DependencyInstanceNumeric(DependencyInstance):
 
             self.heads[i] = instance.heads[i]
             relation = instance.relations[i]
-            self.relations[i] = relation_dictionary.get_relation_id(relation)
+            self.relations[i] = token_dictionary.get_deprel_id(relation)
 
     def get_characters(self, i):
         return self.characters[i]

@@ -10,10 +10,10 @@ class Instance(object):
 
 class InstanceData(object):
     """
-    Class for storing a list of instances, their corresponding parts, features
-    and gold labels.
+    Class for storing a list of instances, their corresponding parts and gold
+    labels.
     """
-    def __init__(self, instances, parts, features=None, gold_parts=None,
+    def __init__(self, instances, parts, gold_parts=None,
                  gold_labels=None):
         """
         :param instances: a list of instances
@@ -31,16 +31,14 @@ class InstanceData(object):
         """
         self.instances = instances
         self.parts = parts
-        self.features = features
         self.gold_parts = gold_parts
         self.gold_labels = gold_labels
 
     def __getitem__(self, item):
-        features = None if self.features is None else self.features[item]
         gold_parts = None if self.gold_parts is None else self.gold_parts[item]
         labels = None if self.gold_labels is None else self.gold_labels[item]
         return InstanceData(self.instances[item], self.parts[item],
-                            features, gold_parts, labels)
+                            gold_parts, labels)
 
     def __len__(self):
         return len(self.instances)
@@ -59,8 +57,6 @@ class InstanceData(object):
         """Auxiliary internal function"""
         # zip the attributes together so they are shuffled in the same order
         data = [self.instances, self.parts]
-        if self.features is not None:
-            data.append(self.features)
         if self.gold_parts is not None:
             data.append(self.gold_parts)
         if self.gold_labels is not None:
@@ -76,8 +72,6 @@ class InstanceData(object):
 
         self.instances = list(next(it))
         self.parts = list(next(it))
-        if self.features is not None:
-            self.features = list(next(it))
         if self.gold_parts is not None:
             self.gold_parts = list(next(it))
         if self.gold_labels is not None:

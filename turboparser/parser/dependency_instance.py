@@ -76,5 +76,11 @@ class DependencyInstance():
     def get_head(self, i):
         return self.heads[i]
 
+    def get_all_heads(self):
+        return self.heads
+
     def get_relation(self, i):
         return self.relations[i]
+
+    def get_all_relations(self):
+        return self.relations

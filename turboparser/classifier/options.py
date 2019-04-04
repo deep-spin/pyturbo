@@ -22,10 +22,6 @@ class OptionParser(object):
         parser.add_argument('--test', action='store_const',
                             default=0, const=1,
                             help='1 for testing the classifier.')
-        parser.add_argument('--evaluate', action='store_const',
-                            default=0, const=1,
-                            help="""1 for evaluating the classifier 
-                            (requires --test).""")
         parser.add_argument('--training_path', type=str, default=None,
                             help='Path to the training data.')
         parser.add_argument('--valid_path', type=str,
@@ -78,6 +74,9 @@ class OptionParser(object):
                             help='Regularization parameter C.')
         parser.add_argument('--batch_size', type=int, default=16,
                             help='Batch size for neural models')
+        parser.add_argument('-v', '--verbose', action='store_true',
+                            help='Verbose mode with some extra information '
+                                 'about the models')
 
         self.parser = parser
 
@@ -91,7 +90,6 @@ class OptionParser(object):
         options = Options()
         options.train = bool(args['train'])
         options.test = bool(args['test'])
-        options.evaluate = bool(args['evaluate'])
         options.training_path = args['training_path']
         options.valid_path = args['valid_path']
         options.test_path = args['test_path']
@@ -112,5 +110,6 @@ class OptionParser(object):
         options.decay = args['decay']
         options.beta1 = args['beta1']
         options.beta2 = args['beta2']
+        options.verbose = args['verbose']
 
         return options

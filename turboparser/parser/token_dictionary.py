@@ -1,13 +1,11 @@
 from ..classifier.alphabet import Alphabet
 from ..classifier.dictionary import Dictionary
+from .dependency_reader import ConllReader
 import pickle
 import logging
 from collections import Counter
 
 UNKNOWN = '_UNKNOWN_'
-START = '<s>'
-STOP = '</s>'
-PADDING = '_PADDING_'
 
 
 class TokenDictionary(Dictionary):
@@ -27,6 +25,9 @@ class TokenDictionary(Dictionary):
         self.upos_alphabet = Alphabet()
         self.xpos_alphabet = Alphabet()
         self.shape_alphabet = Alphabet()
+        self.deprel_alphabet = Alphabet()
+
+        self.max_forms = int(10e7)
 
         # keep all alphabets ordered
         self.alphabets = [self.character_alphabet,
@@ -40,42 +41,12 @@ class TokenDictionary(Dictionary):
                           self.morph_singleton_alphabet,
                           self.upos_alphabet,
                           self.xpos_alphabet,
-                          self.shape_alphabet]
-
-        # Special symbols.
-        self.special_symbols = Alphabet()
-        self.token_unknown = self.special_symbols.insert(UNKNOWN)
-        self.token_start = self.special_symbols.insert(START)
-        self.token_stop = self.special_symbols.insert(STOP)
-        self.token_padding = self.special_symbols.insert(PADDING)
-
-        # Maximum alphabet sizes.
-        self.max_forms = 0xffff
-        self.max_lemmas = 0xffff
-        self.max_shapes = 0xffff
-        self.max_tags = 0xff
-        self.max_morph_tags = 0xfff
-
-    def add_special_symbol(self, symbol):
-        """
-        Add special symbols to the dictionary.
-
-        Any calls to this method must be made before `initialize`.
-        """
-        self.special_symbols.insert(symbol)
+                          self.shape_alphabet,
+                          self.deprel_alphabet]
 
     def save(self, file):
         for alphabet in self.alphabets:
             pickle.dump(alphabet, file)
-        pickle.dump(self.special_symbols, file)
-        pickle.dump(self.token_unknown, file)
-        pickle.dump(self.token_start, file)
-        pickle.dump(self.token_stop, file)
-        pickle.dump(self.max_forms, file)
-        pickle.dump(self.max_lemmas, file)
-        pickle.dump(self.max_shapes, file)
-        pickle.dump(self.max_tags, file)
-        pickle.dump(self.max_morph_tags, file)
 
     def load(self, file):
         # TODO: avoid repeating code somehow
@@ -91,15 +62,7 @@ class TokenDictionary(Dictionary):
         self.upos_alphabet = pickle.load(file)
         self.xpos_alphabet = pickle.load(file)
         self.shape_alphabet = pickle.load(file)
-        self.special_symbols = pickle.load(file)
-        self.token_unknown = pickle.load(file)
-        self.token_start = pickle.load(file)
-        self.token_stop = pickle.load(file)
-        self.max_forms = pickle.load(file)
-        self.max_lemmas = pickle.load(file)
-        self.max_shapes = pickle.load(file)
-        self.max_tags = pickle.load(file)
-        self.max_morph_tags = pickle.load(file)
+        self.deprel_alphabet = pickle.load(file)
 
     def allow_growth(self):
         for alphabet in self.alphabets:
@@ -116,6 +79,9 @@ class TokenDictionary(Dictionary):
     def get_xpos_tags(self):
         """Return the set of XPOS tags"""
         return self.xpos_alphabet.keys()
+
+    def get_deprel_tags(self):
+        return self.deprel_alphabet.keys()
 
     def get_num_characters(self):
         return len(self.character_alphabet)
@@ -140,6 +106,9 @@ class TokenDictionary(Dictionary):
 
     def get_num_morph_singletons(self):
         return len(self.morph_singleton_alphabet)
+
+    def get_num_deprels(self):
+        return len(self.deprel_alphabet)
 
     def get_embedding_id(self, form):
         id_ = self.embedding_alphabet.lookup(form)
@@ -213,14 +182,20 @@ class TokenDictionary(Dictionary):
             return id_
         return self.shape_alphabet.lookup(UNKNOWN)
 
-    def initialize(self, reader, case_sensitive, word_dict=None):
+    def get_deprel_id(self, deprel):
+        id_ = self.deprel_alphabet.lookup(deprel)
+        if id_ >= 0:
+            return id_
+        return self.deprel_alphabet.lookup(UNKNOWN)
+
+    def initialize(self, input_path, case_sensitive, word_dict=None):
         """
         Initializes the dictionary with indices for word forms and tags.
 
         If a word dictionary with words having pretrained embeddings is given,
         new words found in the training data are added in the beginning of it
 
-        :param reader: a subclass of Reader
+        :param input_path: path to an input CoNLL file
         :param word_dict: optional dictionary mapping words to indices, in case
             pre-trained embeddings are used.
         """
@@ -230,27 +205,23 @@ class TokenDictionary(Dictionary):
         form_counts = Counter()
         form_lower_counts = Counter()
         lemma_counts = Counter()
-        upos_counts = Counter()
-        xpos_counts = Counter()
-        morph_tag_counts = Counter()
-        morph_singletons_counts = Counter()
 
-        for name in self.special_symbols.names:
-            # embeddings not included here to keep the same ordering
-            for alphabet in [self.form_alphabet,
-                             self.form_lower_alphabet,
-                             self.lemma_alphabet,
-                             self.prefix_alphabet,
-                             self.suffix_alphabet,
-                             self.upos_alphabet,
-                             self.xpos_alphabet,
-                             self.morph_tag_alphabet,
-                             self.morph_singleton_alphabet]:
-                alphabet.insert(name)
+        # embeddings not included here to keep the same ordering
+        for alphabet in [self.form_alphabet,
+                         self.form_lower_alphabet,
+                         self.lemma_alphabet,
+                         self.character_alphabet,
+                         self.upos_alphabet,
+                         self.xpos_alphabet,
+                         self.morph_tag_alphabet,
+                         self.morph_singleton_alphabet,
+                         self.deprel_alphabet]:
+            alphabet.insert(UNKNOWN)
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
-        with reader.open(self.classifier.options.training_path) as r:
+        reader = ConllReader()
+        with reader.open(input_path) as r:
             for instance in r:
                 for i in range(len(instance)):
                     # Add form to alphabet.
@@ -270,52 +241,40 @@ class TokenDictionary(Dictionary):
                     lemma = instance.get_lemma(i)
                     lemma_counts[lemma] += 1
 
-                    # Add prefix/suffix to alphabet.
-                    # TODO: add varying lengths.
-                    prefix = form[:self.classifier.options.prefix_length]
-                    suffix = form[-self.classifier.options.suffix_length:]
+                    # Dependency relation
+                    deprel = instance.get_relation(i)
+                    self.deprel_alphabet.insert(deprel)
 
                     # Add tags to alphabet.
                     tag = instance.get_upos(i)
-                    upos_counts[tag] += 1
+                    self.upos_alphabet.insert(tag)
 
                     tag = instance.get_xpos(i)
-                    xpos_counts[tag] += 1
+                    self.xpos_alphabet.insert(tag)
 
                     # Add morph tags to alphabet.
                     morph_singleton = instance.get_morph_singleton(i)
-                    morph_singletons_counts[morph_singleton] += 1
+                    self.morph_singleton_alphabet.insert(morph_singleton)
                     for j in range(instance.get_num_morph_tags(i)):
                         morph_tag = instance.get_morph_tag(i, j)
-                        morph_tag_counts[morph_tag] += 1
+                        self.morph_tag_alphabet.insert(morph_tag)
 
         # Now adjust the cutoffs if necessary.
+        # (only using cutoffs for words and chars)
         for label, alphabet, counter, cutoff, max_length in \
-            zip(['char', 'form', 'form_lower', 'lemma', 'upos', 'xpos',
-                 'morph_tag', 'morph_singleton'],
+            zip(['char', 'form', 'form_lower', 'lemma'],
                 [self.character_alphabet, self.form_alphabet,
-                 self.form_lower_alphabet, self.lemma_alphabet,
-                 self.upos_alphabet, self.xpos_alphabet,
-                 self.morph_tag_alphabet, self.morph_singleton_alphabet],
-                [char_counts, form_counts, form_lower_counts, lemma_counts,
-                 upos_counts, xpos_counts, morph_tag_counts,
-                 morph_singletons_counts],
+                 self.form_lower_alphabet, self.lemma_alphabet],
+                [char_counts, form_counts, form_lower_counts, lemma_counts],
                 [self.classifier.options.char_cutoff,
                  self.classifier.options.form_cutoff,
                  self.classifier.options.form_cutoff,
-                 self.classifier.options.lemma_cutoff,
-                 self.classifier.options.tag_cutoff,
-                 self.classifier.options.tag_cutoff,
-                 self.classifier.options.morph_tag_cutoff,
-                 self.classifier.options.morph_tag_cutoff],
-                [int(10e6), self.max_forms, self.max_forms, self.max_lemmas,
-                 self.max_tags, self.max_tags, self.max_morph_tags,
-                 self.max_morph_tags]):
+                 self.classifier.options.lemma_cutoff],
+                [int(10e6), self.max_forms, self.max_forms, self.max_forms]):
 
             alphabet.clear()
-            for name in self.special_symbols.names:
-                alphabet.insert(name)
-            max_length = max_length - len(self.special_symbols)
+            alphabet.insert(UNKNOWN)
+            max_length -= 1  # -1 for the unknown symbol
             for name, count in counter.most_common(max_length):
                 if count >= cutoff:
                     alphabet.insert(name)
