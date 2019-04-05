@@ -5,6 +5,8 @@ class DependencyPart(object):
     """
     Base class for Dependency Parts
     """
+    __slots__ = 'head', 'modifier'
+
     def __init__(self):
         raise NotImplementedError('Abstract class')
 
@@ -29,6 +31,8 @@ class Arc(DependencyPart):
 
 
 class LabeledArc(DependencyPart):
+    __slots__ = 'label',
+
     def __init__(self, head=-1, modifier=-1, label=-1):
         self.head = head
         self.modifier = modifier
@@ -36,6 +40,8 @@ class LabeledArc(DependencyPart):
 
 
 class Grandparent(DependencyPart):
+    __slots__ = 'grandparent',
+
     def __init__(self, head=-1, modifier=-1, grandparent=-1):
         self.head = head
         self.modifier = modifier
@@ -43,6 +49,8 @@ class Grandparent(DependencyPart):
 
 
 class NextSibling(DependencyPart):
+    __slots__ = 'sibling'
+
     def __init__(self, head=-1, modifier=-1, sibling=-1):
         self.head = head
         self.modifier = modifier
@@ -50,6 +58,8 @@ class NextSibling(DependencyPart):
 
 
 class GrandSibling(DependencyPart):
+    __slots__ = 'grandparent', 'sibling'
+
     def __init__(self, head=-1, modifier=-1, grandparent=-1, sibling=-1):
         self.head = head
         self.modifier = modifier

@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 from .dependency_parts import Arc, DependencyParts, NextSibling, Grandparent, \
     GrandSibling, LabeledArc
 from .token_dictionary import TokenDictionary, UNKNOWN
