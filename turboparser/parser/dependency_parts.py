@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import numpy as np
 
 
 class DependencyPart(object):
@@ -68,12 +69,30 @@ class GrandSibling(DependencyPart):
 
 
 class DependencyParts(object):
-    def __init__(self):
+    def __init__(self, instance):
+        """
+        A DependencyParts object stores all the parts into which a dependency
+        tree is factored.
+
+        This class has an attribute arc_mask, a matrix with shape (n, n) in
+        which cell (m, h) indicates if the arc from h to m is considered, if
+        non-zero, or pruned out, if zero.
+
+        In principle, all labels are considered possible for all arcs.
+
+        For higher order parts, it stores OrderedDict's that map the class
+        (i.e., a class object, not an instance) to DependencyPart objects such
+        as Grandparent, NextSibling, etc.
+
+        :param instance: a DependencyInstanceNumeric object
+        """
         self.index = None
         self.index_labeled = None
-        self.arc_index = {}
-        self.labeled_indices = {}
-        self.arc_labels = {}
+
+        length = len(instance)
+        self.arc_mask = np.ones([length, length], np.int)
+        self.gold_arcs = None
+        self._set_gold_arcs(instance)
 
         # part_lists[Arc] contains the list of Arc objects; same for others
         self.part_lists = OrderedDict()
@@ -83,6 +102,19 @@ class DependencyParts(object):
 
         # the i-th position stores the best label found for arc i
         self.best_labels = []
+
+    def _set_gold_arcs(self, instance):
+        """
+        If the instance has gold heads, store the gold arcs in arc matrix.
+        """
+        heads = instance.get_all_heads()
+        if heads[1] == -1:
+            # check [-1] because [0] is the root
+            return
+
+        self.gold_arcs = np.ones_like(self.arc_mask)
+        for m, h in enumerate(heads[1:], 1):
+            self.gold_arcs[m, h] = 1
 
     def has_type(self, type_):
         """
