@@ -69,7 +69,7 @@ class GrandSibling(DependencyPart):
 
 
 class DependencyParts(object):
-    def __init__(self, instance):
+    def __init__(self, instance, model_type):
         """
         A DependencyParts object stores all the parts into which a dependency
         tree is factored.
@@ -85,6 +85,8 @@ class DependencyParts(object):
         as Grandparent, NextSibling, etc.
 
         :param instance: a DependencyInstanceNumeric object
+        :param model_type: a ModelType object, indicating which type of parts
+            should be created (siblings, grandparents, etc)
         """
         self.index = None
         self.index_labeled = None

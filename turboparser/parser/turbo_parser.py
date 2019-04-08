@@ -461,7 +461,7 @@ class TurboParser(object):
         :return: a tuple (instance, parts).
             The returned instance will have been formatted.
         """
-        parts = DependencyParts()
+        parts = DependencyParts(instance, self.model_type)
         self.pruner_mistakes = 0
 
         orig_instance = instance
