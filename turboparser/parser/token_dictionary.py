@@ -27,7 +27,7 @@ class TokenDictionary(Dictionary):
         self.shape_alphabet = Alphabet()
         self.deprel_alphabet = Alphabet()
 
-        self.max_forms = int(10e7)
+        self.max_forms = 0xffff
 
         # keep all alphabets ordered
         self.alphabets = [self.character_alphabet,
