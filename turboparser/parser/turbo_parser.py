@@ -351,7 +351,7 @@ class TurboParser(object):
     def format_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.token_dictionary)
 
-    def prune(self, instance, parts):
+    def prune(self, instance):
         """
         Prune out some arcs with the pruner model.
 
@@ -461,26 +461,15 @@ class TurboParser(object):
         :return: a tuple (instance, parts).
             The returned instance will have been formatted.
         """
-        parts = DependencyParts(instance, self.model_type)
-        self.pruner_mistakes = 0
-
-        orig_instance = instance
-        instance = self.format_instance(instance)
-
-        self.make_parts_basic(instance, parts)
-        if not self.options.unlabeled:
-            self.make_parts_labeled(instance, parts)
-
         if self.has_pruner:
-            parts = self.prune(orig_instance, parts)
+            prune_mask = self.prune(instance)
+        else:
+            prune_mask = None
 
-        if self.model_type.consecutive_siblings:
-            self.make_parts_consecutive_siblings(instance, parts)
-        if self.model_type.grandparents:
-            self.make_parts_grandparent(instance, parts)
-
-        if self.model_type.grandsiblings:
-            self.make_parts_grandsibling(instance, parts)
+        instance = self.format_instance(instance)
+        num_relations = self.token_dictionary.get_num_deprels()
+        parts = DependencyParts(instance, self.model_type, prune_mask,
+                                num_relations)
 
         return instance, parts
 

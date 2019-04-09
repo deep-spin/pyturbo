@@ -1,6 +1,6 @@
 from collections import OrderedDict
 import numpy as np
-
+from .dependency_instance_numeric import DependencyInstanceNumeric
 
 class DependencyPart(object):
     """
@@ -69,7 +69,7 @@ class GrandSibling(DependencyPart):
 
 
 class DependencyParts(object):
-    def __init__(self, instance, model_type):
+    def __init__(self, instance, model_type, mask=None, num_relations=None):
         """
         A DependencyParts object stores all the parts into which a dependency
         tree is factored.
@@ -87,14 +87,17 @@ class DependencyParts(object):
         :param instance: a DependencyInstanceNumeric object
         :param model_type: a ModelType object, indicating which type of parts
             should be created (siblings, grandparents, etc)
+        :param mask: either None (no prune) or a numpy matrix with shape (n, n)
+            in which cell (m, h) indicates if the arc from h to m is considered,
+            if non-zero, or pruned out, if zero.
+        :param num_relations: number of dependency relations; necessary if
+            gold relations are to be stored
         """
         self.index = None
         self.index_labeled = None
 
-        length = len(instance)
-        self.arc_mask = np.ones([length, length], np.int)
-        self.gold_arcs = None
-        self._set_gold_arcs(instance)
+        self._make_parts(instance, model_type, num_relations)
+        self.arc_mask = mask
 
         # part_lists[Arc] contains the list of Arc objects; same for others
         self.part_lists = OrderedDict()
@@ -105,18 +108,40 @@ class DependencyParts(object):
         # the i-th position stores the best label found for arc i
         self.best_labels = []
 
-    def _set_gold_arcs(self, instance):
+    def _make_parts(self, instance, model_type, num_relations):
+        """
+        Create all the parts to represent the instance
+        """
+        # if there are gold labels, store them
+        self._set_gold_arcs(instance, num_relations)
+
+        if model_type.consecutive_siblings:
+            raise NotImplemented
+        if model_type.grandparents:
+            raise NotImplemented
+        if model_type.grandsiblings:
+            raise NotImplemented
+
+    def _set_gold_arcs(self, instance, num_relations):
         """
         If the instance has gold heads, store the gold arcs in arc matrix.
+        :type instance: DependencyInstanceNumeric
         """
         heads = instance.get_all_heads()
+        relations = instance.get_all_relations()
         if heads[1] == -1:
-            # check [-1] because [0] is the root
+            # check [1] because [0] is the root
             return
 
-        self.gold_arcs = np.ones_like(self.arc_mask)
-        for m, h in enumerate(heads[1:], 1):
+        length = len(instance)
+
+        # gold_arcs shape is (modifiers, heads)
+        # we store a sparse matrix to be used in the loss calculation
+        self.gold_arcs = np.zeros([length - 1, length], np.int)
+        self.gold_relations = np.zeros([length - 1, length, num_relations])
+        for m, (h, rel) in enumerate(zip(heads[1:], relations[1:])):
             self.gold_arcs[m, h] = 1
+            self.gold_relations[m, h, rel] = 1
 
     def has_type(self, type_):
         """
