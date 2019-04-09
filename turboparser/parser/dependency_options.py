@@ -65,15 +65,13 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--single_root', action='store_true',
                             help='When running the parser, enforce that there '
                                  'is only one root per sentence.')
-        parser.add_argument('--prune_relations', type=int, default=0,
+        parser.add_argument('--prune_relations', action='store_true',
                             help="""1 for pruning the set of possible relations
                             taking into account the labels that have occured for
                             each pair of POS tags in the training data.""")
-        parser.add_argument('--prune_distances', type=int, default=1,
-                            help="""1 for pruning the set of possible left/right
-                            distances taking into account the distances that
-                            have occured for each pair of POS tags in the
-                            training data.""")
+        parser.add_argument('--prune_tags', action='store_true',
+                            help="""Prune arcs with a combination of POS tags 
+                            unseen in training data.""")
         parser.add_argument('--pruner_path',
                             help="""Path to a pretrained model to be used as
                             pruner. This is independent from the main model; it
@@ -143,8 +141,8 @@ class DependencyOptionParser(OptionParser):
         options.predict_xpos = args['xpos']
         options.predict_morph = args['morph']
         options.projective = args['projective']
-        options.prune_relations = bool(args['prune_relations'])
-        options.prune_distances = bool(args['prune_distances'])
+        options.prune_relations = args['prune_relations']
+        options.prune_tags = args['prune_tags']
         options.pruner_path = args['pruner_path']
         options.pruner_posterior_threshold = args['pruner_posterior_threshold']
         options.pruner_max_heads = args['pruner_max_heads']

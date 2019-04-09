@@ -1,6 +1,7 @@
 from ..classifier.alphabet import Alphabet
 from ..classifier.dictionary import Dictionary
 from .dependency_reader import ConllReader
+from .dependency_instance import DependencyInstance
 import pickle
 import logging
 from collections import Counter
@@ -27,7 +28,12 @@ class TokenDictionary(Dictionary):
         self.shape_alphabet = Alphabet()
         self.deprel_alphabet = Alphabet()
 
-        self.max_forms = int(10e7)
+        # seen_arc_tags has the observed modifier POS tags as keys; values are
+        # dicts mapping observed head POS tags to a set of observed labels in
+        # that combination
+        self.seen_relations = {}
+
+        self.max_forms = 0xffff
 
         # keep all alphabets ordered
         self.alphabets = [self.character_alphabet,
@@ -47,6 +53,7 @@ class TokenDictionary(Dictionary):
     def save(self, file):
         for alphabet in self.alphabets:
             pickle.dump(alphabet, file)
+        pickle.dump(self.seen_relations, file)
 
     def load(self, file):
         # TODO: avoid repeating code somehow
@@ -63,6 +70,7 @@ class TokenDictionary(Dictionary):
         self.xpos_alphabet = pickle.load(file)
         self.shape_alphabet = pickle.load(file)
         self.deprel_alphabet = pickle.load(file)
+        self.seen_relations = pickle.load(file)
 
     def allow_growth(self):
         for alphabet in self.alphabets:
@@ -223,6 +231,8 @@ class TokenDictionary(Dictionary):
         reader = ConllReader()
         with reader.open(input_path) as r:
             for instance in r:
+                assert isinstance(instance, DependencyInstance)
+
                 for i in range(len(instance)):
                     # Add form to alphabet.
                     form = instance.get_form(i)
@@ -243,11 +253,21 @@ class TokenDictionary(Dictionary):
 
                     # Dependency relation
                     deprel = instance.get_relation(i)
-                    self.deprel_alphabet.insert(deprel)
+                    deprel_id = self.deprel_alphabet.insert(deprel)
 
                     # Add tags to alphabet.
                     tag = instance.get_upos(i)
-                    self.upos_alphabet.insert(tag)
+                    tag_id = self.upos_alphabet.insert(tag)
+
+                    if tag_id not in self.seen_relations:
+                        self.seen_relations[tag_id] = {}
+                    head = instance.get_head(i)
+                    if head > 0:
+                        head_tag = instance.get_upos(head)
+                        head_tag_id = self.upos_alphabet.insert(head_tag)
+                        if head_tag_id not in self.seen_relations[tag_id]:
+                            self.seen_relations[tag_id][head_tag_id] = set()
+                        self.seen_relations[tag_id][head_tag_id].add(deprel_id)
 
                     tag = instance.get_xpos(i)
                     self.xpos_alphabet.insert(tag)

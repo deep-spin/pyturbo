@@ -693,6 +693,7 @@ class TurboParser(object):
         :type parts: DependencyParts
         """
         make_gold = self.options.train
+        seen_relations = self.token_dictionary.seen_relations
 
         for h in range(len(instance)):
             for m in range(1, len(instance)):
@@ -705,22 +706,24 @@ class TurboParser(object):
                     continue
 
                 # determine which relations are allowed between h and m
-                modifier_tag = instance.get_upos(m)
-                head_tag = instance.get_upos(h)
+                if self.options.prune_relations:
+                    modifier_tag = instance.get_upos(m)
+                    head_tag = instance.get_upos(h)
 
-                #TODO: use pruned relations
-                allowed_relations = self.token_dictionary.get_deprel_tags()
-                # allowed_relations = self.dictionary.get_existing_relations(
-                #     modifier_tag, head_tag)
+                    if modifier_tag not in seen_relations or \
+                            head_tag not in seen_relations[modifier_tag]:
+                        # allow any deprel for unseen tag combinations
+                        allowed_relations = range(len(self.token_dictionary.\
+                            get_deprel_tags()))
+                    else:
+                        allowed_relations = \
+                            seen_relations[modifier_tag][head_tag]
+                else:
+                    # if not pruning relations, allow all
+                    allowed_relations = range(len(self.token_dictionary.
+                                                  get_deprel_tags()))
 
-                # If there is no allowed relation for this arc, but the
-                # unlabeled arc was added, then it was forced to be present
-                # to maintain connectivity of the graph. In that case (which
-                # should be pretty rare) consider all the possible
-                # relations.
-                if not allowed_relations:
-                    allowed_relations = self.token_dictionary.get_deprel_tags()
-                for l in range(len(allowed_relations)):
+                for l in allowed_relations:
                     part = LabeledArc(h, m, l)
 
                     if make_gold:
@@ -755,36 +758,19 @@ class TurboParser(object):
             If `instances` doesn't have the attribute `output`, return None.
         """
         make_gold = self.options.train
+        seen_relations = self.token_dictionary.seen_relations
 
         for h in range(len(instance)):
             for m in range(1, len(instance)):
                 if h == m:
                     continue
 
-                if h and self.options.prune_distances:
-                    raise NotImplementedError()
-                    # modifier_tag = instance.get_upos(m)
-                    # head_tag = instance.get_upos(h)
-                    # if h < m:
-                    #     # Right attachment.
-                    #     if m - h > \
-                    #             self.dictionary.get_maximum_right_distance(
-                    #                 modifier_tag, head_tag):
-                    #         continue
-                    # else:
-                    #     # Left attachment.
-                    #     if h - m > \
-                    #             self.dictionary.get_maximum_left_distance(
-                    #                 modifier_tag, head_tag):
-                    #         continue
-                if self.options.prune_relations:
-                    raise NotImplementedError()
-                    # modifier_tag = instance.get_upos(m)
-                    # head_tag = instance.get_upos(h)
-                    # allowed_relations = self.dictionary.get_existing_relations(
-                    #     modifier_tag, head_tag)
-                    # if not allowed_relations:
-                    #     continue
+                if h and self.options.prune_tags:
+                    modifier_tag = instance.get_upos(m)
+                    head_tag = instance.get_upos(h)
+                    if modifier_tag not in seen_relations or \
+                            head_tag not in seen_relations[modifier_tag]:
+                        continue
 
                 part = Arc(h, m)
                 if make_gold:
