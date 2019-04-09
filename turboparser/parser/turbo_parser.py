@@ -1056,25 +1056,19 @@ class TurboParser(object):
             In neural models, features is a list of None.
         """
         all_parts = []
-        all_gold_parts = []
         all_gold_labels = []
         formatted_instances = []
 
         for instance in instances:
             f_instance, parts = self.make_parts(instance)
-            gold_parts = parts.get_gold_output()
             gold_labels = self.get_gold_labels(f_instance)
-            if gold_parts is not None:
-                gold_parts = np.array(gold_parts, dtype=np.float)
 
             formatted_instances.append(f_instance)
             all_parts.append(parts)
-            all_gold_parts.append(gold_parts)
             all_gold_labels.append(gold_labels)
 
         self._report_make_parts(instances, all_parts)
-        data = InstanceData(formatted_instances, all_parts, all_gold_parts,
-                            all_gold_labels)
+        data = InstanceData(formatted_instances, all_parts, all_gold_labels)
         return data
 
     def train(self):
