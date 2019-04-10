@@ -187,7 +187,7 @@ class TurboParser(object):
             self.options.prune_relations = model_options.prune_relations
 
             # prune arcs with a distance unseen with the given POS tags
-            self.options.prune_distances = model_options.prune_distances
+            self.options.prune_tags = model_options.prune_tags
 
             # threshold for the basic pruner, if used
             self.options.pruner_posterior_threshold = \
