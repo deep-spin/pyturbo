@@ -1276,7 +1276,6 @@ class TurboParser(object):
         for i in range(len(instance_data)):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
-            gold_parts = instance_data.gold_parts[i]
             gold_labels = instance_data.gold_labels[i]
             inst_scores = scores[i]
 

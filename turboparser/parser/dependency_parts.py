@@ -95,14 +95,15 @@ class DependencyParts(object):
         """
         self.index = None
         self.index_labeled = None
-
-        self._make_parts(instance, model_type, num_relations)
+        self.num_parts = 0
         self.arc_mask = mask
 
-        # part_lists[Arc] contains the list of Arc objects; same for others
+        self._make_parts(instance, model_type, num_relations)
+
+        # part_lists[Type] contains the list of Type parts
         self.part_lists = OrderedDict()
 
-        # part_gold[Arc] contains the gold labels for Arc objects
+        # part_gold[Type] contains the gold labels for Type objects
         self.part_gold = OrderedDict()
 
         # the i-th position stores the best label found for arc i
@@ -114,6 +115,11 @@ class DependencyParts(object):
         """
         # if there are gold labels, store them
         self._set_gold_arcs(instance, num_relations)
+
+        # all non-masked arcs count as a part
+        possible_arcs = (len(instance) - 1) * len(instance)
+        num_masked = np.sum(self.arc_mask == 0)
+        self.num_parts = possible_arcs - num_masked
 
         if model_type.consecutive_siblings:
             raise NotImplemented
@@ -128,11 +134,11 @@ class DependencyParts(object):
         :type instance: DependencyInstanceNumeric
         """
         heads = instance.get_all_heads()
-        relations = instance.get_all_relations()
         if heads[1] == -1:
             # check [1] because [0] is the root
             return
 
+        relations = instance.get_all_relations()
         length = len(instance)
 
         # gold_arcs shape is (modifiers, heads)
@@ -154,7 +160,7 @@ class DependencyParts(object):
         return type_ in self.part_lists and len(self.part_lists[type_]) > 0
 
     def __len__(self):
-        return sum(len(part_list) for part_list in self.part_lists.values())
+        return self.num_parts
 
     def get_num_type(self, type_):
         """
