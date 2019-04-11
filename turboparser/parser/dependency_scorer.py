@@ -13,19 +13,15 @@ class DependencyNeuralScorer(object):
         self.part_scores = None
         self.model = None
 
-    def compute_gradients(self, gold_parts, predicted_parts, gold_labels):
+    def compute_gradients(self, instance_data, predicted_parts):
         """
         Compute the error gradients for parsing and tagging.
 
-        :param gold_parts: either a numpy 1d array for a single item or a list
-            of 1d arrays for a batch.
+        :param instance_data: InstanceData object
         :param predicted_parts: same as gold_output
-        :param gold_labels: list of dictionaries mapping each target name to a
-            list with the gold targets for the sentences in the batch.
-            Each array is as long as its sentence.
         """
         def _compute_loss(target_gold, logits):
-            targets = self.pad_labels(target_gold)
+            targets = pad_labels(target_gold)
 
             # cross_entropy expects (batch, n_classes, ...)
             logits = logits.transpose(1, 2)
@@ -34,6 +30,7 @@ class DependencyNeuralScorer(object):
             return cross_entropy
 
         loss = torch.tensor(0.)
+        gold_labels = instance_data.gold_labels
         if torch.cuda.is_available():
             loss = loss.cuda()
 
@@ -45,46 +42,20 @@ class DependencyNeuralScorer(object):
             logits = self.model.scores[target]
             loss += _compute_loss(target_gold, logits)
 
-        if loss > 0:
-            # TODO: a better way to skip backprop when there's
-            # no additional target
-            loss.backward(retain_graph=True)
-
-        if isinstance(gold_parts, list):
-            batch_size = len(gold_parts)
-            max_length = max(len(g) for g in gold_parts)
-            shape = [batch_size, max_length]
-            diff = torch.zeros(shape, dtype=torch.float)
-            for i in range(batch_size):
-                gold_item = gold_parts[i]
-                pred_item = predicted_parts[i]
-                diff[i, :len(gold_item)] = torch.tensor(pred_item - gold_item)
-        else:
-            diff = torch.tensor(predicted_parts - gold_parts,
-                                dtype=torch.float)
+        batch_size = len(instance_data)
+        max_length = max(len(parts) for parts in instance_data.parts)
+        shape = [batch_size, max_length]
+        diff = torch.zeros(shape, dtype=torch.float)
+        for i in range(batch_size):
+            inst_parts = instance_data.parts[i]
+            gold_parts = inst_parts
+            pred_item = predicted_parts[i]
+            diff[i, :len(gold_parts)] = torch.tensor(pred_item - gold_parts)
 
         parts_loss = (self.part_scores * diff).sum()
         loss += parts_loss.to(loss.device)
         # Backpropagate to accumulate gradients.
         loss.backward()
-
-    def pad_labels(self, labels):
-        """
-        Pad labels with -1 so that all of them have the same length
-
-        :param labels: a list (batch) of lists of labels
-        """
-        batch_size = len(labels)
-        max_length = max(len(a) for a in labels)
-        shape = [batch_size, max_length]
-        padded = torch.full(shape, -1, dtype=torch.long)
-        for i in range(batch_size):
-            padded[i, :len(labels[i])] = torch.tensor(labels[i])
-
-        if torch.cuda.is_available():
-            padded = padded.cuda()
-
-        return padded
 
     def compute_tag_loss(self, scores, gold_output, reduction='mean'):
         """Compute the loss for any tagging subtask
@@ -113,12 +84,12 @@ class DependencyNeuralScorer(object):
             parts = [parts]
 
         model_scores = self.model(instances, parts)
-        self.part_scores = model_scores[Target.DEPENDENCY_PARTS]
         numpy_scores = {target: model_scores[target].detach().cpu().numpy()
                         for target in model_scores}
 
+        # now convert a dictionary of arrays into a list of dictionaries
         score_list = []
-        for i in range(len(self.part_scores)):
+        for i in range(len(instances)):
             instance_scores = {target: numpy_scores[target][i]
                                for target in numpy_scores}
             score_list.append(instance_scores)
@@ -161,3 +132,22 @@ class DependencyNeuralScorer(object):
         self.optimizer.step()
         # Clear out the gradients before the next batch.
         self.model.zero_grad()
+
+
+def pad_labels(labels):
+    """
+    Pad labels with -1 so that all of them have the same length
+
+    :param labels: a list (batch) of lists of labels
+    """
+    batch_size = len(labels)
+    max_length = max(len(a) for a in labels)
+    shape = [batch_size, max_length]
+    padded = torch.full(shape, -1, dtype=torch.long)
+    for i in range(batch_size):
+        padded[i, :len(labels[i])] = torch.tensor(labels[i])
+
+    if torch.cuda.is_available():
+        padded = padded.cuda()
+
+    return padded

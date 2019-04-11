@@ -325,7 +325,7 @@ class DependencyDecoder(StructuredDecoder):
         :return: a margin array to be added to the model scores and a
             normalization constant
         """
-        p = np.zeros_like(len(parts), dtype=np.float)
+        p = np.zeros(len(parts), dtype=np.float)
         if parts.labeled:
             # place the margin on LabeledArcs scores
             # their offset in the gold vector is immediately after Arcs
@@ -336,7 +336,7 @@ class DependencyDecoder(StructuredDecoder):
             offset = 0
             num_parts = parts.num_arcs
 
-        gold_values = parts.gold_arcs[offset:offset + num_parts]
+        gold_values = parts.gold_parts[offset:offset + num_parts]
         p[offset:offset + num_parts] = 0.5 - gold_values
         q = 0.5 * gold_values.sum()
 

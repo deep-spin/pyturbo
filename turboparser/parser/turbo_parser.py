@@ -1285,14 +1285,12 @@ class TurboParser(object):
 
         # run the gradient step for the whole batch
         start_time = time.time()
-        self.make_gradient_step(instance_data.gold_parts, all_predicted_parts,
-                                instance_data.gold_labels)
+        self.make_gradient_step(instance_data, all_predicted_parts)
         end_time = time.time()
         self.time_gradient += end_time - start_time
 
-    def make_gradient_step(self, gold_parts, pred_parts, gold_labels):
-        self.neural_scorer.compute_gradients(gold_parts, pred_parts,
-                                             gold_labels)
+    def make_gradient_step(self, instance_data, pred_parts):
+        self.neural_scorer.compute_gradients(instance_data, pred_parts)
         self.neural_scorer.make_gradient_step()
 
     def decode_train(self, instance, parts, scores):

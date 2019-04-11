@@ -142,6 +142,8 @@ class DependencyParts(object):
         if model_type.grandsiblings:
             raise NotImplemented
 
+        self.gold_parts = np.array(self.gold_parts)
+
     def _make_gold_arcs(self, instance):
         """
         If the instance has gold heads, store the gold arcs in arc matrix.
