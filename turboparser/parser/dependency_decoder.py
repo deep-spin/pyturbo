@@ -8,6 +8,7 @@ from ..classifier.structured_decoder import StructuredDecoder
 from .dependency_instance import DependencyInstance
 from .dependency_parts import Arc, LabeledArc, NextSibling, DependencyParts, \
     Grandparent, GrandSibling
+from .constants import Target
 
 
 class PartStructure(object):
@@ -70,8 +71,8 @@ class DependencyDecoder(StructuredDecoder):
         :param parts: a DependencyParts objects holding all the parts included
             in the scoring functions; usually arcs, siblings and grandparents
         :type parts: DependencyParts
-        :param scores: array or tensor with scores for each part, produced by
-            the model. It should be a 1d array.
+        :param scores: dictionary mapping target names (such as arcs, relations,
+            grandparents etc) to arrays of scores
         :return:
         """
         # this keeps track of the index of each part added to the
@@ -81,24 +82,27 @@ class DependencyDecoder(StructuredDecoder):
         self.additional_indices = []
 
         if parts.has_type(LabeledArc):
-            scores = self.decode_labels(parts, scores)
+            self.decode_labels(parts, scores)
+
+        # this keeps track of the arcs in the order they were added to the graph
+        self.arcs = []
 
         graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores, graph)
 
-        self.use_siblings = parts.has_type(NextSibling)
-        self.use_grandparents = parts.has_type(Grandparent)
-        self.use_grandsiblings = parts.has_type(GrandSibling)
-
-        self._index_parts_by_head(parts, instance, scores)
-
-        if self.use_grandsiblings or \
-                (self.use_siblings and self.use_grandparents):
-            self.create_gp_head_automata(parts, graph, variables)
-        elif self.use_grandparents:
-            self.create_grandparent_factors(parts, scores, graph, variables)
-        elif self.use_siblings:
-            self.create_head_automata(parts, graph, variables)
+        # self.use_siblings = parts.has_type(NextSibling)
+        # self.use_grandparents = parts.has_type(Grandparent)
+        # self.use_grandsiblings = parts.has_type(GrandSibling)
+        #
+        # self._index_parts_by_head(parts, instance, scores)
+        #
+        # if self.use_grandsiblings or \
+        #         (self.use_siblings and self.use_grandparents):
+        #     self.create_gp_head_automata(parts, graph, variables)
+        # elif self.use_grandparents:
+        #     self.create_grandparent_factors(parts, scores, graph, variables)
+        # elif self.use_siblings:
+        #     self.create_head_automata(parts, graph, variables)
 
         graph.set_eta_ad3(.05)
         graph.adapt_eta_ad3(True)
@@ -121,41 +125,46 @@ class DependencyDecoder(StructuredDecoder):
         :return: the scores vector modified such that each unlabeled arc has
             its score increased by the best labeled score
         """
-        # store the position of the best label for each arc
-        # best_label_indices[i] contains the position in the gold vector
-        # corresponding to the best LabeledArc part for Arc i
-        self.best_label_indices = []
+        relation_scores = scores[Target.RELATIONS]
+        relation_scores[~parts.arc_mask] = -np.inf
+        self.best_labels = relation_scores.argmax(-1)
+        parts.best_labels = self.best_labels
 
-        # copied scores
-        new_scores = np.array(scores)
-        offset_arc = parts.get_type_offset(Arc)
-        offset_label = parts.get_type_offset(LabeledArc)
-
-        # we find which label has the highest score for each arc and sum
-        # the arc score with the label score
-        for i, arc in enumerate(parts.iterate_over_type(Arc), offset_arc):
-            labeled_indices = parts.find_labeled_arc_indices(arc.head,
-                                                             arc.modifier)
-            labels = parts.find_arc_labels(arc.head, arc.modifier)
-
-            best_label_index = -1
-            best_label = -1
-            best_score = -np.inf
-            for index, label in zip(labeled_indices, labels):
-                index += offset_label
-                score = scores[index]
-
-                if score > best_score:
-                    best_score = score
-                    best_label_index = index
-                    best_label = label
-
-            assert best_label_index >= 0
-            self.best_label_indices.append(best_label_index)
-            new_scores[i] += best_score
-            parts.best_labels.append(best_label)
-
-        return new_scores
+        # # store the position of the best label for each arc
+        # # best_label_indices[i] contains the position in the gold vector
+        # # corresponding to the best LabeledArc part for Arc i
+        # self.best_label_indices = []
+        #
+        # # copied scores
+        # new_scores = np.array(scores)
+        # offset_arc = parts.get_type_offset(Arc)
+        # offset_label = parts.get_type_offset(LabeledArc)
+        #
+        # # we find which label has the highest score for each arc and sum
+        # # the arc score with the label score
+        # for i, arc in enumerate(parts.iterate_over_type(Arc), offset_arc):
+        #     labeled_indices = parts.find_labeled_arc_indices(arc.head,
+        #                                                      arc.modifier)
+        #     labels = parts.find_arc_labels(arc.head, arc.modifier)
+        #
+        #     best_label_index = -1
+        #     best_label = -1
+        #     best_score = -np.inf
+        #     for index, label in zip(labeled_indices, labels):
+        #         index += offset_label
+        #         score = scores[index]
+        #
+        #         if score > best_score:
+        #             best_score = score
+        #             best_label_index = index
+        #             best_label = label
+        #
+        #     assert best_label_index >= 0
+        #     self.best_label_indices.append(best_label_index)
+        #     new_scores[i] += best_score
+        #     parts.best_labels.append(best_label)
+        #
+        # return new_scores
 
     def copy_unlabeled_predictions(self, parts, predicted_output):
         """
@@ -305,7 +314,7 @@ class DependencyDecoder(StructuredDecoder):
 
         return new_parts
 
-    def _get_margin(self, parts, gold_output):
+    def _get_margin(self, parts):
         """
         Compute and return a margin vector to be used in the loss and a
         normalization term to be added to it.
@@ -313,20 +322,22 @@ class DependencyDecoder(StructuredDecoder):
         It only affects Arcs or LabeledArcs (in case the latter are used).
 
         :param parts: DependencyParts object
-        :param gold_output: Binary array with gold parts
         :return: a margin array to be added to the model scores and a
             normalization constant
         """
-        p = np.zeros_like(gold_output, dtype=np.float)
-        if parts.has_type(LabeledArc):
-            part_type = LabeledArc
+        p = np.zeros_like(len(parts), dtype=np.float)
+        if parts.labeled:
+            # place the margin on LabeledArcs scores
+            # their offset in the gold vector is immediately after Arcs
+            offset = parts.num_arcs
+            num_parts = parts.num_labeled_arcs
         else:
-            part_type = Arc
+            # place the margin on Arc scores
+            offset = 0
+            num_parts = parts.num_arcs
 
-        offset = parts.get_type_offset(part_type)
-        num_arcs = parts.get_num_type(part_type)
-        gold_values = gold_output[offset:offset + num_arcs]
-        p[offset:offset + num_arcs] = 0.5 - gold_values
+        gold_values = parts.gold_arcs[offset:offset + num_parts]
+        p[offset:offset + num_parts] = 0.5 - gold_values
         q = 0.5 * gold_values.sum()
 
         return p, q
@@ -343,23 +354,25 @@ class DependencyDecoder(StructuredDecoder):
         :return: a numpy array with the same size as parts
         """
         predicted_output = np.zeros(len(parts), np.float)
+        num_arcs = parts.num_arcs
 
-        assert len(posteriors) == len(self.arc_indices)
-        assert len(additional_posteriors) == len(self.additional_indices)
+        assert len(posteriors) == num_arcs
+        assert len(additional_posteriors) == (len(parts) - num_arcs
+                                              - parts.num_labeled_arcs)
 
-        all_posteriors = posteriors + additional_posteriors
-        all_indices = self.arc_indices + self.additional_indices
-        for value, index in zip(all_posteriors, all_indices):
-            predicted_output[index] = value
+        predicted_output[:num_arcs] = posteriors
 
-        # if doing labeled parsing, set 1 to the label with highest score
-        # for each predicted arc
-        if self.best_label_indices:
-            offset_arcs = parts.get_type_offset(Arc)
-            for i, arc in enumerate(parts.iterate_over_type(Arc), offset_arcs):
-                arc_index = i - offset_arcs
-                best_label_index = self.best_label_indices[arc_index]
-                predicted_output[best_label_index] = predicted_output[i]
+        # if doing labeled parsing, set the score of the best label for each
+        # arc to be the same as the score of the arc
+        offset = num_arcs
+        num_relations = parts.num_relations
+
+        #TODO: set additional_posteriors
+
+        for posterior, (m, h) in zip(posteriors, self.arcs):
+            label = self.best_labels[m, h]
+            predicted_output[offset + label] = posterior
+            offset += num_relations
 
         return predicted_output
 
@@ -377,22 +390,40 @@ class DependencyDecoder(StructuredDecoder):
         # length is the number of tokens in the instance, including root
         length = len(instance)
 
+        arc_scores = scores[Target.HEADS]
+        if parts.labeled:
+            # take the best relation score for each arc
+            label_scores = scores[Target.RELATIONS]
+            inds = np.expand_dims(self.best_labels, 2)
+            best_label_scores = np.take_along_axis(label_scores, inds, 2)
+
+            # make a copy of arc scores so the originals are unchanged
+            arc_scores = arc_scores.copy()
+            arc_scores += best_label_scores.squeeze(2)
+
+        assert (length - 1) == len(arc_scores)
+        assert length == len(arc_scores[0])
+
         tree_factor = PFactorTree()
-        arcs = []
         variables = []
-        offset_arcs = parts.get_type_offset(Arc)
-        for r, part in enumerate(parts.iterate_over_type(Arc), offset_arcs):
-            arcs.append((part.head, part.modifier))
+        self.arcs = list(*zip(np.where(parts.arc_mask)))
+        for m, h in self.arcs:
             arc_variable = graph.create_binary_variable()
-            score = scores[r]
-            arc_variable.set_log_potential(score)
+            arc_variable.set_log_potential(arc_scores[m, h])
             variables.append(arc_variable)
-            self.arc_indices.append(r)
+
+        # for r, part in enumerate(parts.iterate_over_type(Arc), offset_arcs):
+        #     arcs.append((part.head, part.modifier))
+        #     arc_variable = graph.create_binary_variable()
+        #     score = scores[r]
+        #     arc_variable.set_log_potential(score)
+        #     variables.append(arc_variable)
+        #     self.arc_indices.append(r)
 
         # owned_by_graph makes the factor persist after calling this function
         # if left as False, the factor is garbage collected
         graph.declare_factor(tree_factor, variables, owned_by_graph=True)
-        tree_factor.initialize(length, arcs)
+        tree_factor.initialize(length, self.arcs)
 
         return variables
 

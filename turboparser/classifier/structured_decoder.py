@@ -12,19 +12,18 @@ class StructuredDecoder(object):
         as parts.'''
         raise NotImplementedError
 
-    def _get_margin(self, parts, gold_output):
+    def _get_margin(self, parts):
         """
         Compute and return a margin vector to be used in the loss and a
         normalization term to be added to it.
 
         This function is supposed to be overridden.
         """
-        return np.zeros_like(gold_output, dtype=np.float), 0
+        return np.zeros_like(len(parts), dtype=np.float), 0
 
-    def decode_mira(self, instance, parts, scores, gold_outputs,
-                    old_mira=False):
+    def decode_mira(self, instance, parts, scores, old_mira=False):
         '''Perform cost-augmented decoding or classical MIRA.'''
-        p, q = self._get_margin(parts, gold_outputs)
+        p, q = self._get_margin(parts)
 
         if old_mira:
             predicted_outputs = self.decode(instance, parts, scores)
@@ -32,14 +31,13 @@ class StructuredDecoder(object):
             scores_cost = scores + p
             predicted_outputs = self.decode(instance, parts, scores_cost)
         cost = p.dot(predicted_outputs) + q
-        loss = cost + scores.dot(predicted_outputs - gold_outputs)
+        loss = cost + scores.dot(predicted_outputs - parts.gold_parts)
 
         return predicted_outputs, cost, loss
 
-    def decode_cost_augmented(self, instance, parts, scores, gold_outputs):
+    def decode_cost_augmented(self, instance, parts, scores):
         '''Perform cost-augmented decoding.'''
-        return self.decode_mira(instance, parts, scores, gold_outputs,
-                                old_mira=False)
+        return self.decode_mira(instance, parts, scores, old_mira=False)
 
     def compute_loss(self, gold_output, predicted_output, scores):
         '''

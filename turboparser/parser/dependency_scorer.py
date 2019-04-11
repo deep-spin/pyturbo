@@ -46,7 +46,8 @@ class DependencyNeuralScorer(object):
             loss += _compute_loss(target_gold, logits)
 
         if loss > 0:
-            # TODO: a better way to skip backprop when there's no additional target
+            # TODO: a better way to skip backprop when there's
+            # no additional target
             loss.backward(retain_graph=True)
 
         if isinstance(gold_parts, list):

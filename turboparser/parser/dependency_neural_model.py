@@ -124,6 +124,8 @@ class DependencyNeuralModel(nn.Module):
         self.word_dropout_rate = word_dropout
         self.tag_dropout_rate = tag_dropout
         self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
+        self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
+        self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
         self.predict_upos = predict_upos
         self.predict_xpos = predict_xpos
@@ -150,9 +152,9 @@ class DependencyNeuralModel(nn.Module):
         total_tag_embedding_size = 0
         if tag_embedding_size:
             # only use tag embeddings if there are actual tags
-            # +2 for root and the placeholder "_" when there is no tags
+            # 3 means root, unk and the placeholder "_" when there are no tags
             num_upos = token_dictionary.get_num_upos_tags()
-            if num_upos > len(token_dictionary.special_symbols) + 2:
+            if num_upos > 3:
                 self.upos_embeddings = nn.Embedding(num_upos,
                                                     tag_embedding_size)
                 total_tag_embedding_size += tag_embedding_size
@@ -163,7 +165,7 @@ class DependencyNeuralModel(nn.Module):
             num_xpos = token_dictionary.get_num_xpos_tags()
             xpos_tags = token_dictionary.get_xpos_tags()
             upos_tags = token_dictionary.get_upos_tags()
-            if num_xpos > len(token_dictionary.special_symbols) + 2 and \
+            if num_xpos > 3 and \
                     upos_tags != xpos_tags:
                 self.xpos_embeddings = nn.Embedding(num_xpos,
                                                     tag_embedding_size)

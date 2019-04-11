@@ -69,16 +69,15 @@ class GrandSibling(DependencyPart):
 
 
 class DependencyParts(object):
-    def __init__(self, instance, model_type, mask=None, num_relations=None):
+    def __init__(self, instance, model_type, mask=None, labeled=True,
+                 num_relations=None):
         """
         A DependencyParts object stores all the parts into which a dependency
         tree is factored.
 
-        This class has an attribute arc_mask, a matrix with shape (n, n) in
-        which cell (m, h) indicates if the arc from h to m is considered, if
-        non-zero, or pruned out, if zero.
-
-        In principle, all labels are considered possible for all arcs.
+        This class has an attribute arc_mask to indicate which arcs are
+        considered possible. In principle, all labels are considered possible
+        for possible arcs.
 
         For higher order parts, it stores OrderedDict's that map the class
         (i.e., a class object, not an instance) to DependencyPart objects such
@@ -87,18 +86,22 @@ class DependencyParts(object):
         :param instance: a DependencyInstanceNumeric object
         :param model_type: a ModelType object, indicating which type of parts
             should be created (siblings, grandparents, etc)
-        :param mask: either None (no prune) or a numpy matrix with shape (n, n)
-            in which cell (m, h) indicates if the arc from h to m is considered,
-            if non-zero, or pruned out, if zero.
-        :param num_relations: number of dependency relations; necessary if
-            gold relations are to be stored
+        :param labeled: whether LabeledArc parts should be used
+        :param mask: either None (no prune) or a bool numpy matrix with shape
+            (n, n+1) -- n is number of words without root. Cell (m, h) indicates
+            if the arc from h to m is considered, if True, or pruned out, if
+            False.
+        :param num_relations: number of dependency relations, if used
         """
         self.index = None
         self.index_labeled = None
         self.num_parts = 0
         self.arc_mask = mask
+        self.labeled = labeled
+        self.num_relations = num_relations
+        self.gold_arcs = None
 
-        self._make_parts(instance, model_type, num_relations)
+        self._make_parts(instance, model_type)
 
         # part_lists[Type] contains the list of Type parts
         self.part_lists = OrderedDict()
@@ -109,17 +112,28 @@ class DependencyParts(object):
         # the i-th position stores the best label found for arc i
         self.best_labels = []
 
-    def _make_parts(self, instance, model_type, num_relations):
+    def _make_parts(self, instance, model_type):
         """
         Create all the parts to represent the instance
         """
+        # if no mask was given, create an all-True mask
+        if self.arc_mask is None:
+            self.arc_mask = np.ones([len(instance) - 1, len(instance)],
+                                    dtype=np.bool)
+
         # if there are gold labels, store them
-        self._set_gold_arcs(instance, num_relations)
+        self.gold_parts = self._make_gold_arcs(instance)
 
         # all non-masked arcs count as a part
-        possible_arcs = (len(instance) - 1) * len(instance)
+        possible_arcs = self.arc_mask.size
         num_masked = np.sum(self.arc_mask == 0)
-        self.num_parts = possible_arcs - num_masked
+        self.num_arcs = possible_arcs - num_masked
+        if self.labeled:
+            self.num_labeled_arcs = self.num_arcs * self.num_relations
+        else:
+            self.num_labeled_arcs = 0
+
+        self.num_parts = self.num_arcs + self.num_labeled_arcs
 
         if model_type.consecutive_siblings:
             raise NotImplemented
@@ -128,7 +142,7 @@ class DependencyParts(object):
         if model_type.grandsiblings:
             raise NotImplemented
 
-    def _set_gold_arcs(self, instance, num_relations):
+    def _make_gold_arcs(self, instance):
         """
         If the instance has gold heads, store the gold arcs in arc matrix.
         :type instance: DependencyInstanceNumeric
@@ -139,15 +153,33 @@ class DependencyParts(object):
             return
 
         relations = instance.get_all_relations()
+        gold_parts = []
+        gold_relations = []
         length = len(instance)
 
-        # gold_arcs shape is (modifiers, heads)
-        # we store a sparse matrix to be used in the loss calculation
-        self.gold_arcs = np.zeros([length - 1, length], np.int)
-        self.gold_relations = np.zeros([length - 1, length, num_relations])
-        for m, (h, rel) in enumerate(zip(heads[1:], relations[1:])):
-            self.gold_arcs[m, h] = 1
-            self.gold_relations[m, h, rel] = 1
+        for m in range(length - 1):
+            # -1 to skip root
+            for h in range(length):
+                if not self.arc_mask[m, h]:
+                    continue
+
+                gold_head = heads[m] == h
+                if gold_head:
+                    gold_parts.append(1)
+                else:
+                    gold_parts.append(0)
+
+                if not self.labeled:
+                    continue
+
+                for rel in range(self.num_relations):
+                    if gold_head and relations[m] == rel:
+                        gold_relations.append(1)
+                    else:
+                        gold_relations.append(0)
+
+        gold_parts.extend(gold_relations)
+        return gold_parts
 
     def has_type(self, type_):
         """
@@ -268,46 +300,3 @@ class DependencyParts(object):
         Return a list with gold values for parts of the given type
         """
         return self.part_gold[type_]
-
-    def find_arc_index(self, head, modifier):
-        """
-        Return the position of the arc connecting `head` and `modifier`. If no
-        such arc exists, return -1.
-
-        :param head: integer
-        :param modifier: integer
-        :return: integer
-        """
-        if head not in self.arc_index or modifier not in self.arc_index[head]:
-            return -1
-
-        return self.arc_index[head][modifier]
-
-    def find_labeled_arc_indices(self, head, modifier):
-        """
-        Return the list of positions (within the list of labeled arcs) of the
-        labeled arcs connecting `head` and `modifier`. If no such label exists,
-        return an empty list.
-        """
-        if head not in self.labeled_indices:
-            return []
-
-        head_dict = self.labeled_indices[head]
-        if modifier not in head_dict:
-            return []
-
-        return head_dict[modifier]
-
-    def find_arc_labels(self, head, modifier):
-        """
-        Return a list of all possible labels for the arc between `head` and
-        `modifier`. If there is none, return an empty list.
-        """
-        if head not in self.arc_labels:
-            return []
-
-        head_dict = self.arc_labels[head]
-        if modifier not in head_dict:
-            return []
-
-        return head_dict[modifier]

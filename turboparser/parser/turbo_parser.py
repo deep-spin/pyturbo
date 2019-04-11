@@ -302,7 +302,7 @@ class TurboParser(object):
         return gold_dict
 
     def _update_task_metrics(self, predicted_parts, instance, scores, parts,
-                             gold_parts, gold_labels):
+                             gold_labels):
         """
         Update the accumulated UAS, LAS and other targets count for one
         sentence.
@@ -329,11 +329,11 @@ class TurboParser(object):
         head_hits = pred_heads == gold_heads
         uas = np.mean(head_hits)
 
-        if not self.options.unlabeled:
+        if self.options.unlabeled:
+            las = 0
+        else:
             label_hits = gold_deprel == gold_deprel
             las = np.logical_and(head_hits, label_hits).mean()
-        else:
-            las = 0
 
         for target in self.additional_targets:
             gold = gold_labels[target]
@@ -351,7 +351,7 @@ class TurboParser(object):
     def format_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.token_dictionary)
 
-    def prune(self, instance):
+    def prune(self, instance, parts):
         """
         Prune out some arcs with the pruner model.
 
@@ -361,7 +361,7 @@ class TurboParser(object):
         :return: a new DependencyParts object contained the kept arcs
         """
         instance = self.pruner.format_instance(instance)
-        scores = self.pruner.compute_scores(instance, parts)[0][Target.HEADS]
+        scores = self.pruner.neural_scorer.compute_scores(instance, parts)[0]
         new_parts = self.decoder.decode_matrix_tree(
             len(instance), parts.arc_index, parts, scores,
             self.options.pruner_max_heads,
@@ -406,10 +406,9 @@ class TurboParser(object):
             num_possible_arcs += (inst_len - 1) ** 2  # exclude root and self
 
             # skip the root symbol
-            for m in range(1, inst_len):
+            for m in range(inst_len - 1):
                 for h in range(inst_len):
-                    r = inst_parts.find_arc_index(h, m)
-                    if r < 0:
+                    if not inst_parts.arc_mask[m, h]:
                         # pruned
                         if self.options.train and instance.heads[m] == h:
                             self.pruner_mistakes += 1
@@ -461,6 +460,8 @@ class TurboParser(object):
         :return: a tuple (instance, parts).
             The returned instance will have been formatted.
         """
+        self.pruner_mistakes = 0
+
         if self.has_pruner:
             prune_mask = self.prune(instance)
         else:
@@ -468,8 +469,9 @@ class TurboParser(object):
 
         instance = self.format_instance(instance)
         num_relations = self.token_dictionary.get_num_deprels()
+        labeled = not self.options.unlabeled
         parts = DependencyParts(instance, self.model_type, prune_mask,
-                                num_relations)
+                                labeled, num_relations)
 
         return instance, parts
 
@@ -750,7 +752,7 @@ class TurboParser(object):
                 if h == m:
                     continue
 
-                if h and self.options.prune_distances:
+                if h and self.options.prune_tags:
                     raise NotImplementedError()
                     # modifier_tag = instance.get_upos(m)
                     # head_tag = instance.get_upos(h)
@@ -1096,7 +1098,6 @@ class TurboParser(object):
         :param train_data: InstanceData
         :param valid_data: InstanceData
         '''
-        import time
         self.time_decoding = 0
         self.time_scores = 0
         self.time_gradient = 0
@@ -1208,9 +1209,8 @@ class TurboParser(object):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
             inst_scores = scores[i]
-            part_scores = inst_scores[Target.DEPENDENCY_PARTS]
 
-            predicted_parts = self.decoder.decode(instance, parts, part_scores)
+            predicted_parts = self.decoder.decode(instance, parts, inst_scores)
             inst_prediction = {Target.DEPENDENCY_PARTS: predicted_parts}
             for target in self.additional_targets:
                 model_answer = inst_scores[target].argmax(-1)
@@ -1219,25 +1219,23 @@ class TurboParser(object):
             predictions.append(inst_prediction)
 
         if return_loss:
-            losses = self.compute_loss_batch(instance_data.gold_parts,
-                                             predictions,
-                                             scores, instance_data.gold_labels)
+            losses = self.compute_loss_batch(instance_data, predictions, scores)
             return predictions, losses
 
         return predictions
 
-    def compute_loss_batch(self, gold_parts, predictions, scores,
-                           gold_labels):
+    def compute_loss_batch(self, instance_data, predictions, scores):
         """
         Compute the loss for a batch of predicted parts and label scores.
 
         :param scores: a list of dictionaries mapping target names to scores
         """
-        losses = np.zeros(len(gold_parts), np.float)
+        gold_labels = instance_data.gold_labels
+        losses = np.zeros(len(instance_data), np.float)
 
         for i, inst_predictions in enumerate(predictions):
             pred_parts = inst_predictions[Target.DEPENDENCY_PARTS]
-            inst_gold_parts = gold_parts[i]
+            inst_gold_parts = instance_data[i].parts.gold_parts
             inst_gold_labels = gold_labels[i]
             inst_scores = scores[i]
             inst_part_scores = inst_scores[Target.DEPENDENCY_PARTS]
@@ -1279,15 +1277,11 @@ class TurboParser(object):
             gold_labels = instance_data.gold_labels[i]
             inst_scores = scores[i]
 
-            score_parts = inst_scores[Target.DEPENDENCY_PARTS][:len(parts)]
-            predicted_parts = self.decode_train(
-                instance, parts, score_parts, gold_parts)
-
+            predicted_parts = self.decode_train(instance, parts, inst_scores)
             all_predicted_parts.append(predicted_parts)
 
             self._update_task_metrics(
-                predicted_parts, instance, inst_scores, parts,
-                gold_parts, gold_labels)
+                predicted_parts, instance, inst_scores, parts, gold_labels)
 
         # run the gradient step for the whole batch
         start_time = time.time()
@@ -1301,16 +1295,19 @@ class TurboParser(object):
                                              gold_labels)
         self.neural_scorer.make_gradient_step()
 
-    def decode_train(self, instance, parts, part_scores, gold_output):
+    def decode_train(self, instance, parts, scores):
         """
-        Decode the scores for a structured problem at training time.
+        Decode the scores for parsing at training time.
 
-        Return the predicted output (for each part) and eta.
+        Return the predicted output (for each part)
+
+        :param scores: a dictionary mapping target names to scores produced by
+            the network
         """
         # Do the decoding.
         start_decoding = time.time()
-        predicted_output, cost, loss =  self.decoder.decode_cost_augmented(
-            instance, parts, part_scores, gold_output)
+        predicted_output, cost, loss = self.decoder.decode_cost_augmented(
+            instance, parts, scores)
 
         end_decoding = time.time()
         self.time_decoding += end_decoding - start_decoding
