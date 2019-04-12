@@ -73,6 +73,10 @@ type2target = {NextSibling: Target.NEXT_SIBLINGS,
                Grandparent: Target.GRANDPARENTS,
                GrandSibling: Target.GRANDSIBLINGS}
 
+target2type = {Target.NEXT_SIBLINGS: NextSibling,
+               Target.GRANDPARENTS: Grandparent,
+               Target.GRANDSIBLINGS: GrandSibling}
+
 
 class DependencyParts(object):
     def __init__(self, instance, model_type, mask=None, labeled=True,
@@ -118,24 +122,28 @@ class DependencyParts(object):
         # the i-th position stores the best label found for arc i
         self.best_labels = []
 
-    def extract_parts_scores(self, scores):
+    def get_num_expected_scores(self, target):
         """
-        Given a dictionary of target scores, produce a single array with scores
-        for all parts in the same order as in this object.
+        Return the expected number of scores for a given target.
 
-        :param scores: dicitonary mapping targets such as heads, siblings, etc
-            to arrays of scores
-        :return: numpy 1d array
+        This is useful to get the number of meaningful scores from a padded
+        batch. It can return the number of arcs to be scored, or grandparents,
+        tags.
+
+        :param target: a value in Target
+        :return: int
         """
-        part_scores = [scores[Target.HEADS]]
-        if self.labeled:
-            part_scores.append(scores[Target.RELATIONS])
-
-        for type_ in self.part_lists:
-            target = type2target[type_]
-            part_scores.append(scores[target])
-
-        return np.concatenate(part_scores)
+        if target == Target.HEADS:
+            return self.num_arcs
+        elif target == Target.RELATIONS:
+            return self.num_labeled_arcs
+        elif target in target2type:
+            # this covers higher-order features such as grandparent, siblings
+            type_ = target2type[target]
+            return len(self.part_lists[type_])
+        else:
+            # assume it is some tagging task
+            return len(self.arc_mask)
 
     def _make_parts(self, instance, model_type):
         """
@@ -143,8 +151,9 @@ class DependencyParts(object):
         """
         # if no mask was given, create an all-True mask
         if self.arc_mask is None:
-            self.arc_mask = np.ones([len(instance) - 1, len(instance)],
-                                    dtype=np.bool)
+            length = len(instance)
+            self.arc_mask = np.ones([length - 1, length], dtype=np.bool)
+            self.arc_mask[np.arange(length - 1), np.arange(1, length)] = False
 
         # if there are gold labels, store them
         self.gold_parts = self._make_gold_arcs(instance)
@@ -171,8 +180,11 @@ class DependencyParts(object):
 
     def _make_gold_arcs(self, instance):
         """
-        If the instance has gold heads, store the gold arcs in arc matrix.
+        If the instance has gold heads, create a list with the gold arcs and
+        gold relations.
+
         :type instance: DependencyInstanceNumeric
+        :return: a list of 0s and 1s
         """
         heads = instance.get_all_heads()
         if heads[1] == -1:

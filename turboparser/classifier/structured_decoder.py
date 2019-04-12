@@ -21,19 +21,22 @@ class StructuredDecoder(object):
         """
         return np.zeros_like(len(parts), dtype=np.float), 0
 
+    def _add_cost_vector(self, parts, scores):
+        """
+        Add the cost margin to the scores.
+
+        This is used before actually decoding.
+        """
+        return
+
     def decode_mira(self, instance, parts, scores, old_mira=False):
         '''Perform cost-augmented decoding or classical MIRA.'''
-        p, q = self._get_margin(parts)
+        if not old_mira:
+            self._add_cost_vector(parts, scores)
 
-        if old_mira:
-            predicted_outputs = self.decode(instance, parts, scores)
-        else:
-            scores_cost = scores + p
-            predicted_outputs = self.decode(instance, parts, scores_cost)
-        cost = p.dot(predicted_outputs) + q
-        loss = cost + scores.dot(predicted_outputs - parts.gold_parts)
+        predicted_outputs = self.decode(instance, parts, scores)
 
-        return predicted_outputs, cost, loss
+        return predicted_outputs
 
     def decode_cost_augmented(self, instance, parts, scores):
         '''Perform cost-augmented decoding.'''

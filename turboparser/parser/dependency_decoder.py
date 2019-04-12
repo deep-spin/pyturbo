@@ -72,7 +72,8 @@ class DependencyDecoder(StructuredDecoder):
             in the scoring functions; usually arcs, siblings and grandparents
         :type parts: DependencyParts
         :param scores: dictionary mapping target names (such as arcs, relations,
-            grandparents etc) to arrays of scores
+            grandparents etc) to arrays of scores. Arc scores may have padding;
+            it is treated internally.
         :return:
         """
         # this keeps track of the index of each part added to the
@@ -81,7 +82,7 @@ class DependencyDecoder(StructuredDecoder):
         self.arc_indices = []
         self.additional_indices = []
 
-        if parts.has_type(LabeledArc):
+        if parts.labeled:
             self.decode_labels(parts, scores)
 
         # this keeps track of the arcs in the order they were added to the graph
@@ -165,20 +166,6 @@ class DependencyDecoder(StructuredDecoder):
         #     parts.best_labels.append(best_label)
         #
         # return new_scores
-
-    def copy_unlabeled_predictions(self, parts, predicted_output):
-        """
-        Copy the (unlabeled) arc prediction values found by the decoder to the
-        labeled part with the highest score.
-
-        :param predicted_output: array of predictions found by the decoder
-        :type parts: DependencyParts
-        """
-        offset_arcs = parts.get_offset(Arc)[0]
-        for i, arc in parts.iterate_over_type(Arc, return_index=True):
-            label_index = i - offset_arcs
-            label = self.best_label_indices[label_index]
-            predicted_output[label] = predicted_output[i]
 
     def _index_parts_by_head(self, parts, instance, scores):
         """
@@ -319,7 +306,6 @@ class DependencyDecoder(StructuredDecoder):
         Compute and return a margin vector to be used in the loss and a
         normalization term to be added to it.
 
-        It only affects Arcs or LabeledArcs (in case the latter are used).
 
         :param parts: DependencyParts object
         :return: a margin array to be added to the model scores and a
@@ -341,6 +327,32 @@ class DependencyDecoder(StructuredDecoder):
         q = 0.5 * gold_values.sum()
 
         return p, q
+
+    def _add_cost_vector(self, parts, scores):
+        """
+        Add the cost margin to the scores.
+
+        It only affects Arcs or LabeledArcs (in case the latter are used).
+
+        This is used before actually decoding.
+        """
+        if parts.labeled:
+            # place the margin on LabeledArcs scores
+            # their offset in the gold vector is immediately after Arcs
+            offset = parts.num_arcs
+            num_parts = parts.num_labeled_arcs
+            key = Target.RELATIONS
+        else:
+            # place the margin on Arc scores
+            offset = 0
+            num_parts = parts.num_arcs
+            key = Target.HEADS
+
+        gold_values = parts.gold_parts[offset:offset + num_parts]
+        if parts.labeled:
+            gold_values = gold_values.reshape(-1, parts.num_relations)
+        part_scores = scores[key]
+        part_scores[parts.arc_mask] += 0.5 - gold_values
 
     def get_predicted_output(self, parts, posteriors, additional_posteriors):
         """
@@ -382,7 +394,9 @@ class DependencyDecoder(StructuredDecoder):
 
         :type instance: DependencyInstance
         :type parts: DependencyParts
-        :param scores: 1d np.array with model scores for each part
+        :param scores: dictionary mapping target names to scores.
+            It should have a key for Target.HEADS and another for
+            Target.RELATIONS if labels are used
         :type graph: fg.PFactorGraph
         :return: a list of arc variables. The i-th variable corresponds to the
             i-th arc in parts.
@@ -401,12 +415,10 @@ class DependencyDecoder(StructuredDecoder):
             arc_scores = arc_scores.copy()
             arc_scores += best_label_scores.squeeze(2)
 
-        assert (length - 1) == len(arc_scores)
-        assert length == len(arc_scores[0])
-
+        # even if there is some padding, arc_mask will only give us valid arcs
         tree_factor = PFactorTree()
         variables = []
-        self.arcs = list(*zip(np.where(parts.arc_mask)))
+        self.arcs = list(zip(*np.where(parts.arc_mask)))
         for m, h in self.arcs:
             arc_variable = graph.create_binary_variable()
             arc_variable.set_log_potential(arc_scores[m, h])

@@ -1285,13 +1285,30 @@ class TurboParser(object):
 
         # run the gradient step for the whole batch
         start_time = time.time()
-        self.make_gradient_step(instance_data, all_predicted_parts)
+        loss = self.make_gradient_step(instance_data, all_predicted_parts)
+
+        # Update the total loss and cost.
+        if loss < 0.0:
+            if loss < -1e-6:
+                # len 2 means root + one word
+                msg_len_1 = '(sentence length 1)' \
+                    if len(instance) == 2 else ''
+                msg = 'Negative loss set to zero: %f %s' % (loss, msg_len_1)
+                logging.warning(msg)
+            loss = 0.0
+
+        self.total_loss += loss
+
         end_time = time.time()
         self.time_gradient += end_time - start_time
 
     def make_gradient_step(self, instance_data, pred_parts):
-        self.neural_scorer.compute_gradients(instance_data, pred_parts)
+        """
+        Perform a gradient step and return the loss
+        """
+        loss = self.neural_scorer.compute_gradients(instance_data, pred_parts)
         self.neural_scorer.make_gradient_step()
+        return loss
 
     def decode_train(self, instance, parts, scores):
         """
@@ -1307,24 +1324,11 @@ class TurboParser(object):
         """
         # Do the decoding.
         start_decoding = time.time()
-        part_scores = parts.extract_parts_scores(scores)
-        predicted_output, cost, loss = self.decoder.decode_cost_augmented(
-            instance, parts, part_scores)
+        predicted_output = self.decoder.decode_cost_augmented(
+            instance, parts, scores)
 
         end_decoding = time.time()
         self.time_decoding += end_decoding - start_decoding
-
-        # Update the total loss and cost.
-        if loss < 0.0:
-            if loss < -1e-6:
-                # len 2 means root + one word
-                msg_len_1 = '(sentence length 1)' \
-                    if len(instance) == 2 else ''
-                msg = 'Negative loss set to zero: %f %s' % (loss, msg_len_1)
-                logging.warning(msg)
-            loss = 0.0
-
-        self.total_loss += loss
 
         return predicted_output
 
