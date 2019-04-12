@@ -1,6 +1,7 @@
 from collections import OrderedDict
 import numpy as np
 from .dependency_instance_numeric import DependencyInstanceNumeric
+from .constants import Target
 
 class DependencyPart(object):
     """
@@ -68,6 +69,11 @@ class GrandSibling(DependencyPart):
         self.grandparent = grandparent
 
 
+type2target = {NextSibling: Target.NEXT_SIBLINGS,
+               Grandparent: Target.GRANDPARENTS,
+               GrandSibling: Target.GRANDSIBLINGS}
+
+
 class DependencyParts(object):
     def __init__(self, instance, model_type, mask=None, labeled=True,
                  num_relations=None):
@@ -111,6 +117,25 @@ class DependencyParts(object):
 
         # the i-th position stores the best label found for arc i
         self.best_labels = []
+
+    def extract_parts_scores(self, scores):
+        """
+        Given a dictionary of target scores, produce a single array with scores
+        for all parts in the same order as in this object.
+
+        :param scores: dicitonary mapping targets such as heads, siblings, etc
+            to arrays of scores
+        :return: numpy 1d array
+        """
+        part_scores = [scores[Target.HEADS]]
+        if self.labeled:
+            part_scores.append(scores[Target.RELATIONS])
+
+        for type_ in self.part_lists:
+            target = type2target[type_]
+            part_scores.append(scores[target])
+
+        return np.concatenate(part_scores)
 
     def _make_parts(self, instance, model_type):
         """

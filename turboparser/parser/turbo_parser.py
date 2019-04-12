@@ -1299,13 +1299,17 @@ class TurboParser(object):
 
         Return the predicted output (for each part)
 
+        :param instance: a DependencyInstanceNumeric
+        :param parts: DependencyParts
+        :type parts: DependencyParts
         :param scores: a dictionary mapping target names to scores produced by
             the network
         """
         # Do the decoding.
         start_decoding = time.time()
+        part_scores = parts.extract_parts_scores(scores)
         predicted_output, cost, loss = self.decoder.decode_cost_augmented(
-            instance, parts, scores)
+            instance, parts, part_scores)
 
         end_decoding = time.time()
         self.time_decoding += end_decoding - start_decoding
