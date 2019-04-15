@@ -423,17 +423,15 @@ class DependencyNeuralModel(nn.Module):
 
         return model
 
-    def _compute_arc_scores(self, states, lengths):
+    def _compute_arc_scores(self, states, parts):
         """
         Compute the first order scores and store them in the appropriate
         position in the `scores` tensor.
 
         :param states: hidden states returned by the RNN; one for each word
-        :param lengths: tensor with the length of each sentence in the batch
+        :param parts: list of DependencyParts objects
+        :type parts: list[DependencyParts]
         """
-        # including root
-        max_num_words = states.size()[1]
-
         # call dropout multiple times to vary results each time
         # we interpret arc_scores as [modifier, head]
         arc_scores = self.arc_scorer(self.dropout(states),
@@ -441,20 +439,21 @@ class DependencyNeuralModel(nn.Module):
         label_scores = self.label_scorer(self.dropout(states),
                                          self.dropout(states))
 
-        # set arc scores from each word to itself as -inf
-        diag = torch.eye(max_num_words, dtype=torch.uint8,
-                         device=arc_scores.device).unsqueeze(0)
-        arc_scores.masked_fill_(diag, -np.inf)
+        # remove root scores
+        arc_scores = arc_scores[:, 1:]
+        label_scores = label_scores[:, 1:]
 
-        # during training, label loss is computed in relation to the gold
-        # arcs, so there's no need to set -inf scores to invalid positions
-        # in label scores.
-        padding_mask = create_padding_mask(lengths)
-        arc_scores.masked_fill_(padding_mask.unsqueeze(1), -np.inf)
+        self.scores[Target.HEADS] = []
+        self.scores[Target.RELATIONS] = []
+        for sent_parts in parts:
+            # the arc mask in sent_parts is a numpy boolean array
+            mask = sent_parts.arc_mask.astype(np.uint8)
+            valid_arc_scores = torch.masked_select(arc_scores, mask)
+            self.scores[Target.HEADS].append(valid_arc_scores)
 
-        # exclude root - arc_scores is now (batch, num_words - 1, num_words)
-        self.scores[Target.HEADS] = arc_scores[:, 1:]
-        self.scores[Target.RELATIONS] = label_scores[:, 1:]
+            valid_label_scores = torch.masked_select(label_scores,
+                                                     mask.unsqueeze(2))
+            self.scores[Target.RELATIONS].append(valid_label_scores)
 
     def _compute_grandparent_scores(self, states, parts, scores):
         """
@@ -787,7 +786,7 @@ class DependencyNeuralModel(nn.Module):
                 hidden = self.morph_mlp(tagger_batch_states[:, 1:])
                 self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
-        self._compute_arc_scores(parser_batch_states, lengths)
+        self._compute_arc_scores(parser_batch_states, parts)
 
         # # now go through each batch item
         # for i in range(batch_size):

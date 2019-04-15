@@ -820,22 +820,19 @@ class TurboParser(object):
         :param predictions: indicator array of predicted dependency parts (with
             values between 0 and 1)
         :param parts: the dependency parts
+        :type parts: DependencyParts
         :return: a tuple (pred_heads, pred_labels)
             The first is an array such that position heads[m] contains the head
             for token m; it starts from the first actual word, not the root.
             If the model is not trained for predicting labels, the second item
             is None.
         """
-        offset = parts.get_type_offset(Arc)
-        num_arcs = parts.get_num_type(Arc)
-        arcs = parts.get_parts_of_type(Arc)
-        arc_scores = predictions[offset:offset + num_arcs]
-
-        score_matrix = make_score_matrix(length, arcs, arc_scores)
+        arc_scores = predictions[:parts.num_arcs]
+        score_matrix = make_score_matrix(length, parts.arc_mask, arc_scores)
         pred_heads = chu_liu_edmonds(score_matrix)[1:]
 
         if not self.options.unlabeled:
-            pred_labels = get_predicted_labels(pred_heads, parts)
+            pred_labels = parts.best_labels
         else:
             pred_labels = None
 
@@ -885,8 +882,7 @@ class TurboParser(object):
 
             if not self.options.unlabeled:
                 deprel_gold = instance.relations[1:]
-                pred_labels = get_predicted_labels(pred_heads, parts)
-                label_hits = deprel_gold == pred_labels
+                label_hits = deprel_gold == parts.best_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
@@ -1343,19 +1339,14 @@ class TurboParser(object):
         root_score = -1
 
         dep_output = output[Target.DEPENDENCY_PARTS]
-
-        offset = parts.get_type_offset(Arc)
-        num_arcs = parts.get_num_type(Arc)
-        arcs = parts.get_parts_of_type(Arc)
-        scores = dep_output[offset:offset + num_arcs]
-        score_matrix = make_score_matrix(len(instance), arcs, scores)
+        scores = dep_output[:parts.num_arcs]
+        score_matrix = make_score_matrix(len(instance), parts.arc_mask, scores)
         heads = chu_liu_edmonds(score_matrix)[1:]
 
         for m, h in enumerate(heads, 1):
             instance.heads[m] = h
             if h == 0:
-                index = parts.find_arc_index(h, m)
-                score = dep_output[index]
+                score = score_matrix[m + 1, h]
 
                 if self.options.single_root and root != -1:
                     self.reassigned_roots += 1
@@ -1373,8 +1364,7 @@ class TurboParser(object):
                     root_score = score
 
             if not self.options.unlabeled:
-                index = parts.find_arc_index(h, m) - offset
-                label = parts.best_labels[index]
+                label = parts.best_labels[m - 1]
                 label_name = self.token_dictionary.deprel_alphabet.\
                     get_label_name(label)
                 instance.relations[m] = label_name
@@ -1405,24 +1395,6 @@ class TurboParser(object):
                     instance.relations[m] = \
                         self.token_dictionary.deprel_alphabet.\
                             get_relation_name(0)
-
-
-def get_predicted_labels(predicted_heads, parts):
-    """
-    Get the labels of the dependency relations.
-
-    :param predicted_heads: list or array with the the head of the each word
-        (only for real words, i.e., not the root symbol)
-    :param parts: DependencyParts object
-    :return: numpy integer array with labels
-    """
-    labels = np.zeros(len(predicted_heads), dtype=np.int)
-
-    for modifier, head in enumerate(predicted_heads, 1):
-        i = parts.find_arc_index(head, modifier)
-        labels[modifier - 1] = parts.best_labels[i]
-
-    return labels
 
 
 def load_pruner(model_path):

@@ -11,6 +11,7 @@ class Target(Enum):
     XPOS = auto()
     UPOS = auto()
     MORPH = auto()
+    BEST_RELATION = auto()
 
     NEXT_SIBLINGS = auto()
     GRANDPARENTS = auto()

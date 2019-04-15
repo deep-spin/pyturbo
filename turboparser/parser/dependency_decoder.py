@@ -52,8 +52,6 @@ class DependencyDecoder(StructuredDecoder):
         self.left_grandsiblings = None
         self.right_grandsiblings = None
 
-        self.arc_indices = None
-        self.additional_indices = None
         self.use_grandsiblings = None
         self.use_grandparents = None
         self.use_siblings = None
@@ -76,11 +74,9 @@ class DependencyDecoder(StructuredDecoder):
             it is treated internally.
         :return:
         """
-        # this keeps track of the index of each part added to the
-        # graph. The i-th part added to the graph will have its index to the
-        # parts list stored in additiona_index[i] or arc_index[i]
-        self.arc_indices = []
-        self.additional_indices = []
+        # AD3 expects arcs as (h, m) with m counting from 0
+        modifiers, heads = np.where(parts.arc_mask)
+        self.arcs = list(zip(heads, modifiers + 1))
 
         if parts.labeled:
             self.decode_labels(parts, scores)
@@ -126,10 +122,6 @@ class DependencyDecoder(StructuredDecoder):
         :return: the scores vector modified such that each unlabeled arc has
             its score increased by the best labeled score
         """
-        relation_scores = scores[Target.RELATIONS]
-        relation_scores[~parts.arc_mask] = -np.inf
-        self.best_labels = relation_scores.argmax(-1)
-        parts.best_labels = self.best_labels
 
         # # store the position of the best label for each arc
         # # best_label_indices[i] contains the position in the gold vector
@@ -301,33 +293,6 @@ class DependencyDecoder(StructuredDecoder):
 
         return new_parts
 
-    def _get_margin(self, parts):
-        """
-        Compute and return a margin vector to be used in the loss and a
-        normalization term to be added to it.
-
-
-        :param parts: DependencyParts object
-        :return: a margin array to be added to the model scores and a
-            normalization constant
-        """
-        p = np.zeros(len(parts), dtype=np.float)
-        if parts.labeled:
-            # place the margin on LabeledArcs scores
-            # their offset in the gold vector is immediately after Arcs
-            offset = parts.num_arcs
-            num_parts = parts.num_labeled_arcs
-        else:
-            # place the margin on Arc scores
-            offset = 0
-            num_parts = parts.num_arcs
-
-        gold_values = parts.gold_parts[offset:offset + num_parts]
-        p[offset:offset + num_parts] = 0.5 - gold_values
-        q = 0.5 * gold_values.sum()
-
-        return p, q
-
     def _add_cost_vector(self, parts, scores):
         """
         Add the cost margin to the scores.
@@ -381,10 +346,12 @@ class DependencyDecoder(StructuredDecoder):
 
         #TODO: set additional_posteriors
 
-        for posterior, (m, h) in zip(posteriors, self.arcs):
-            label = self.best_labels[m, h]
-            predicted_output[offset + label] = posterior
-            offset += num_relations
+        if parts.labeled:
+            for i in range(len(self.arcs)):
+                label = self.best_labels[i]
+                posterior = posteriors[i]
+                predicted_output[offset + label] = posterior
+                offset += num_relations
 
         return predicted_output
 
@@ -406,22 +373,29 @@ class DependencyDecoder(StructuredDecoder):
 
         arc_scores = scores[Target.HEADS]
         if parts.labeled:
-            # take the best relation score for each arc
-            label_scores = scores[Target.RELATIONS]
-            inds = np.expand_dims(self.best_labels, 2)
-            best_label_scores = np.take_along_axis(label_scores, inds, 2)
+            relation_scores = scores[Target.RELATIONS]
+
+            # reshape as (num_arcs, num_relations)
+            relation_scores = relation_scores.reshape(-1, parts.num_relations)
+
+            # best_labels[i] has the best label for the i-th arc
+            self.best_labels = relation_scores.argmax(-1)
+            parts.best_labels = self.best_labels
+
+            inds = np.expand_dims(self.best_labels, 1)
+            best_label_scores = np.take_along_axis(relation_scores, inds, 1)
 
             # make a copy of arc scores so the originals are unchanged
             arc_scores = arc_scores.copy()
-            arc_scores += best_label_scores.squeeze(2)
+            arc_scores += best_label_scores.squeeze(1)
 
         # even if there is some padding, arc_mask will only give us valid arcs
         tree_factor = PFactorTree()
         variables = []
-        self.arcs = list(zip(*np.where(parts.arc_mask)))
-        for m, h in self.arcs:
+
+        for h, m in self.arcs:
             arc_variable = graph.create_binary_variable()
-            arc_variable.set_log_potential(arc_scores[m, h])
+            arc_variable.set_log_potential(arc_scores[m - 1, h])
             variables.append(arc_variable)
 
         # for r, part in enumerate(parts.iterate_over_type(Arc), offset_arcs):
@@ -666,23 +640,20 @@ def _populate_structure_list(left_list, right_list, parts, scores,
             left_list[part.head].append(part, scores[i], i)
 
 
-def make_score_matrix(length, arcs, scores):
+def make_score_matrix(length, arc_mask, scores):
     """
     Makes a score matrix from an array of scores ordered in the same way as a
     list of DependencyPartArcs. Positions [m, h] corresponding to non-existing
     arcs have score of -inf.
 
     :param length: length of the sentence, including the root pseudo-token
-    :param arcs: list of candidate Arc parts
+    :param arc_mask: Arc mask as in DependencyParts
     :param scores: array with score of each arc (ordered in the same way as
         arcs)
-    :return: a 2d numpy array
+    :return: a 2d numpy array (m, h), starting from 0
     """
     score_matrix = np.full([length, length], -np.inf, np.float32)
-    for arc, score in zip(arcs, scores):
-        h = arc.head
-        m = arc.modifier
-        score_matrix[m, h] = score
+    score_matrix[1:][arc_mask] = scores
 
     return score_matrix
 

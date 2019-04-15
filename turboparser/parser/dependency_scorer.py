@@ -48,15 +48,17 @@ class DependencyNeuralScorer(object):
         # max_length = max(len(parts) for parts in instance_data.parts)
         # shape = [batch_size, max_length]
         # diff = torch.zeros(shape, dtype=torch.float)
-        parts_loss = torch.tensor(0)
+        parts_loss = torch.tensor(0.)
         for i in range(batch_size):
             inst_parts = instance_data.parts[i]
             gold_parts = inst_parts.gold_parts
             pred_item = predicted_parts[i]
-            inst_scores = self.model.scores
-            part_scores = extract_parts_scores(inst_parts, inst_scores, i)
-            diff = torch.tensor(pred_item - gold_parts)
+            part_score_list = [self.model.scores[type_]
+                               for type_ in inst_parts.type_order]
+            part_scores = torch.cat(part_score_list)
+            diff = torch.tensor(pred_item - gold_parts, dtype=part_scores.dtype)
             parts_loss += torch.dot(part_scores, diff)
+            parts_loss /= len(gold_parts)
             # diff[i, :len(gold_parts)] = torch.tensor(pred_item - gold_parts)
 
         parts_loss /= batch_size
@@ -65,7 +67,7 @@ class DependencyNeuralScorer(object):
         # Backpropagate to accumulate gradients.
         loss.backward()
 
-        return parts_loss
+        return parts_loss.item()
 
     def compute_tag_loss(self, scores, gold_output, reduction='mean'):
         """Compute the loss for any tagging subtask
@@ -94,23 +96,22 @@ class DependencyNeuralScorer(object):
             parts = [parts]
 
         model_scores = self.model(instances, parts)
-        numpy_scores = {target: model_scores[target].detach().cpu().numpy()
-                        for target in model_scores}
+        numpy_scores = {}
+        for target in model_scores:
+            # dependency part scores are stored as lists of tensors; tags
+            # are singleton tensors
+            if target in [Target.UPOS, Target.XPOS, Target.MORPH]:
+                numpy_scores[target] = model_scores[target].detach()\
+                    .cpu().numpy()
+            else:
+                numpy_scores[target] = [tensor.detach().cpu().numpy()
+                                        for tensor in model_scores[target]]
 
         # now convert a dictionary of arrays into a list of dictionaries
         score_list = []
         for i in range(len(instances)):
             instance_scores = {target: numpy_scores[target][i]
                                for target in numpy_scores}
-            #TODO: make this cleaner
-            shape = parts[i].arc_mask.shape
-            arc_scores = instance_scores[Target.HEADS]
-            instance_scores[Target.HEADS] = arc_scores[:shape[0], :shape[1]]
-
-            if Target.RELATIONS in instance_scores:
-                label_scores = instance_scores[Target.RELATIONS]
-                instance_scores[Target.RELATIONS] = label_scores[:shape[0],
-                                                                 :shape[1]]
             score_list.append(instance_scores)
 
         return score_list
@@ -170,33 +171,3 @@ def pad_labels(labels):
         padded = padded.cuda()
 
     return padded
-
-
-def extract_parts_scores(parts, scores, i):
-    """
-    Given a list of dictionary of target scores, produce a single array with
-    scores for all parts in instance i.
-
-    :param scores: dicitonary mapping targets such as heads, siblings, etc
-        to arrays of scores
-    :return: numpy 1d array
-    """
-    arc_scores = scores[Target.HEADS][i]
-
-    # in case there was padding, take only the valid scores
-    shape = parts.arc_mask.shape
-    arc_scores = arc_scores[:shape[0], :shape[1]]
-    arc_scores = arc_scores[parts.arc_mask]
-
-    part_scores = [arc_scores]
-    if parts.labeled:
-        labeled_scores = scores[Target.RELATIONS][i]
-        labeled_scores = labeled_scores[:shape[0], :shape[1]]
-        labeled_scores = labeled_scores[parts.arc_mask]
-        part_scores.append(labeled_scores.reshape(-1))
-
-    for type_ in parts.part_lists:
-        target = type2target[type_]
-        part_scores.append(scores[target][i])
-
-    return np.concatenate(part_scores)

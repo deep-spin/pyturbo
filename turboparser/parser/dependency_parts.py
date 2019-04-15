@@ -111,13 +111,16 @@ class DependencyParts(object):
         self.num_relations = num_relations
         self.gold_arcs = None
 
-        self._make_parts(instance, model_type)
+        # store the order in which part types are used
+        self.type_order = []
 
         # part_lists[Type] contains the list of Type parts
         self.part_lists = OrderedDict()
 
         # part_gold[Type] contains the gold labels for Type objects
         self.part_gold = OrderedDict()
+
+        self._make_parts(instance, model_type)
 
         # the i-th position stores the best label found for arc i
         self.best_labels = []
@@ -149,7 +152,7 @@ class DependencyParts(object):
         """
         Create all the parts to represent the instance
         """
-        # if no mask was given, create an all-True mask
+        # if no mask was given, create an all-True mask with a False diagonal
         if self.arc_mask is None:
             length = len(instance)
             self.arc_mask = np.ones([length - 1, length], dtype=np.bool)
@@ -157,6 +160,7 @@ class DependencyParts(object):
 
         # if there are gold labels, store them
         self.gold_parts = self._make_gold_arcs(instance)
+        self.type_order.append(Target.HEADS)
 
         # all non-masked arcs count as a part
         possible_arcs = self.arc_mask.size
@@ -164,6 +168,7 @@ class DependencyParts(object):
         self.num_arcs = possible_arcs - num_masked
         if self.labeled:
             self.num_labeled_arcs = self.num_arcs * self.num_relations
+            self.type_order.append(Target.RELATIONS)
         else:
             self.num_labeled_arcs = 0
 
@@ -176,7 +181,7 @@ class DependencyParts(object):
         if model_type.grandsiblings:
             raise NotImplemented
 
-        self.gold_parts = np.array(self.gold_parts)
+        self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
 
     def _make_gold_arcs(self, instance):
         """
