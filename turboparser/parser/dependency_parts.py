@@ -122,8 +122,7 @@ class DependencyParts(object):
 
         self._make_parts(instance, model_type)
 
-        # the i-th position stores the best label found for arc i
-        self.best_labels = []
+        self.best_labels = {}
 
     def get_num_expected_scores(self, target):
         """
@@ -147,6 +146,44 @@ class DependencyParts(object):
         else:
             # assume it is some tagging task
             return len(self.arc_mask)
+
+    def save_best_labels(self, best_labels, arcs):
+        """
+        Save the best labels for each arc in a dictionary.
+
+        :param best_labels: array with the best label for each arc
+        :param arcs: list of tuples (h, m)
+        """
+        self.best_labels = {}
+        for arc, label in zip(arcs, best_labels):
+            self.best_labels[arc] = label
+
+    def concatenate_part_scores(self, scores):
+        """
+        Concatenate all the vectors of part scores in the given dictionary to a
+        single vector in the same order used in parts.
+
+        :param scores: dictionary mapping target names to arrays
+        :return: a single numpy array
+        """
+        score_list = [scores[type_] for type_ in self.type_order]
+        return np.concatenate(score_list)
+
+    def get_labels(self, heads):
+        """
+        Return the labels associated with the given head attachments for the
+        words.
+
+        :param heads: list or array with the head of each word in the sentence
+            (root not included)
+        :return: a list of predicted labels
+        """
+        pred_labels = []
+        for m, h in enumerate(heads, 1):
+            label = self.best_labels[(h, m)]
+            pred_labels.append(label)
+
+        return pred_labels
 
     def _make_parts(self, instance, model_type):
         """
@@ -182,6 +219,7 @@ class DependencyParts(object):
             raise NotImplemented
 
         self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
+        assert self.num_parts == len(self.gold_parts)
 
     def _make_gold_arcs(self, instance):
         """

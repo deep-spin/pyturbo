@@ -53,7 +53,7 @@ class DependencyNeuralScorer(object):
             inst_parts = instance_data.parts[i]
             gold_parts = inst_parts.gold_parts
             pred_item = predicted_parts[i]
-            part_score_list = [self.model.scores[type_]
+            part_score_list = [self.model.scores[type_][i]
                                for type_ in inst_parts.type_order]
             part_scores = torch.cat(part_score_list)
             diff = torch.tensor(pred_item - gold_parts, dtype=part_scores.dtype)
@@ -62,12 +62,13 @@ class DependencyNeuralScorer(object):
             # diff[i, :len(gold_parts)] = torch.tensor(pred_item - gold_parts)
 
         parts_loss /= batch_size
-        loss += parts_loss.to(loss.device)
+        if parts_loss > 0:
+            loss += parts_loss.to(loss.device)
 
         # Backpropagate to accumulate gradients.
         loss.backward()
 
-        return parts_loss.item()
+        return loss.item()
 
     def compute_tag_loss(self, scores, gold_output, reduction='mean'):
         """Compute the loss for any tagging subtask

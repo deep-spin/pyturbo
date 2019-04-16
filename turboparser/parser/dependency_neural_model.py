@@ -445,13 +445,18 @@ class DependencyNeuralModel(nn.Module):
 
         self.scores[Target.HEADS] = []
         self.scores[Target.RELATIONS] = []
-        for sent_parts in parts:
-            # the arc mask in sent_parts is a numpy boolean array
+        for i, sent_parts in enumerate(parts):
+            # we need to convert the numpy mask to a torch tensor
             mask = sent_parts.arc_mask.astype(np.uint8)
-            valid_arc_scores = torch.masked_select(arc_scores, mask)
+            mask = torch.ByteTensor(mask)
+
+            shape = mask.shape
+            sent_arc_scores = arc_scores[i, :shape[0], :shape[1]]
+            valid_arc_scores = torch.masked_select(sent_arc_scores, mask)
             self.scores[Target.HEADS].append(valid_arc_scores)
 
-            valid_label_scores = torch.masked_select(label_scores,
+            sent_label_scores = label_scores[i, :shape[0], :shape[1]]
+            valid_label_scores = torch.masked_select(sent_label_scores,
                                                      mask.unsqueeze(2))
             self.scores[Target.RELATIONS].append(valid_label_scores)
 

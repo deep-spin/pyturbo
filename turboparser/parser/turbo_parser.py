@@ -187,7 +187,7 @@ class TurboParser(object):
             self.options.prune_relations = model_options.prune_relations
 
             # prune arcs with a distance unseen with the given POS tags
-            self.options.prune_distances = model_options.prune_distances
+            self.options.prune_tags = model_options.prune_tags
 
             # threshold for the basic pruner, if used
             self.options.pruner_posterior_threshold = \
@@ -410,7 +410,7 @@ class TurboParser(object):
                 for h in range(inst_len):
                     if not inst_parts.arc_mask[m, h]:
                         # pruned
-                        if self.options.train and instance.heads[m] == h:
+                        if self.options.train and instance.heads[m + 1] == h:
                             self.pruner_mistakes += 1
                         continue
 
@@ -832,13 +832,13 @@ class TurboParser(object):
         pred_heads = chu_liu_edmonds(score_matrix)[1:]
 
         if not self.options.unlabeled:
-            pred_labels = parts.best_labels
+            pred_labels = parts.get_labels(pred_heads)
         else:
             pred_labels = None
 
         return pred_heads, pred_labels
 
-    def _get_task_validation_metrics(self, valid_data, valid_pred):
+    def _get_validation_metrics(self, valid_data, valid_pred):
         """
         Compute and store internally validation metrics. Also call the neural
         scorer to update learning rate.
@@ -865,13 +865,11 @@ class TurboParser(object):
             inst_pred = valid_pred[i]
 
             dep_prediction = inst_pred[Target.DEPENDENCY_PARTS]
-            offset = parts.get_type_offset(Arc)
-            num_arcs = parts.get_num_type(Arc)
-            arcs = parts.get_parts_of_type(Arc)
-            arc_scores = dep_prediction[offset:offset + num_arcs]
+            arc_scores = dep_prediction[:parts.num_arcs]
             gold_heads = instance.heads[1:]
 
-            score_matrix = make_score_matrix(len(instance), arcs, arc_scores)
+            score_matrix = make_score_matrix(len(instance), parts.arc_mask,
+                                             arc_scores)
             pred_heads = chu_liu_edmonds(score_matrix)[1:]
             real_length = len(instance) - 1
 
@@ -882,7 +880,8 @@ class TurboParser(object):
 
             if not self.options.unlabeled:
                 deprel_gold = instance.relations[1:]
-                label_hits = deprel_gold == parts.best_labels
+                pred_labels = parts.get_labels(pred_heads)
+                label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
@@ -1124,7 +1123,7 @@ class TurboParser(object):
         self.neural_scorer.eval_mode()
         valid_pred, valid_losses = self._run_batches(valid_data, 32,
                                                      return_loss=True)
-        self._get_task_validation_metrics(valid_data, valid_pred)
+        self._get_validation_metrics(valid_data, valid_pred)
         valid_end = time.time()
         time_validation = valid_end - valid_start
         train_loss = self.total_loss / len(train_data)
@@ -1230,13 +1229,12 @@ class TurboParser(object):
         losses = np.zeros(len(instance_data), np.float)
 
         for i, inst_predictions in enumerate(predictions):
-            pred_parts = inst_predictions[Target.DEPENDENCY_PARTS]
-            inst_gold_parts = instance_data[i].parts.gold_parts
+            inst_parts = instance_data.parts[i]
             inst_gold_labels = gold_labels[i]
             inst_scores = scores[i]
-            inst_part_scores = inst_scores[Target.DEPENDENCY_PARTS]
-            parser_loss = self.decoder.compute_loss(inst_gold_parts, pred_parts,
-                                                    inst_part_scores)
+            inst_predicted_parts = inst_predictions[Target.DEPENDENCY_PARTS]
+            parser_loss = self.decoder.compute_loss(
+                inst_parts, inst_predicted_parts, inst_scores)
             losses[i] = parser_loss
 
             for target in self.additional_targets:
@@ -1317,6 +1315,7 @@ class TurboParser(object):
         :type parts: DependencyParts
         :param scores: a dictionary mapping target names to scores produced by
             the network
+        :return: prediction array
         """
         # Do the decoding.
         start_decoding = time.time()
@@ -1343,6 +1342,9 @@ class TurboParser(object):
         score_matrix = make_score_matrix(len(instance), parts.arc_mask, scores)
         heads = chu_liu_edmonds(score_matrix)[1:]
 
+        if parts.labeled:
+            relations = parts.get_labels(heads)
+
         for m, h in enumerate(heads, 1):
             instance.heads[m] = h
             if h == 0:
@@ -1363,11 +1365,11 @@ class TurboParser(object):
                     root = m
                     root_score = score
 
-            if not self.options.unlabeled:
-                label = parts.best_labels[m - 1]
-                label_name = self.token_dictionary.deprel_alphabet.\
-                    get_label_name(label)
-                instance.relations[m] = label_name
+            if parts.labeled:
+                relation = relations[m - 1]
+                relation_name = self.token_dictionary.deprel_alphabet.\
+                    get_label_name(relation)
+                instance.relations[m] = relation_name
 
             if self.options.predict_upos:
                 # -1 because there's no tag for the root

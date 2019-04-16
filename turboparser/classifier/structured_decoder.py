@@ -42,17 +42,16 @@ class StructuredDecoder(object):
         '''Perform cost-augmented decoding.'''
         return self.decode_mira(instance, parts, scores, old_mira=False)
 
-    def compute_loss(self, gold_output, predicted_output, scores):
+    def compute_loss(self, parts, predicted_output, scores):
         '''
         Compute the cost-augmented loss for the given prediction
 
         :return:
         '''
-        # there might be spurious scores for padding
-        scores = scores[:len(gold_output)]
-        p = 0.5 - gold_output
-        q = 0.5 * np.sum(gold_output)
+        part_scores = parts.concatenate_part_scores(scores)
+
+        p, q = self._get_margin(parts)
         cost = p.dot(predicted_output) + q
-        loss = cost + scores.dot(predicted_output - gold_output)
+        loss = cost + part_scores.dot(predicted_output - parts.gold_parts)
 
         return loss
