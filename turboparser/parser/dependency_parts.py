@@ -229,12 +229,12 @@ class DependencyParts(object):
         :type instance: DependencyInstanceNumeric
         :return: a list of 0s and 1s
         """
-        heads = instance.get_all_heads()
-        if heads[1] == -1:
-            # check [1] because [0] is the root
+        # skip root
+        heads = instance.get_all_heads()[1:]
+        if heads[0] == -1:
             return
 
-        relations = instance.get_all_relations()
+        relations = instance.get_all_relations()[1:]
         gold_parts = []
         gold_relations = []
         length = len(instance)

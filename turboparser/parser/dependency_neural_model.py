@@ -220,13 +220,25 @@ class DependencyNeuralModel(nn.Module):
                                                     bias=True)
 
         # first order
-        rnn_output = rnn_size * 2
-        self.arc_scorer = BiaffineScorer(
-            rnn_output, self.mlp_size, 1, self.relu, self.dropout)
+        self.head_mlp = self._create_mlp()
+        self.modifier_mlp = self._create_mlp()
+        self.arc_scorer = self._create_scorer()
+
+        self.label_head_mlp = self._create_mlp(
+            hidden_size=self.label_mlp_size)
+        self.label_modifier_mlp = self._create_mlp(
+            hidden_size=self.label_mlp_size)
         num_labels = token_dictionary.get_num_deprels()
-        self.label_scorer = BiaffineScorer(
-            rnn_output, self.label_mlp_size, num_labels, self.relu,
-            self.dropout)
+        self.label_scorer = self._create_scorer(self.label_mlp_size,
+                                                num_labels)
+
+        # rnn_output = rnn_size * 2
+        # self.arc_scorer = BiaffineScorer(
+        #     rnn_output, self.mlp_size, 1, self.relu, self.dropout)
+        # num_labels = token_dictionary.get_num_deprels()
+        # self.label_scorer = BiaffineScorer(
+        #     rnn_output, self.label_mlp_size, num_labels, self.relu,
+        #     self.dropout)
 
         if model_type.grandparents:
             self.gp_grandparent_mlp = self._create_mlp()
@@ -251,18 +263,18 @@ class DependencyNeuralModel(nn.Module):
             self.gsib_grandparent_mlp = self._create_mlp()
             self.grandsibling_scorer = self._create_scorer()
 
-        # if self.distance_embedding_size:
-        #     self.distance_projector = nn.Linear(
-        #         distance_embedding_size,
-        #         mlp_size,
-        #         bias=True)
-        #     self.label_distance_projector = nn.Linear(
-        #         distance_embedding_size,
-        #         self.label_mlp_size,
-        #         bias=True
-        #     )
-        # else:
-        #     self.distance_mlp = None
+        if self.distance_embedding_size:
+            self.distance_projector = nn.Linear(
+                distance_embedding_size,
+                mlp_size,
+                bias=True)
+            self.label_distance_projector = nn.Linear(
+                distance_embedding_size,
+                self.label_mlp_size,
+                bias=True
+            )
+        else:
+            self.distance_mlp = None
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -429,36 +441,91 @@ class DependencyNeuralModel(nn.Module):
         position in the `scores` tensor.
 
         :param states: hidden states returned by the RNN; one for each word
-        :param parts: list of DependencyParts objects
-        :type parts: list[DependencyParts]
+        :param parts: DependencyParts objects
+        :type parts: DependencyParts
         """
-        # call dropout multiple times to vary results each time
-        # we interpret arc_scores as [modifier, head]
-        arc_scores = self.arc_scorer(self.dropout(states),
-                                     self.dropout(states))
-        label_scores = self.label_scorer(self.dropout(states),
-                                         self.dropout(states))
+        head_tensors = self.head_mlp(states)
+        modifier_tensors = self.modifier_mlp(states)
 
-        # remove root scores
-        arc_scores = arc_scores[:, 1:]
-        label_scores = label_scores[:, 1:]
+        modifier_indices, head_indices = np.where(parts.arc_mask)
+        # modifiers in the mask consider the first real word as 0
+        modifier_indices += 1
+        if self.distance_embedding_size:
+            distance_indices = np.zeros_like(modifier_indices)
+            distance_diff = head_indices - modifier_indices
+            head_right_inds = distance_diff > 0
+            distance_indices[head_right_inds] = np.nonzero(
+                distance_diff[head_right_inds] >= self.distance_bins)[0][-1]
 
-        self.scores[Target.HEADS] = []
-        self.scores[Target.RELATIONS] = []
-        for i, sent_parts in enumerate(parts):
-            # we need to convert the numpy mask to a torch tensor
-            mask = sent_parts.arc_mask.astype(np.uint8)
-            mask = torch.ByteTensor(mask)
+            head_left_inds = distance_diff < 0
+            distance_indices[head_left_inds] = np.nonzero(
+                -distance_diff[head_left_inds] >= self.distance_bins)[0][-1]
+            distance_indices[head_left_inds] += len(self.distance_bins)
 
-            shape = mask.shape
-            sent_arc_scores = arc_scores[i, :shape[0], :shape[1]]
-            valid_arc_scores = torch.masked_select(sent_arc_scores, mask)
-            self.scores[Target.HEADS].append(valid_arc_scores)
+        # now index all of them to process at once
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
 
-            sent_label_scores = label_scores[i, :shape[0], :shape[1]]
-            valid_label_scores = torch.masked_select(sent_label_scores,
-                                                     mask.unsqueeze(2))
-            self.scores[Target.RELATIONS].append(valid_label_scores)
+        if self.distance_embedding_size:
+            distance_indices = torch.tensor(distance_indices, dtype=torch.long)
+            if self.on_gpu:
+                distance_indices = distance_indices.cuda()
+
+            distances = self.distance_embeddings(distance_indices)
+            distance_projections = self.distance_projector(distances)
+            distance_projections = distance_projections.view(
+                -1, self.mlp_size)
+
+        else:
+            distance_projections = 0
+
+        arc_states = self.tanh(heads + modifiers + distance_projections)
+        arc_scores = self.arc_scorer(arc_states)
+        self.scores[Target.HEADS].append(arc_scores.view(-1))
+
+        if not parts.labeled:
+            return
+
+        head_tensors = self.label_head_mlp(states)
+        modifier_tensors = self.label_modifier_mlp(states)
+
+        # we can reuse indices -- every LabeledArc must also appear as Arc
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
+        if self.distance_embedding_size:
+            distance_projections = self.label_distance_projector(distances)
+
+        label_states = self.tanh(heads + modifiers + distance_projections)
+        label_scores = self.label_scorer(label_states)
+        self.scores[Target.RELATIONS].append(label_scores.view(-1))
+
+        # # call dropout multiple times to vary results each time
+        # # we interpret arc_scores as [modifier, head]
+        # arc_scores = self.arc_scorer(self.dropout(states),
+        #                              self.dropout(states))
+        # label_scores = self.label_scorer(self.dropout(states),
+        #                                  self.dropout(states))
+
+        # # remove root scores
+        # arc_scores = arc_scores[:, 1:]
+        # label_scores = label_scores[:, 1:]
+        #
+        # self.scores[Target.HEADS] = []
+        # self.scores[Target.RELATIONS] = []
+        # for i, sent_parts in enumerate(parts):
+        #     # we need to convert the numpy mask to a torch tensor
+        #     mask = sent_parts.arc_mask.astype(np.uint8)
+        #     mask = torch.ByteTensor(mask)
+        #
+        #     shape = mask.shape
+        #     sent_arc_scores = arc_scores[i, :shape[0], :shape[1]]
+        #     valid_arc_scores = torch.masked_select(sent_arc_scores, mask)
+        #     self.scores[Target.HEADS].append(valid_arc_scores)
+        #
+        #     sent_label_scores = label_scores[i, :shape[0], :shape[1]]
+        #     valid_label_scores = torch.masked_select(sent_label_scores,
+        #                                              mask.unsqueeze(2))
+        #     self.scores[Target.RELATIONS].append(valid_label_scores)
 
     def _compute_grandparent_scores(self, states, parts, scores):
         """
@@ -740,7 +807,8 @@ class DependencyNeuralModel(nn.Module):
         :param parts: a list of DependencyParts objects
         :return: a score matrix with shape (num_instances, longest_length)
         """
-        self.scores = {}
+        self.scores = {Target.HEADS: [], Target.RELATIONS: []}
+        batch_size = len(instances)
         lengths = torch.tensor([len(instance) for instance in instances],
                                dtype=torch.long)
         if self.on_gpu:
@@ -791,14 +859,13 @@ class DependencyNeuralModel(nn.Module):
                 hidden = self.morph_mlp(tagger_batch_states[:, 1:])
                 self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
-        self._compute_arc_scores(parser_batch_states, parts)
+        # now go through each batch item
+        for i in range(batch_size):
+            length = lengths[i].item()
+            states = parser_batch_states[i, :length]
+            sent_parts = parts[i]
 
-        # # now go through each batch item
-        # for i in range(batch_size):
-        #     length = lengths[i].item()
-        #     states = parser_batch_states[i, :length]
-        #     sent_scores = dependency_scores[i]
-        #     sent_parts = parts[i]
+            self._compute_arc_scores(states, sent_parts)
         #
         #     if sent_parts.has_type(NextSibling):
         #         self._compute_consecutive_sibling_scores(states, sent_parts,

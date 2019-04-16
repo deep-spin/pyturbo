@@ -77,6 +77,7 @@ class DependencyInstance():
         return self.heads[i]
 
     def get_all_heads(self):
+        """Return all heads in the sentence, including root"""
         return self.heads
 
     def get_relation(self, i):
