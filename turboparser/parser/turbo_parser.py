@@ -351,43 +351,48 @@ class TurboParser(object):
     def format_instance(self, instance):
         return DependencyInstanceNumeric(instance, self.token_dictionary)
 
-    def prune(self, instance, parts):
+    def run_pruner(self, instance):
         """
         Prune out some arcs with the pruner model.
 
+        To use the current model as a pruner, use `prune` instead.
+
         :param instance: a DependencyInstance object, not formatted
-        :param parts: a DependencyParts object with arcs
-        :type parts:DependencyParts
-        :return: a new DependencyParts object contained the kept arcs
+        :return: a boolean 2d array masking arcs. It has shape (n - 1, n) where
+            n is the instance length including root. Position (m, h) has True
+            if the arc is valid, False otherwise.
+            During training, gold arcs always are True.
         """
-        instance = self.pruner.format_instance(instance)
-        scores = self.pruner.neural_scorer.compute_scores(instance, parts)[0]
-        new_parts = self.decoder.decode_matrix_tree(
-            len(instance), parts.arc_index, parts, scores,
-            self.options.pruner_max_heads,
-            self.options.pruner_posterior_threshold)
+        new_mask = self.pruner.prune(instance)
 
         if self.options.train:
-            for m in range(1, len(instance)):
-                h = instance.heads[m]
-                if new_parts.find_arc_index(h, m) < 0:
-                    new_parts.append(Arc(h, m), 1)
-
-                    # accumulate pruner mistakes here instead of later, because
-                    # it is simpler to keep `parts` with only arcs
+            for m in range(len(instance) - 1):
+                h = instance.heads[m + 1]
+                if not new_mask[m, h]:
+                    new_mask[m, h] = True
                     self.pruner_mistakes += 1
 
-                    # also add all labels if doing labeled parsing
-                    if not self.options.unlabeled:
-                        for label in range(
-                                self.token_dictionary.get_num_deprels()):
-                            if instance.relations[m] == label:
-                                gold = 1
-                            else:
-                                gold = 0
-                            new_parts.append(LabeledArc(h, m, label), gold)
+        return new_mask
 
-        return new_parts
+    def prune(self, instance):
+        """
+        Prune out some possible arcs in the given instance.
+
+        This function uses the current model as the pruner; to run an
+        encapsulated pruner, use `run_pruner` instead.
+
+        :param instance: a DependencyInstance object, not formatted
+        :return: a boolean 2d array masking arcs. It has shape (n - 1, n) where
+            n is the instance length including root. Position (m, h) has True
+            if the arc is valid, False otherwise.
+        """
+        instance, parts = self.make_parts(instance)
+        scores = self.neural_scorer.compute_scores(instance, parts)[0]
+        new_mask = self.decoder.decode_matrix_tree(
+            parts, scores, self.options.pruner_max_heads,
+            self.options.pruner_posterior_threshold)
+
+        return new_mask
 
     def _report_make_parts(self, instances, parts):
         """
@@ -463,7 +468,7 @@ class TurboParser(object):
         self.pruner_mistakes = 0
 
         if self.has_pruner:
-            prune_mask = self.prune(instance)
+            prune_mask = self.run_pruner(instance)
         else:
             prune_mask = None
 

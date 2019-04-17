@@ -212,11 +212,11 @@ class DependencyParts(object):
         self.num_parts = self.num_arcs + self.num_labeled_arcs
 
         if model_type.consecutive_siblings:
-            raise NotImplemented
+            raise NotImplementedError()
         if model_type.grandparents:
-            raise NotImplemented
+            raise NotImplementedError()
         if model_type.grandsiblings:
-            raise NotImplemented
+            raise NotImplementedError()
 
         self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
         assert self.num_parts == len(self.gold_parts)
