@@ -25,59 +25,6 @@ def create_padding_mask(lengths):
     return mask
 
 
-class BiaffineScorer(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size,
-                 activation_layer, dropout_layer):
-        super(BiaffineScorer, self).__init__()
-
-        self.ff1 = nn.Sequential(nn.Linear(input_size, hidden_size),
-                                 activation_layer, dropout_layer)
-        self.ff2 = nn.Sequential(nn.Linear(input_size, hidden_size),
-                                 activation_layer, dropout_layer)
-
-        # +1 to account for bias
-        hidden_size += 1
-        w = torch.Tensor(output_size, hidden_size, hidden_size)
-
-        self.bilinear_w = nn.Parameter(w)
-        self.bias = nn.Parameter(torch.Tensor(1))
-
-        nn.init.xavier_uniform_(self.bilinear_w)
-        self.bias.data.fill_(0)
-
-    def forward(self, input1, input2):
-        """
-        Inputs are candidate heads and modifiers.
-
-        Both inputs should have shape (batch, num_words, input_size).
-        """
-        hidden1 = self.ff1(input1)
-        hidden2 = self.ff2(input2)
-
-        bias1 = hidden1.new_ones(hidden1.size()[:-1] + (1,))
-        bias2 = hidden2.new_ones(hidden2.size()[:-1] + (1,))
-
-        hidden1 = torch.cat([hidden1, bias1], -1)
-        hidden2 = torch.cat([hidden2, bias2], -1)
-
-        # intermediate is (batch, output_size, num_words, hidden_size)
-        intermediate = torch.matmul(hidden1.unsqueeze(1), self.bilinear_w)
-
-        # (batch, output_size, num_words, num_words)
-        bilinear = torch.matmul(intermediate,
-                                hidden2.unsqueeze(1).transpose(2, 3))
-
-        final = bilinear + self.bias
-
-        # make final (batch, num_words, num_words, output_size)
-        final = final.permute(0, 2, 3, 1)
-
-        if final.size()[-1] == 1:
-            final.squeeze_(-1)
-
-        return final
-
-
 class DependencyNeuralModel(nn.Module):
     def __init__(self,
                  model_type,
@@ -177,8 +124,8 @@ class DependencyNeuralModel(nn.Module):
             self.xpos_embeddings = None
 
         if self.distance_embedding_size:
-            self.distance_bins = np.array(
-                list(range(10)) + list(range(10, 40, 5)) + [40])
+            bins = np.array(list(range(1, 10)) + list(range(10, 31, 5)))
+            self.distance_bins = np.concatenate([-bins[::-1], bins])
             self.distance_embeddings = nn.Embedding(len(self.distance_bins) * 2,
                                                     distance_embedding_size)
         else:
@@ -231,14 +178,6 @@ class DependencyNeuralModel(nn.Module):
         num_labels = token_dictionary.get_num_deprels()
         self.label_scorer = self._create_scorer(self.label_mlp_size,
                                                 num_labels)
-
-        # rnn_output = rnn_size * 2
-        # self.arc_scorer = BiaffineScorer(
-        #     rnn_output, self.mlp_size, 1, self.relu, self.dropout)
-        # num_labels = token_dictionary.get_num_deprels()
-        # self.label_scorer = BiaffineScorer(
-        #     rnn_output, self.label_mlp_size, num_labels, self.relu,
-        #     self.dropout)
 
         if model_type.grandparents:
             self.gp_grandparent_mlp = self._create_mlp()
@@ -441,7 +380,7 @@ class DependencyNeuralModel(nn.Module):
         position in the `scores` tensor.
 
         :param states: hidden states returned by the RNN; one for each word
-        :param parts: DependencyParts objects
+        :param parts: a DependencyParts object
         :type parts: DependencyParts
         """
         head_tensors = self.head_mlp(states)
@@ -451,22 +390,8 @@ class DependencyNeuralModel(nn.Module):
         # modifiers in the mask consider the first real word as 0
         modifier_indices += 1
         if self.distance_embedding_size:
-            distance_indices = np.zeros_like(modifier_indices)
             distance_diff = head_indices - modifier_indices
-            head_right_inds = distance_diff > 0
-            distance_indices[head_right_inds] = np.nonzero(
-                distance_diff[head_right_inds] >= self.distance_bins)[0][-1]
-
-            head_left_inds = distance_diff < 0
-            distance_indices[head_left_inds] = np.nonzero(
-                -distance_diff[head_left_inds] >= self.distance_bins)[0][-1]
-            distance_indices[head_left_inds] += len(self.distance_bins)
-
-        # now index all of them to process at once
-        heads = head_tensors[head_indices]
-        modifiers = modifier_tensors[modifier_indices]
-
-        if self.distance_embedding_size:
+            distance_indices = np.digitize(distance_diff, self.distance_bins)
             distance_indices = torch.tensor(distance_indices, dtype=torch.long)
             if self.on_gpu:
                 distance_indices = distance_indices.cuda()
@@ -475,9 +400,12 @@ class DependencyNeuralModel(nn.Module):
             distance_projections = self.distance_projector(distances)
             distance_projections = distance_projections.view(
                 -1, self.mlp_size)
-
         else:
             distance_projections = 0
+
+        # now index all of them to process at once
+        heads = head_tensors[head_indices]
+        modifiers = modifier_tensors[modifier_indices]
 
         arc_states = self.tanh(heads + modifiers + distance_projections)
         arc_scores = self.arc_scorer(arc_states)
@@ -498,34 +426,6 @@ class DependencyNeuralModel(nn.Module):
         label_states = self.tanh(heads + modifiers + distance_projections)
         label_scores = self.label_scorer(label_states)
         self.scores[Target.RELATIONS].append(label_scores.view(-1))
-
-        # # call dropout multiple times to vary results each time
-        # # we interpret arc_scores as [modifier, head]
-        # arc_scores = self.arc_scorer(self.dropout(states),
-        #                              self.dropout(states))
-        # label_scores = self.label_scorer(self.dropout(states),
-        #                                  self.dropout(states))
-
-        # # remove root scores
-        # arc_scores = arc_scores[:, 1:]
-        # label_scores = label_scores[:, 1:]
-        #
-        # self.scores[Target.HEADS] = []
-        # self.scores[Target.RELATIONS] = []
-        # for i, sent_parts in enumerate(parts):
-        #     # we need to convert the numpy mask to a torch tensor
-        #     mask = sent_parts.arc_mask.astype(np.uint8)
-        #     mask = torch.ByteTensor(mask)
-        #
-        #     shape = mask.shape
-        #     sent_arc_scores = arc_scores[i, :shape[0], :shape[1]]
-        #     valid_arc_scores = torch.masked_select(sent_arc_scores, mask)
-        #     self.scores[Target.HEADS].append(valid_arc_scores)
-        #
-        #     sent_label_scores = label_scores[i, :shape[0], :shape[1]]
-        #     valid_label_scores = torch.masked_select(sent_label_scores,
-        #                                              mask.unsqueeze(2))
-        #     self.scores[Target.RELATIONS].append(valid_label_scores)
 
     def _compute_grandparent_scores(self, states, parts, scores):
         """
@@ -866,7 +766,6 @@ class DependencyNeuralModel(nn.Module):
             sent_parts = parts[i]
 
             self._compute_arc_scores(states, sent_parts)
-        #
         #     if sent_parts.has_type(NextSibling):
         #         self._compute_consecutive_sibling_scores(states, sent_parts,
         #                                                  sent_scores)
