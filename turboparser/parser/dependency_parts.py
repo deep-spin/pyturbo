@@ -3,6 +3,7 @@ import numpy as np
 from .dependency_instance_numeric import DependencyInstanceNumeric
 from .constants import Target
 
+
 class DependencyPart(object):
     """
     Base class for Dependency Parts
@@ -117,9 +118,6 @@ class DependencyParts(object):
         # part_lists[Type] contains the list of Type parts
         self.part_lists = OrderedDict()
 
-        # part_gold[Type] contains the gold labels for Type objects
-        self.part_gold = OrderedDict()
-
         self._make_parts(instance, model_type)
 
         self.best_labels = {}
@@ -195,6 +193,8 @@ class DependencyParts(object):
             self.arc_mask = np.ones([length - 1, length], dtype=np.bool)
             self.arc_mask[np.arange(length - 1), np.arange(1, length)] = False
 
+        # TODO: enforce connectedness
+
         # if there are gold labels, store them
         self.gold_parts = self._make_gold_arcs(instance)
         self.type_order.append(Target.HEADS)
@@ -212,10 +212,14 @@ class DependencyParts(object):
         self.num_parts = self.num_arcs + self.num_labeled_arcs
 
         if model_type.consecutive_siblings:
-            raise NotImplementedError()
+            self.make_consecutive_siblings(instance)
+            self.type_order.append(Target.NEXT_SIBLINGS)
+            self.num_parts += len(self.part_lists[NextSibling])
         if model_type.grandparents:
+            self.type_order.append(Target.GRANDPARENTS)
             raise NotImplementedError()
         if model_type.grandsiblings:
+            self.type_order.append(Target.GRANDSIBLINGS)
             raise NotImplementedError()
 
         self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
@@ -232,8 +236,10 @@ class DependencyParts(object):
         # skip root
         heads = instance.get_all_heads()[1:]
         if heads[0] == -1:
+            self.make_gold = False
             return
 
+        self.make_gold = True
         relations = instance.get_all_relations()[1:]
         gold_parts = []
         gold_relations = []
@@ -262,6 +268,78 @@ class DependencyParts(object):
 
         gold_parts.extend(gold_relations)
         return gold_parts
+
+    def make_consecutive_siblings(self, instance):
+        """
+        Create the parts relative to consecutive siblings.
+
+        Each part means that an arc h -> m and h -> s exist at the same time,
+        with both h > m and h > s or both h < m and h < s.
+
+        :param instance: DependencyInstance
+        :type instance: DependencyInstanceNumeric
+        """
+        self.part_lists[NextSibling] = []
+        for h in range(len(instance)):
+
+            # siblings to the right of h
+            # when m = h, it signals that s is the first child
+            for m in range(h, len(instance)):
+
+                if h != m and not self.arc_mask[m - 1, h]:
+                    # pruned out
+                    continue
+
+                gold_hm = m == h or instance.get_head(m) == h
+                arc_between = False
+
+                # when s = length, it signals that m encodes the last child
+                for s in range(m + 1, len(instance) + 1):
+                    if s < len(instance) and not self.arc_mask[s - 1, h]:
+                        # pruned out
+                        continue
+
+                    if self.make_gold:
+                        gold_hs = s == len(instance) or \
+                                    instance.get_head(s) == h
+
+                        if gold_hm and gold_hs and not arc_between:
+                            gold = 1
+                            arc_between = True
+                        else:
+                            gold = 0
+
+                        self.gold_parts.append(gold)
+                    part = GrandSibling(h, m, s)
+                    self.part_lists[NextSibling].append(part)
+
+            # siblings to the left of h
+            for m in range(h, -1, -1):
+                if h != m and not self.arc_mask[m - 1, h]:
+                    # pruned out
+                    continue
+
+                gold_hm = m == h or instance.get_head(m) == h
+                arc_between = False
+
+                # when s = 0, it signals that m encoded the leftmost child
+                for s in range(m - 1, -2, -1):
+                    if s == 0 or (s != -1 and not self.arc_mask[s - 1, h]):
+                        # pruned out
+                        continue
+
+                    if self.make_gold:
+                        gold_hs = s == -1 or instance.get_head(s) == h
+
+                        if gold_hm and gold_hs and not arc_between:
+                            gold = 1
+                            arc_between = True
+                        else:
+                            gold = 0
+
+                        self.gold_parts.append(gold)
+                    part = GrandSibling(h, m, s)
+                    self.part_lists[NextSibling].append(part)
 
     def has_type(self, type_):
         """
