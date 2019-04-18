@@ -385,10 +385,8 @@ class DependencyNeuralModel(nn.Module):
         """
         head_tensors = self.head_mlp(states)
         modifier_tensors = self.modifier_mlp(states)
+        head_indices, modifier_indices = parts.get_arc_indices()
 
-        modifier_indices, head_indices = np.where(parts.arc_mask)
-        # modifiers in the mask consider the first real word as 0
-        modifier_indices += 1
         if self.distance_embedding_size:
             distance_diff = head_indices - modifier_indices
             distance_indices = np.digitize(distance_diff, self.distance_bins)
@@ -427,7 +425,7 @@ class DependencyNeuralModel(nn.Module):
         label_scores = self.label_scorer(label_states)
         self.scores[Target.RELATIONS].append(label_scores.view(-1))
 
-    def _compute_grandparent_scores(self, states, parts, scores):
+    def _compute_grandparent_scores(self, states, parts):
         """
         Compute the grandparent scores and store them in the
         appropriate position in the `scores` tensor.
@@ -435,10 +433,12 @@ class DependencyNeuralModel(nn.Module):
         :param states: hidden states returned by the RNN; one for each word
         :param parts: a DependencyParts object containing the parts to be scored
         :type parts: DependencyParts
-        :param scores: tensor for storing the scores for each part. The
-            positions relative to the features are indexed by the parts
-            object. It is modified in-place.
         """
+        # there may be no grandparent parts in some cases
+        if parts.get_num_type(Target.GRANDPARENTS) == 0:
+            self.scores[Target.GRANDPARENTS].append(torch.tensor([]))
+            return
+
         head_tensors = self.gp_head_mlp(states)
         grandparent_tensors = self.gp_grandparent_mlp(states)
         modifier_tensors = self.gp_modifier_mlp(states)
@@ -447,7 +447,7 @@ class DependencyNeuralModel(nn.Module):
         modifier_indices = []
         grandparent_indices = []
 
-        for part in parts.iterate_over_type(Grandparent):
+        for part in parts.part_lists[Target.GRANDPARENTS]:
             # list all indices, then feed the corresponding tensors to the net
             head_indices.append(part.head)
             modifier_indices.append(part.modifier)
@@ -459,11 +459,9 @@ class DependencyNeuralModel(nn.Module):
         part_states = self.tanh(heads + modifiers + grandparents)
         part_scores = self.grandparent_scorer(part_states)
 
-        offset = parts.get_type_offset(Grandparent)
-        size = parts.get_num_type(Grandparent)
-        scores[offset:offset + size] = part_scores.view(-1)
+        self.scores[Target.GRANDPARENTS].append(part_scores.view(-1))
 
-    def _compute_consecutive_sibling_scores(self, states, parts, scores):
+    def _compute_consecutive_sibling_scores(self, states, parts):
         """
         Compute the consecutive sibling scores and store them in the
         appropriate position in the `scores` tensor.
@@ -471,9 +469,6 @@ class DependencyNeuralModel(nn.Module):
         :param states: hidden states returned by the RNN; one for each word
         :param parts: a DependencyParts object containing the parts to be scored
         :type parts: DependencyParts
-        :param scores: tensor for storing the scores for each part. The
-            positions relative to the features are indexed by the parts
-            object. It is modified in-place.
         """
         # include the vector for null sibling
         # word_sibling_tensors is (num_words=1, hidden_units)
@@ -488,7 +483,7 @@ class DependencyNeuralModel(nn.Module):
         modifier_indices = []
         sibling_indices = []
 
-        for part in parts.iterate_over_type(NextSibling):
+        for part in parts.part_lists[Target.NEXT_SIBLINGS]:
             # list all indices to the candidate head/modifier/siblings, then
             # process them all at once for faster execution.
             head_indices.append(part.head)
@@ -506,11 +501,9 @@ class DependencyNeuralModel(nn.Module):
         sibling_states = self.tanh(heads + modifiers + siblings)
         sibling_scores = self.sibling_scorer(sibling_states)
 
-        offset = parts.get_type_offset(NextSibling)
-        size = parts.get_num_type(NextSibling)
-        scores[offset:offset + size] = sibling_scores.view(-1)
+        self.scores[Target.NEXT_SIBLINGS].append(sibling_scores.view(-1))
 
-    def _compute_grandsibling_scores(self, states, parts, scores):
+    def _compute_grandsibling_scores(self, states, parts):
         """
         Compute the consecutive grandsibling scores and store them in the
         appropriate position in the `scores` tensor.
@@ -518,9 +511,6 @@ class DependencyNeuralModel(nn.Module):
         :param states: hidden states returned by the RNN; one for each word
         :param parts: a DependencyParts object containing the parts to be scored
         :type parts: DependencyParts
-        :param scores: tensor for storing the scores for each part. The
-            positions relative to the features are indexed by the parts
-            object. It is modified in-place.
         """
         # include the vector for null sibling
         # word_sibling_tensors is (num_words=1, hidden_units)
@@ -537,7 +527,7 @@ class DependencyNeuralModel(nn.Module):
         sibling_indices = []
         grandparent_indices = []
 
-        for part in parts.iterate_over_type(GrandSibling):
+        for part in parts.part_lists[Target.GRANDSIBLINGS]:
             # list all indices to the candidate head/mod/sib/grandparent
             head_indices.append(part.head)
             modifier_indices.append(part.modifier)
@@ -556,9 +546,7 @@ class DependencyNeuralModel(nn.Module):
         gsib_states = self.tanh(heads + modifiers + siblings + grandparents)
         gsib_scores = self.grandsibling_scorer(gsib_states)
 
-        offset = parts.get_type_offset(GrandSibling)
-        size = parts.get_num_type(GrandSibling)
-        scores[offset:offset + size] = gsib_scores.view(-1)
+        self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
 
     def get_word_representation(self, instances, max_length):
         """
@@ -698,8 +686,7 @@ class DependencyNeuralModel(nn.Module):
             char_representation = char_representation.cuda()
         char_representation[sorted_inds] = last_output_bi
 
-        return char_representation.view([batch_size, max_sentence_length,
-                                         -1])
+        return char_representation.view([batch_size, max_sentence_length, -1])
 
     def forward(self, instances, parts):
         """
@@ -708,6 +695,9 @@ class DependencyNeuralModel(nn.Module):
         :return: a score matrix with shape (num_instances, longest_length)
         """
         self.scores = {Target.HEADS: [], Target.RELATIONS: []}
+        for type_ in parts[0].part_lists:
+            self.scores[type_] = []
+
         batch_size = len(instances)
         lengths = torch.tensor([len(instance) for instance in instances],
                                dtype=torch.long)
@@ -766,16 +756,13 @@ class DependencyNeuralModel(nn.Module):
             sent_parts = parts[i]
 
             self._compute_arc_scores(states, sent_parts)
-        #     if sent_parts.has_type(NextSibling):
-        #         self._compute_consecutive_sibling_scores(states, sent_parts,
-        #                                                  sent_scores)
-        #
-        #     if sent_parts.has_type(Grandparent):
-        #         self._compute_grandparent_scores(states, sent_parts,
-        #                                          sent_scores)
-        #
-        #     if sent_parts.has_type(GrandSibling):
-        #         self._compute_grandsibling_scores(states, sent_parts,
-        #                                           sent_scores)
+            if self.model_type.consecutive_siblings:
+                self._compute_consecutive_sibling_scores(states, sent_parts)
+
+            if self.model_type.grandparents:
+                self._compute_grandparent_scores(states, sent_parts)
+
+            if self.model_type.grandsiblings:
+                self._compute_grandsibling_scores(states, sent_parts)
 
         return self.scores

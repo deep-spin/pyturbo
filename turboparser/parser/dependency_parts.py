@@ -118,7 +118,7 @@ class DependencyParts(object):
         # part_lists[Type] contains the list of Type parts
         self.part_lists = OrderedDict()
 
-        self._make_parts(instance, model_type)
+        self.make_parts(instance, model_type)
 
         self.best_labels = {}
 
@@ -183,7 +183,7 @@ class DependencyParts(object):
 
         return pred_labels
 
-    def _make_parts(self, instance, model_type):
+    def make_parts(self, instance, model_type):
         """
         Create all the parts to represent the instance
         """
@@ -193,7 +193,7 @@ class DependencyParts(object):
             self.arc_mask = np.ones([length - 1, length], dtype=np.bool)
             self.arc_mask[np.arange(length - 1), np.arange(1, length)] = False
 
-        # TODO: enforce connectedness
+        # TODO: enforce connectedness (necessary if pruning by tag or distance)
 
         # if there are gold labels, store them
         self.gold_parts = self._make_gold_arcs(instance)
@@ -209,18 +209,19 @@ class DependencyParts(object):
         else:
             self.num_labeled_arcs = 0
 
-        self.num_parts = self.num_arcs + self.num_labeled_arcs
-
         if model_type.consecutive_siblings:
             self.make_consecutive_siblings(instance)
-            self.type_order.append(Target.NEXT_SIBLINGS)
-            self.num_parts += len(self.part_lists[NextSibling])
+
         if model_type.grandparents:
-            self.type_order.append(Target.GRANDPARENTS)
-            raise NotImplementedError()
+            self.make_grandparents(instance)
+
         if model_type.grandsiblings:
-            self.type_order.append(Target.GRANDSIBLINGS)
-            raise NotImplementedError()
+            self.make_grandsiblings(instance)
+
+        self.num_parts = self.num_arcs + self.num_labeled_arcs + \
+            sum(len(parts) for parts in self.part_lists.values())
+        for type_ in self.part_lists:
+            self.type_order.append(type_)
 
         self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
         assert self.num_parts == len(self.gold_parts)
@@ -269,6 +270,47 @@ class DependencyParts(object):
         gold_parts.extend(gold_relations)
         return gold_parts
 
+    def make_grandparents(self, instance):
+        """
+        Create the parts relative to grandparents.
+
+        Each part means that an arc h -> m and g -> h exist at the same time.
+
+        :type instance: DependencyInstanceNumeric
+        """
+        gp_parts = []
+        for g in range(len(instance)):
+            for h in range(1, len(instance)):
+                if g == h:
+                    continue
+
+                if not self.arc_mask[h - 1, g]:
+                    # the arc g -> h has been pruned out
+                    continue
+
+                gold_gh = instance.get_head(h) == g
+
+                for m in range(1, len(instance)):
+                    if h == m:
+                        # g == m is necessary to run the grandparent factor
+                        continue
+
+                    if not self.arc_mask[m - 1, h]:
+                        # pruned out
+                        continue
+
+                    part = Grandparent(h, m, g)
+                    if self.make_gold:
+                        if gold_gh and instance.get_head(m) == h:
+                            gold = 1
+                        else:
+                            gold = 0
+                        self.gold_parts.append(gold)
+
+                    gp_parts.append(part)
+
+        self.part_lists[Target.GRANDPARENTS] = gp_parts
+
     def make_consecutive_siblings(self, instance):
         """
         Create the parts relative to consecutive siblings.
@@ -279,7 +321,7 @@ class DependencyParts(object):
         :param instance: DependencyInstance
         :type instance: DependencyInstanceNumeric
         """
-        self.part_lists[NextSibling] = []
+        parts = []
         for h in range(len(instance)):
 
             # siblings to the right of h
@@ -311,7 +353,7 @@ class DependencyParts(object):
 
                         self.gold_parts.append(gold)
                     part = GrandSibling(h, m, s)
-                    self.part_lists[NextSibling].append(part)
+                    parts.append(part)
 
             # siblings to the left of h
             for m in range(h, -1, -1):
@@ -339,7 +381,128 @@ class DependencyParts(object):
 
                         self.gold_parts.append(gold)
                     part = GrandSibling(h, m, s)
-                    self.part_lists[NextSibling].append(part)
+                    parts.append(part)
+
+        self.part_lists[Target.NEXT_SIBLINGS] = parts
+
+    def make_grandsiblings(self, instance):
+        """
+        Create the parts relative to grandsibling nodes.
+
+        Each part means that arcs g -> h, h -> m, and h ->s exist at the same
+        time.
+        :type instance: DependencyInstanceNumeric
+        """
+        parts = []
+        for g in range(len(instance)):
+            for h in range(1, len(instance)):
+                if g == h:
+                    continue
+
+                if not self.arc_mask[h - 1, g]:
+                    # pruned
+                    continue
+
+                gold_gh = instance.get_head(h) == g
+
+                # check modifiers to the right
+                for m in range(h, len(instance)):
+                    if h != m and not self.arc_mask[m - 1, h]:
+                        # pruned; h == m signals first child
+                        continue
+
+                    gold_hm = m == h or instance.get_head(m) == h
+                    arc_between = False
+
+                    for s in range(m + 1, len(instance) + 1):
+                        if s < len(instance) and not self.arc_mask[s - 1, h]:
+                            # pruned; s == len signals last child
+                            continue
+
+                        gold_hs = s == len(instance) or \
+                            instance.get_head(s) == h
+
+                        if self.make_gold:
+                            gold = 0
+                            if gold_hm and gold_hs and not arc_between:
+                                if gold_gh:
+                                    gold = 1
+
+                                arc_between = True
+                            self.gold_parts.append(gold)
+
+                        part = GrandSibling(h, m, g, s)
+                        parts.append(part)
+
+                # check modifiers to the left
+                for m in range(h, 0, -1):
+                    if h != m and not self.arc_mask[m - 1, h]:
+                        # pruned; h == m signals last child
+                        continue
+
+                    gold_hm = m == h or instance.get_head(m) == h
+                    arc_between = False
+
+                    for s in range(m - 1, -2, -1):
+                        if s == 0 or (s != -1 and not self.arc_mask[s - 1, h]):
+                            # pruned out
+                            # s = -1 signals leftmost child; 0 should be ignored
+                            continue
+
+                        gold_hs = s == -1 or instance.get_head(s) == h
+                        if self.make_gold:
+                            gold = 0
+                            if gold_hm and gold_hs and not arc_between:
+                                if gold_gh:
+                                    gold = 1
+
+                                arc_between = True
+                            self.gold_parts.append(gold)
+
+                        part = GrandSibling(h, m, g, s)
+                        parts.append(part)
+
+        self.part_lists[Target.GRANDSIBLINGS] = parts
+
+    def create_arc_index(self):
+        """
+        Create a matrix such that cell (h, m) has the position of the given arc
+        in the arc list of -1 if it doesn't exist.
+
+        The matrix shape is (n, n), where n includes the dummy root.
+        """
+        # first, invert the arc_mask which is (m, h)
+        mask = self.arc_mask.T
+        mask = mask.astype(np.int)
+
+        # add the root
+        length = len(mask)
+        root_col = np.zeros([length, 1], dtype=np.int)
+        mask = np.concatenate([root_col, mask], axis=1)
+
+        # replace 1's and 0's with their positions
+        mask[mask == 0] = -1
+        mask[mask == 1] = np.arange(np.sum(mask == 1))
+
+        return mask
+
+    def get_arc_indices(self):
+        """
+        Return a tuple with indices for heads and modifiers of valid arcs, such
+        that they are ordered first by head and then by modifier.
+
+        Modifier words are numbered from 1; 0 is reserved for the root.
+
+        This ensures that all conversions from arc_mask to arcs will have the
+        same ordering.
+
+        :return: a tuple (heads, modifiers)
+        """
+        head_indices, modifier_indices = np.where(self.arc_mask.T)
+        # modifiers in the mask consider the first real word as 0
+        modifier_indices += 1
+
+        return head_indices, modifier_indices
 
     def has_type(self, type_):
         """
@@ -366,10 +529,16 @@ class DependencyParts(object):
         """
         Return the offset of the given type in the ordered array with gold data.
         """
+        if type_ == Target.HEADS:
+            return 0
+
+        if type_ == Target.RELATIONS:
+            return self.num_arcs
+
         if type_ not in self.part_lists:
             return -1
 
-        offset = 0
+        offset = self.num_arcs + self.num_labeled_arcs
         for type_i in self.part_lists:
             if type_i == type_:
                 return offset
@@ -394,69 +563,3 @@ class DependencyParts(object):
             return None
 
         return all_gold
-
-    def append(self, part, gold=None):
-        """
-        Append the object to the internal list. If it's a first order arc, also
-        update the position index.
-
-        :param part: a DependencyPart
-        :param gold: either 1 or 0
-        """
-        part_type = type(part)
-        if part_type not in self.part_lists:
-            self.part_lists[part_type] = []
-            if gold is not None:
-                self.part_gold[part_type] = []
-
-        self.part_lists[part_type].append(part)
-        if gold is not None:
-            self.part_gold[part_type].append(gold)
-
-        if isinstance(part, Arc):
-            if part.head not in self.arc_index:
-                self.arc_index[part.head] = {}
-
-            index = len(self.part_lists[Arc]) - 1
-            self.arc_index[part.head][part.modifier] = index
-
-        elif isinstance(part, LabeledArc):
-            if part.head not in self.labeled_indices:
-                self.labeled_indices[part.head] = {}
-
-            if part.head not in self.arc_labels:
-                self.arc_labels[part.head] = {}
-
-            head_indices = self.labeled_indices[part.head]
-            head_labels = self.arc_labels[part.head]
-            if part.modifier not in head_indices:
-                head_indices[part.modifier] = []
-
-            if part.modifier not in head_labels:
-                head_labels[part.modifier] = []
-
-            index = len(self.part_lists[LabeledArc]) - 1
-            head_indices[part.modifier].append(index)
-            head_labels[part.modifier].append(part.label)
-
-    def iterate_over_type(self, type_):
-        """
-        Iterates over the parts (arcs) of a particular type.
-        """
-        if type_ not in self.part_lists:
-            raise StopIteration
-
-        for part in self.part_lists[type_]:
-            yield part
-
-    def get_parts_of_type(self, type_):
-        """
-        Return a sublist of this object containing parts of the requested type.
-        """
-        return self.part_lists[type_]
-
-    def get_gold_for_type(self, type_):
-        """
-        Return a list with gold values for parts of the given type
-        """
-        return self.part_gold[type_]

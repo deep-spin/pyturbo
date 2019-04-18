@@ -76,26 +76,29 @@ class DependencyDecoder(StructuredDecoder):
             it is treated internally.
         :return:
         """
-        # AD3 expects arcs as (h, m) with m counting from 0
-        modifiers, heads = np.where(parts.arc_mask)
-        self.arcs = list(zip(heads, modifiers + 1))
+        heads, modifiers = parts.get_arc_indices()
+        self.arcs = list(zip(heads, modifiers))
+        self.arc_index = parts.create_arc_index()
+
+        # these indices keep track of the higher order parts added to the graph
+        self.additional_indices = []
 
         graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores, graph)
 
-        # self.use_siblings = parts.has_type(NextSibling)
-        # self.use_grandparents = parts.has_type(Grandparent)
-        # self.use_grandsiblings = parts.has_type(GrandSibling)
-        #
-        # self._index_parts_by_head(parts, instance, scores)
-        #
-        # if self.use_grandsiblings or \
-        #         (self.use_siblings and self.use_grandparents):
-        #     self.create_gp_head_automata(parts, graph, variables)
-        # elif self.use_grandparents:
-        #     self.create_grandparent_factors(parts, scores, graph, variables)
-        # elif self.use_siblings:
-        #     self.create_head_automata(parts, graph, variables)
+        self.use_siblings = parts.has_type(Target.NEXT_SIBLINGS)
+        self.use_grandparents = parts.has_type(Target.GRANDPARENTS)
+        self.use_grandsiblings = parts.has_type(Target.GRANDSIBLINGS)
+
+        self._index_parts_by_head(parts, instance, scores)
+
+        if self.use_grandsiblings or \
+                (self.use_siblings and self.use_grandparents):
+            self.create_gp_head_automata(graph, variables)
+        elif self.use_grandparents:
+            self.create_grandparent_factors(parts, scores, graph, variables)
+        elif self.use_siblings:
+            self.create_head_automata(graph, variables)
 
         graph.set_eta_ad3(.05)
         graph.adapt_eta_ad3(True)
@@ -117,7 +120,8 @@ class DependencyDecoder(StructuredDecoder):
 
         :type parts: DependencyParts
         :type instance: DependencyInstance
-        :type scores: np.ndarray
+        :param scores: dictionary mapping target names to scores
+        :type scores: dict
         """
         n = len(instance)
 
@@ -126,21 +130,21 @@ class DependencyDecoder(StructuredDecoder):
         if self.use_siblings:
             _populate_structure_list(
                 self.left_siblings, self.right_siblings, parts, scores,
-                NextSibling)
+                Target.NEXT_SIBLINGS)
 
         self.left_grandparents = create_empty_structures(n)
         self.right_grandparents = create_empty_structures(n)
         if self.use_grandparents:
             _populate_structure_list(
                 self.left_grandparents, self.right_grandparents, parts, scores,
-                Grandparent)
+                Target.GRANDPARENTS)
 
         self.left_grandsiblings = create_empty_structures(n)
         self.right_grandsiblings = create_empty_structures(n)
         if self.use_grandsiblings:
             _populate_structure_list(
                 self.left_grandsiblings, self.right_grandsiblings, parts,
-                scores, GrandSibling)
+                scores, Target.GRANDSIBLINGS)
 
     def decode_matrix_tree(self, parts, scores, max_heads, threshold=0):
         """
@@ -165,24 +169,15 @@ class DependencyDecoder(StructuredDecoder):
         # others have their corresponding position in the arc list
         # matrix should be (h, m) including root
 
-        # first, invert the arc_mask which is (m, h)
-        mask = parts.arc_mask.T
-        mask = mask.astype(np.int)
+        arc_index = parts.create_arc_index()
+        length = len(arc_index)
 
-        # add the root
-        length = len(mask)
-        root_col = np.zeros([length, 1], dtype=np.int)
-        mask = np.concatenate([root_col, mask], axis=1)
-
-        # create the arcs in the expectaed order
-        arcs = list(zip(*np.nonzero(mask)))
-
-        # replace 1's and 0's with their positions
-        mask[mask == 0] = -1
-        mask[mask == 1] = np.arange(np.sum(mask == 1))
+        # create the arcs in the expected order
+        head_inds, modifier_inds = parts.get_arc_indices()
+        arcs = list(zip(head_inds, modifier_inds))
 
         marginals, log_partition, entropy = decode_matrix_tree(
-            length, mask, arcs, arc_scores)
+            length, arc_index, arcs, arc_scores)
 
         # now, we can treat the marginals as scores for each arc and run the
         # naive decoder algorithm. The resulting configurations ensures at
@@ -301,6 +296,8 @@ class DependencyDecoder(StructuredDecoder):
                                               - parts.num_labeled_arcs)
 
         predicted_output[:num_arcs] = posteriors
+        for index, score in zip(self.additional_indices, additional_posteriors):
+            predicted_output[index] = score
 
         # if doing labeled parsing, set the score of the best label for each
         # arc to be the same as the score of the arc
@@ -383,15 +380,13 @@ class DependencyDecoder(StructuredDecoder):
 
         return variables
 
-    def create_gp_head_automata(self, parts, graph, variables):
+    def create_gp_head_automata(self, graph, variables):
         """
         Include grandsibling factors (grandparent head automata) in the graph.
 
-        :type parts: DependencyParts
         :param graph: the graph
         :param variables: list of binary variables denoting arcs
         """
-        offset_arcs = parts.get_type_offset(Arc)
         # n is the number of tokens including the root
         n = len(self.left_siblings)
 
@@ -411,14 +406,14 @@ class DependencyDecoder(StructuredDecoder):
                 gp_tuples = [(p.grandparent, p.head, p.modifier)
                              for p in grandparent_structure.parts]
 
-                # (g, h) arcs must always be in increasing order
+                # (g, h) arcs must always be in increasing order for AD3
                 # we must include (g, h) even if there is no grandparent part
                 # this happens when the only sibling part is with null siblings
                 h = sib_tuples[0][0]
                 incoming_arcs = []
                 incoming_var_inds = []
                 for g in range(n):
-                    index = parts.find_arc_index(g, h)
+                    index = self.arc_index[g, h]
                     if index >= 0:
                         incoming_var_inds.append(index)
                         incoming_arcs.append((g, h))
@@ -430,12 +425,10 @@ class DependencyDecoder(StructuredDecoder):
                 if len(incoming_arcs) == 0:
                     # no grandparent structure; create simple head automaton
                     self._create_head_automata(
-                        [siblings_structure], parts, graph, variables,
-                        decreasing, offset_arcs)
+                        [siblings_structure], graph, variables, decreasing)
                     continue
 
-                outgoing_var_inds = [parts.find_arc_index(arc[0],
-                                                          arc[1]) - offset_arcs
+                outgoing_var_inds = [self.arc_index[arc[0], arc[1]]
                                      for arc in outgoing_arcs]
 
                 incoming_vars = [variables[i] for i in incoming_var_inds]
@@ -489,34 +482,28 @@ class DependencyDecoder(StructuredDecoder):
         :param graph: the graph
         :param variables: list of binary variables denoting arcs
         """
-        offset_arcs = parts.get_type_offset(Arc)
-        offset_gp = parts.get_type_offset(Grandparent)
-
-        for i, part in enumerate(parts.iterate_over_type(Grandparent),
-                                 offset_gp):
+        for i, part in parts.part_lists[Target.GRANDPARENTS]:
             head = part.head
             modifier = part.modifier
             grandparent = part.grandparent
 
-            index_hm = parts.find_arc_index(head, modifier) - offset_arcs
-            index_gh = parts.find_arc_index(grandparent, head) - offset_arcs
+            index_hm = self.arc_index[head, modifier]
+            index_gh = self.arc_index[grandparent, head]
 
             var_hm = variables[index_hm]
             var_gh = variables[index_gh]
 
-            score = scores[i]
+            score = scores[Target.GRANDPARENTS][i]
             graph.create_factor_pair([var_hm, var_gh], score)
             self.additional_indices.append(i)
 
-    def _create_head_automata(self, structures, parts, graph, variables,
-                              decreasing, offset_arcs=0):
+    def _create_head_automata(self, structures, graph, variables, decreasing):
         """
         Creates and sets the head automaton factors for either left or
         right siblings.
 
         :param structures: a list of PartStructure objects containing
             next sibling parts
-        :param parts: DependencyParts
         :param graph: the AD3 graph
         :param variables: list of variables constrained by the automata
         :param decreasing: whether to sort modifiers in decreasing order.
@@ -529,8 +516,7 @@ class DependencyDecoder(StructuredDecoder):
 
             indices = head_structure.indices
             arcs = head_structure.get_arcs(decreasing)
-            var_inds = [parts.find_arc_index(arc[0], arc[1]) - offset_arcs
-                        for arc in arcs]
+            var_inds = [self.arc_index[arc[0], arc[1]] for arc in arcs]
             local_variables = [variables[i] for i in var_inds]
             siblings = [(p.head, p.modifier, p.sibling)
                         for p in head_structure.parts]
@@ -545,7 +531,7 @@ class DependencyDecoder(StructuredDecoder):
 
             self.additional_indices.extend(indices)
 
-    def create_head_automata(self, parts, graph, variables):
+    def create_head_automata(self, graph, variables):
         """
         Include head automata for constraining consecutive siblings in the
         graph.
@@ -555,13 +541,10 @@ class DependencyDecoder(StructuredDecoder):
         :param variables: list of binary variables denoting arcs
         """
         # needed to map indices in parts to indices in variables
-        offset_arcs = parts.get_type_offset(Arc)
         self._create_head_automata(
-            self.left_siblings, parts, graph, variables, decreasing=True,
-            offset_arcs=offset_arcs)
+            self.left_siblings, graph, variables, decreasing=True)
         self._create_head_automata(
-            self.right_siblings, parts, graph, variables, decreasing=False,
-            offset_arcs=offset_arcs)
+            self.right_siblings, graph, variables, decreasing=False)
 
 
 def create_empty_lists(n):
@@ -588,12 +571,15 @@ def _populate_structure_list(left_list, right_list, parts, scores,
         head. It will be filled with the structures occurring left to each
         head.
     :param parts: a DependencyParts object
-    :param scores: a list or array of scores
+    :param scores: dictionary mapping target type to a score array
     :param right_list: same as above, for the right hand side.
-    :param type_: a type of dependency part
+    :param type_: a target type denoting some dependency part
     """
+    part_list = parts.part_lists[type_]
+    scores = scores[type_]
     offset = parts.get_type_offset(type_)
-    for i, part in enumerate(parts.iterate_over_type(type_), offset):
+
+    for i, part in enumerate(part_list):
 
         # make this check because modifier == head has a special meaning for
         # sibling parts
@@ -604,10 +590,10 @@ def _populate_structure_list(left_list, right_list, parts, scores,
 
         if is_right:
             # right sibling
-            right_list[part.head].append(part, scores[i], i)
+            right_list[part.head].append(part, scores[i], i + offset)
         else:
             # left sibling
-            left_list[part.head].append(part, scores[i], i)
+            left_list[part.head].append(part, scores[i], i + offset)
 
 
 def make_score_matrix(length, arc_mask, scores):
