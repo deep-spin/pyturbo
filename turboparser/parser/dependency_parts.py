@@ -112,6 +112,11 @@ class DependencyParts(object):
 
         self.best_labels = {}
 
+        for type_ in self.part_lists:
+            print('Type', type_, ':', [str(part) for part in self.part_lists[type_]])
+            print()
+        print()
+
     def save_best_labels(self, best_labels, arcs):
         """
         Save the best labels for each arc in a dictionary.
@@ -320,7 +325,7 @@ class DependencyParts(object):
                             gold = 0
 
                         self.gold_parts.append(gold)
-                    part = GrandSibling(h, m, s)
+                    part = NextSibling(h, m, s)
                     parts.append(part)
 
             # siblings to the left of h
@@ -348,7 +353,7 @@ class DependencyParts(object):
                             gold = 0
 
                         self.gold_parts.append(gold)
-                    part = GrandSibling(h, m, s)
+                    part = NextSibling(h, m, s)
                     parts.append(part)
 
         self.part_lists[Target.NEXT_SIBLINGS] = parts
