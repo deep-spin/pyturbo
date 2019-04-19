@@ -694,7 +694,9 @@ class DependencyNeuralModel(nn.Module):
         :param parts: a list of DependencyParts objects
         :return: a score matrix with shape (num_instances, longest_length)
         """
-        self.scores = {Target.HEADS: [], Target.RELATIONS: []}
+        self.scores = {Target.HEADS: []}
+        if parts[0].labeled:
+            self.scores[Target.RELATIONS] = []
         for type_ in parts[0].part_lists:
             self.scores[type_] = []
 

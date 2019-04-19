@@ -70,15 +70,6 @@ class GrandSibling(DependencyPart):
         self.grandparent = grandparent
 
 
-type2target = {NextSibling: Target.NEXT_SIBLINGS,
-               Grandparent: Target.GRANDPARENTS,
-               GrandSibling: Target.GRANDSIBLINGS}
-
-target2type = {Target.NEXT_SIBLINGS: NextSibling,
-               Target.GRANDPARENTS: Grandparent,
-               Target.GRANDSIBLINGS: GrandSibling}
-
-
 class DependencyParts(object):
     def __init__(self, instance, model_type, mask=None, labeled=True,
                  num_relations=None):
@@ -99,7 +90,7 @@ class DependencyParts(object):
             should be created (siblings, grandparents, etc)
         :param labeled: whether LabeledArc parts should be used
         :param mask: either None (no prune) or a bool numpy matrix with shape
-            (n, n+1) -- n is number of words without root. Cell (m, h) indicates
+            (n, n) -- n is number of words with root. Cell (h, m) indicates
             if the arc from h to m is considered, if True, or pruned out, if
             False.
         :param num_relations: number of dependency relations, if used
@@ -110,7 +101,6 @@ class DependencyParts(object):
         self.arc_mask = mask
         self.labeled = labeled
         self.num_relations = num_relations
-        self.gold_arcs = None
 
         # store the order in which part types are used
         self.type_order = []
@@ -121,29 +111,6 @@ class DependencyParts(object):
         self.make_parts(instance, model_type)
 
         self.best_labels = {}
-
-    def get_num_expected_scores(self, target):
-        """
-        Return the expected number of scores for a given target.
-
-        This is useful to get the number of meaningful scores from a padded
-        batch. It can return the number of arcs to be scored, or grandparents,
-        tags.
-
-        :param target: a value in Target
-        :return: int
-        """
-        if target == Target.HEADS:
-            return self.num_arcs
-        elif target == Target.RELATIONS:
-            return self.num_labeled_arcs
-        elif target in target2type:
-            # this covers higher-order features such as grandparent, siblings
-            type_ = target2type[target]
-            return len(self.part_lists[type_])
-        else:
-            # assume it is some tagging task
-            return len(self.arc_mask)
 
     def save_best_labels(self, best_labels, arcs):
         """
@@ -188,10 +155,12 @@ class DependencyParts(object):
         Create all the parts to represent the instance
         """
         # if no mask was given, create an all-True mask with a False diagonal
+        # and False in the first column (root as modifier)
         if self.arc_mask is None:
             length = len(instance)
-            self.arc_mask = np.ones([length - 1, length], dtype=np.bool)
-            self.arc_mask[np.arange(length - 1), np.arange(1, length)] = False
+            self.arc_mask = np.ones([length, length], dtype=np.bool)
+            self.arc_mask[np.arange(length), np.arange(length)] = False
+            self.arc_mask[:, 0] = False
 
         # TODO: enforce connectedness (necessary if pruning by tag or distance)
 
@@ -234,22 +203,21 @@ class DependencyParts(object):
         :type instance: DependencyInstanceNumeric
         :return: a list of 0s and 1s
         """
-        # skip root
-        heads = instance.get_all_heads()[1:]
-        if heads[0] == -1:
+        heads = instance.get_all_heads()
+        # [1] to skip root
+        if heads[1] == -1:
             self.make_gold = False
             return
 
         self.make_gold = True
-        relations = instance.get_all_relations()[1:]
+        relations = instance.get_all_relations()
         gold_parts = []
         gold_relations = []
         length = len(instance)
 
-        for m in range(length - 1):
-            # -1 to skip root
-            for h in range(length):
-                if not self.arc_mask[m, h]:
+        for h in range(length):
+            for m in range(1, length):
+                if not self.arc_mask[h, m]:
                     continue
 
                 gold_head = heads[m] == h
@@ -284,7 +252,7 @@ class DependencyParts(object):
                 if g == h:
                     continue
 
-                if not self.arc_mask[h - 1, g]:
+                if not self.arc_mask[g, h]:
                     # the arc g -> h has been pruned out
                     continue
 
@@ -295,7 +263,7 @@ class DependencyParts(object):
                         # g == m is necessary to run the grandparent factor
                         continue
 
-                    if not self.arc_mask[m - 1, h]:
+                    if not self.arc_mask[h, m]:
                         # pruned out
                         continue
 
@@ -328,7 +296,7 @@ class DependencyParts(object):
             # when m = h, it signals that s is the first child
             for m in range(h, len(instance)):
 
-                if h != m and not self.arc_mask[m - 1, h]:
+                if h != m and not self.arc_mask[h, m]:
                     # pruned out
                     continue
 
@@ -337,7 +305,7 @@ class DependencyParts(object):
 
                 # when s = length, it signals that m encodes the last child
                 for s in range(m + 1, len(instance) + 1):
-                    if s < len(instance) and not self.arc_mask[s - 1, h]:
+                    if s < len(instance) and not self.arc_mask[h, s]:
                         # pruned out
                         continue
 
@@ -357,7 +325,7 @@ class DependencyParts(object):
 
             # siblings to the left of h
             for m in range(h, -1, -1):
-                if h != m and not self.arc_mask[m - 1, h]:
+                if h != m and not self.arc_mask[h, m]:
                     # pruned out
                     continue
 
@@ -366,7 +334,7 @@ class DependencyParts(object):
 
                 # when s = 0, it signals that m encoded the leftmost child
                 for s in range(m - 1, -2, -1):
-                    if s == 0 or (s != -1 and not self.arc_mask[s - 1, h]):
+                    if s != -1 and not self.arc_mask[h, s]:
                         # pruned out
                         continue
 
@@ -399,7 +367,7 @@ class DependencyParts(object):
                 if g == h:
                     continue
 
-                if not self.arc_mask[h - 1, g]:
+                if not self.arc_mask[g, h]:
                     # pruned
                     continue
 
@@ -407,7 +375,7 @@ class DependencyParts(object):
 
                 # check modifiers to the right
                 for m in range(h, len(instance)):
-                    if h != m and not self.arc_mask[m - 1, h]:
+                    if h != m and not self.arc_mask[h, m]:
                         # pruned; h == m signals first child
                         continue
 
@@ -415,7 +383,7 @@ class DependencyParts(object):
                     arc_between = False
 
                     for s in range(m + 1, len(instance) + 1):
-                        if s < len(instance) and not self.arc_mask[s - 1, h]:
+                        if s < len(instance) and not self.arc_mask[h, s]:
                             # pruned; s == len signals last child
                             continue
 
@@ -436,7 +404,7 @@ class DependencyParts(object):
 
                 # check modifiers to the left
                 for m in range(h, 0, -1):
-                    if h != m and not self.arc_mask[m - 1, h]:
+                    if h != m and not self.arc_mask[h, m]:
                         # pruned; h == m signals last child
                         continue
 
@@ -444,9 +412,9 @@ class DependencyParts(object):
                     arc_between = False
 
                     for s in range(m - 1, -2, -1):
-                        if s == 0 or (s != -1 and not self.arc_mask[s - 1, h]):
+                        if s != -1 and not self.arc_mask[h, s]:
                             # pruned out
-                            # s = -1 signals leftmost child; 0 should be ignored
+                            # s = -1 signals leftmost child
                             continue
 
                         gold_hs = s == -1 or instance.get_head(s) == h
@@ -471,14 +439,7 @@ class DependencyParts(object):
 
         The matrix shape is (n, n), where n includes the dummy root.
         """
-        # first, invert the arc_mask which is (m, h)
-        mask = self.arc_mask.T
-        mask = mask.astype(np.int)
-
-        # add the root
-        length = len(mask)
-        root_col = np.zeros([length, 1], dtype=np.int)
-        mask = np.concatenate([root_col, mask], axis=1)
+        mask = self.arc_mask.astype(np.int)
 
         # replace 1's and 0's with their positions
         mask[mask == 0] = -1
@@ -498,9 +459,7 @@ class DependencyParts(object):
 
         :return: a tuple (heads, modifiers)
         """
-        head_indices, modifier_indices = np.where(self.arc_mask.T)
-        # modifiers in the mask consider the first real word as 0
-        modifier_indices += 1
+        head_indices, modifier_indices = np.where(self.arc_mask)
 
         return head_indices, modifier_indices
 

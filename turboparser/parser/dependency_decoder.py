@@ -221,7 +221,7 @@ class DependencyDecoder(StructuredDecoder):
             heads_and_scores = heads_and_scores[:max_heads]
             for head, score in heads_and_scores:
                 # arc_mask doesn't have root as potential modifier
-                new_mask[modifier - 1, head] = True
+                new_mask[head, modifier] = True
 
         return new_mask
 
@@ -364,7 +364,6 @@ class DependencyDecoder(StructuredDecoder):
         else:
             arc_scores = scores[Target.HEADS]
 
-        # even if there is some padding, arc_mask will only give us valid arcs
         tree_factor = PFactorTree()
         variables = []
 
@@ -599,19 +598,27 @@ def _populate_structure_list(left_list, right_list, parts, scores,
 def make_score_matrix(length, arc_mask, scores):
     """
     Makes a score matrix from an array of scores ordered in the same way as a
-    list of DependencyPartArcs. Positions [m, h] corresponding to non-existing
+    list of DependencyPartArcs. Positions [h, m] corresponding to non-existing
     arcs have score of -inf.
 
     :param length: length of the sentence, including the root pseudo-token
     :param arc_mask: Arc mask as in DependencyParts
-    :param scores: array with score of each arc (ordered in the same way as
-        arcs)
+    :param scores: array with score of each arc
     :return: a 2d numpy array (m, h), starting from 0
     """
     score_matrix = np.full([length, length], -np.inf, np.float32)
-    score_matrix[1:][arc_mask] = scores
 
-    return score_matrix
+    i = 0
+    score_matrix[arc_mask] = scores
+    # for h in range(length):
+    #     for m in range(length - 1):
+    #         if not arc_mask[m, h]:
+    #             continue
+    #
+    #         score_matrix[m + 1, h] = scores[i]
+    #         i += 1
+
+    return score_matrix.T
 
 
 def chu_liu_edmonds(score_matrix):

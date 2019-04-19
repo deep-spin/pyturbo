@@ -411,11 +411,11 @@ class TurboParser(object):
             num_possible_arcs += (inst_len - 1) ** 2  # exclude root and self
 
             # skip the root symbol
-            for m in range(inst_len - 1):
-                for h in range(inst_len):
-                    if not inst_parts.arc_mask[m, h]:
+            for h in range(inst_len):
+                for m in range(1, inst_len):
+                    if not inst_parts.arc_mask[h, m]:
                         # pruned
-                        if self.options.train and instance.heads[m + 1] == h:
+                        if self.options.train and instance.heads[m] == h:
                             self.pruner_mistakes += 1
                         continue
 
