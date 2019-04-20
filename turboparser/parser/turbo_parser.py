@@ -1102,7 +1102,7 @@ class TurboParser(object):
         for m, h in enumerate(heads, 1):
             instance.heads[m] = h
             if h == 0:
-                score = score_matrix[m + 1, h]
+                score = score_matrix[m - 1, h]
 
                 if self.options.single_root and root != -1:
                     self.reassigned_roots += 1
