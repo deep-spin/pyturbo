@@ -46,7 +46,7 @@ class DependencyNeuralScorer(object):
         # max_length = max(len(parts) for parts in instance_data.parts)
         # shape = [batch_size, max_length]
         # diff = torch.zeros(shape, dtype=torch.float)
-        parts_loss = torch.tensor(0.)
+        parts_loss = torch.tensor(0., device=loss.device)
         for i in range(batch_size):
             inst_parts = instance_data.parts[i]
             gold_parts = inst_parts.gold_parts
@@ -54,12 +54,13 @@ class DependencyNeuralScorer(object):
             part_score_list = [self.model.scores[type_][i]
                                for type_ in inst_parts.type_order]
             part_scores = torch.cat(part_score_list)
-            diff = torch.tensor(pred_item - gold_parts, dtype=part_scores.dtype)
+            diff = torch.tensor(pred_item - gold_parts, dtype=part_scores.dtype,
+                                device=part_scores.device)
             parts_loss += torch.dot(part_scores, diff) / gold_parts.sum()
 
         # parts_loss /= batch_size
         if parts_loss > 0:
-            loss += parts_loss.to(loss.device)
+            loss += parts_loss
 
         # Backpropagate to accumulate gradients.
         if loss > 0:
