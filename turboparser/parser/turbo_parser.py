@@ -358,18 +358,18 @@ class TurboParser(object):
         To use the current model as a pruner, use `prune` instead.
 
         :param instance: a DependencyInstance object, not formatted
-        :return: a boolean 2d array masking arcs. It has shape (n - 1, n) where
-            n is the instance length including root. Position (m, h) has True
+        :return: a boolean 2d array masking arcs. It has shape (n, n) where
+            n is the instance length including root. Position (h, m) has True
             if the arc is valid, False otherwise.
             During training, gold arcs always are True.
         """
         new_mask = self.pruner.prune(instance)
 
         if self.options.train:
-            for m in range(len(instance) - 1):
-                h = instance.heads[m + 1]
-                if not new_mask[m, h]:
-                    new_mask[m, h] = True
+            for m in range(1, len(instance)):
+                h = instance.heads[m]
+                if not new_mask[h, m]:
+                    new_mask[h, m] = True
                     self.pruner_mistakes += 1
 
         return new_mask
@@ -382,8 +382,8 @@ class TurboParser(object):
         encapsulated pruner, use `run_pruner` instead.
 
         :param instance: a DependencyInstance object, not formatted
-        :return: a boolean 2d array masking arcs. It has shape (n - 1, n) where
-            n is the instance length including root. Position (m, h) has True
+        :return: a boolean 2d array masking arcs. It has shape (n, n) where
+            n is the instance length including root. Position (h, m) has True
             if the arc is valid, False otherwise.
         """
         instance, parts = self.make_parts(instance)
@@ -479,88 +479,6 @@ class TurboParser(object):
                                 labeled, num_relations)
 
         return instance, parts
-
-    def make_parts_grandsibling(self, instance, parts):
-        """
-        Create the parts relative to grandsibling nodes.
-
-        Each part means that arcs g -> h, h -> m, and h ->s exist at the same
-        time.
-
-        :param instance: DependencyInstance
-        :param parts: DependencyParts, already pruned
-        """
-        make_gold = self.options.train
-
-        for g in range(len(instance)):
-            for h in range(1, len(instance)):
-                if g == h:
-                    continue
-
-                if 0 > parts.find_arc_index(g, h):
-                    # pruned
-                    continue
-
-                gold_gh = self._check_gold_arc(instance, g, h)
-
-                # check modifiers to the right
-                for m in range(h, len(instance)):
-                    if h != m and 0 > parts.find_arc_index(h, m):
-                        # pruned; h == m signals first child
-                        continue
-
-                    gold_hm = m == h or self._check_gold_arc(instance, h, m)
-                    arc_between = False
-
-                    for s in range(m + 1, len(instance) + 1):
-                        if s < len(instance) and 0 > parts.find_arc_index(h, s):
-                            # pruned; s == len signals last child
-                            continue
-
-                        gold_hs = s == len(instance) or \
-                            self._check_gold_arc(instance, h, s)
-
-                        if make_gold:
-                            gold = 0
-                            if gold_hm and gold_hs and not arc_between:
-                                if gold_gh:
-                                    gold = 1
-
-                                arc_between = True
-                        else:
-                            gold = None
-
-                        part = GrandSibling(h, m, g, s)
-                        parts.append(part, gold)
-
-                # check modifiers to the left
-                for m in range(h, 0, -1):
-                    if h != m and 0 > parts.find_arc_index(h, m):
-                        # pruned; h == m signals last child
-                        continue
-
-                    gold_hm = m == h or self._check_gold_arc(instance, h, m)
-                    arc_between = False
-
-                    for s in range(m - 1, -2, -1):
-                        if s != -1 and 0 > parts.find_arc_index(h, s):
-                            # pruned out
-                            continue
-
-                        gold_hs = s == -1 or self._check_gold_arc(instance,
-                                                                  h, s)
-                        if make_gold:
-                            gold = 0
-                            if gold_hm and gold_hs and not arc_between:
-                                if gold_gh:
-                                    gold = 1
-
-                                arc_between = True
-                        else:
-                            gold = None
-
-                        part = GrandSibling(h, m, g, s)
-                        parts.append(part, gold)
 
     def decode_predictions(self, length, predictions, parts):
         """

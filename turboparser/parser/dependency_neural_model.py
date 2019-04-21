@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-from .dependency_parts import Arc, DependencyParts, NextSibling, Grandparent, \
-    GrandSibling, LabeledArc
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target
 from ..classifier.lstm import LSTM

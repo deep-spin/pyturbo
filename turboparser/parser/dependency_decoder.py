@@ -202,8 +202,8 @@ class DependencyDecoder(StructuredDecoder):
         :param threshold: prune parts with a scorer lower than this value. It
             should only be used when scores have been normalized to
             probabilities, since log potential values have an arbitrary scale.
-        :return: a boolean 2d array masking arcs. It has shape (n - 1, n) where
-            n is the instance length including root. Position (m, h) has True
+        :return: a boolean 2d array masking arcs. It has shape (n, n) where
+            n is the instance length including root. Position (h, m) has True
             if the arc is valid, False otherwise.
         """
         candidate_heads = defaultdict(list)
@@ -220,7 +220,6 @@ class DependencyDecoder(StructuredDecoder):
             heads_and_scores.sort(key=lambda x: x[1], reverse=True)
             heads_and_scores = heads_and_scores[:max_heads]
             for head, score in heads_and_scores:
-                # arc_mask doesn't have root as potential modifier
                 new_mask[head, modifier] = True
 
         return new_mask
