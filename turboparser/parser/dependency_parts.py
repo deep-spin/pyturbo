@@ -192,8 +192,9 @@ class DependencyParts(object):
         for type_ in self.part_lists:
             self.type_order.append(type_)
 
-        self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
-        assert self.num_parts == len(self.gold_parts)
+        if self.make_gold:
+            self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
+            assert self.num_parts == len(self.gold_parts)
 
     def _make_gold_arcs(self, instance):
         """
