@@ -434,7 +434,8 @@ class DependencyNeuralModel(nn.Module):
         """
         # there may be no grandparent parts in some cases
         if parts.get_num_type(Target.GRANDPARENTS) == 0:
-            self.scores[Target.GRANDPARENTS].append(torch.tensor([]))
+            empty = torch.tensor([], device=states.device)
+            self.scores[Target.GRANDPARENTS].append(empty)
             return
 
         head_tensors = self.gp_head_mlp(states)
