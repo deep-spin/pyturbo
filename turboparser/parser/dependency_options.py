@@ -53,9 +53,6 @@ class DependencyOptionParser(OptionParser):
                             default=0, const=1,
                             help="""Make the parser output just the backbone
                             dependencies.""")
-        parser.add_argument('--projective', action='store_true',
-                            help="""Force the parser output single-rooted
-                            projective trees.""")
         parser.add_argument('--upos', action='store_true',
                             help='Predict UPOS tags')
         parser.add_argument('--xpos', action='store_true',
@@ -102,12 +99,14 @@ class DependencyOptionParser(OptionParser):
                             help='Size of distance embeddings')
         parser.add_argument('--rnn_size', type=int, default=100,
                             help='Size of hidden RNN layers')
-        parser.add_argument('--mlp_size', type=int, default=100,
-                            help='Size of hidden head MLP layers')
+        parser.add_argument('--arc_mlp_size', type=int, default=100,
+                            help='Size of dependency arc MLP layers')
         parser.add_argument('--label_mlp_size', type=int, default=100,
-                            help='Size of hidden dependency label MLP layers')
+                            help='Size of dependency label MLP layers')
+        parser.add_argument('--ho_mlp_size', type=int, default=100,
+                            help='Size of dependency higher-order MLP layers')
         parser.add_argument('--tag_mlp_size', type=int, default=100,
-                            help='Size of hidden MLP layer for tagging')
+                            help='Size of MLP layer for tagging')
         parser.add_argument('--rnn_layers', type=int, default=1,
                             help='Number of RNN layers')
         parser.add_argument('--mlp_layers', type=int, default=1,
@@ -139,7 +138,6 @@ class DependencyOptionParser(OptionParser):
         options.predict_upos = args['upos']
         options.predict_xpos = args['xpos']
         options.predict_morph = args['morph']
-        options.projective = args['projective']
         options.prune_relations = args['prune_relations']
         options.prune_tags = args['prune_tags']
         options.pruner_path = args['pruner_path']
@@ -153,8 +151,9 @@ class DependencyOptionParser(OptionParser):
         options.tag_embedding_size = args['tag_embedding_size']
         options.distance_embedding_size = args['distance_embedding_size']
         options.rnn_size = args['rnn_size']
-        options.mlp_size = args['mlp_size']
+        options.arc_mlp_size = args['arc_mlp_size']
         options.tag_mlp_size = args['tag_mlp_size']
+        options.ho_mlp_size = args['ho_mlp_size']
         options.label_mlp_size = args['label_mlp_size']
         options.rnn_layers = args['rnn_layers']
         options.mlp_layers = args['mlp_layers']

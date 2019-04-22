@@ -33,8 +33,7 @@ def train_parser(options):
 
 def test_parser(options):
     logging.info('Running the parser...')
-    dependency_parser = TurboParser(options)
-    dependency_parser.load()
+    dependency_parser = TurboParser.load(options)
     dependency_parser.run()
 
 

@@ -8,8 +8,7 @@ from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
     make_score_matrix
-from .dependency_parts import DependencyParts, Arc, LabeledArc, Grandparent, \
-    NextSibling, GrandSibling
+from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
@@ -77,8 +76,9 @@ class TurboParser(object):
                 distance_embedding_size=self.options.
                 distance_embedding_size,
                 rnn_size=self.options.rnn_size,
-                mlp_size=self.options.mlp_size,
+                arc_mlp_size=self.options.arc_mlp_size,
                 label_mlp_size=self.options.label_mlp_size,
+                ho_mlp_size=self.options.ho_mlp_size,
                 rnn_layers=self.options.rnn_layers,
                 mlp_layers=self.options.mlp_layers,
                 dropout=self.options.dropout,
@@ -166,49 +166,42 @@ class TurboParser(object):
             self.token_dictionary.save(f)
             self.neural_scorer.model.save(f)
 
-    def load(self, model_path=None):
+    @classmethod
+    def load(cls, options):
         """Load the full configuration and model."""
-        if not model_path:
-            model_path = self.options.model_path
-        with open(model_path, 'rb') as f:
-            # TODO: treat differently options inherent to the model vs execution
-            # options (file paths, single_root, etc)
-            model_options = pickle.load(f)
+        with open(options.model_path, 'rb') as f:
+            loaded_options = pickle.load(f)
 
-            self.options.neural = model_options.neural
-            self.options.model_type = model_options.model_type
-            self.options.unlabeled = model_options.unlabeled
-            self.options.projective = model_options.projective
-            self.options.predict_morph = model_options.predict_morph
-            self.options.predict_xpos = model_options.predict_xpos
-            self.options.predict_upos = model_options.predict_upos
+            options.model_type = loaded_options.model_type
+            options.unlabeled = loaded_options.unlabeled
+            options.predict_morph = loaded_options.predict_morph
+            options.predict_xpos = loaded_options.predict_xpos
+            options.predict_upos = loaded_options.predict_upos
 
             # prune arcs with label/head POS/modifier POS unseen in training
-            self.options.prune_relations = model_options.prune_relations
+            options.prune_relations = loaded_options.prune_relations
 
             # prune arcs with a distance unseen with the given POS tags
-            self.options.prune_tags = model_options.prune_tags
+            options.prune_tags = loaded_options.prune_tags
 
             # threshold for the basic pruner, if used
-            self.options.pruner_posterior_threshold = \
-                model_options.pruner_posterior_threshold
+            options.pruner_posterior_threshold = \
+                loaded_options.pruner_posterior_threshold
 
             # maximum candidate heads per word in the basic pruner, if used
-            self.options.pruner_max_heads = model_options.pruner_max_heads
-            self._set_options()
+            options.pruner_max_heads = loaded_options.pruner_max_heads
 
-            self.token_dictionary.load(f)
-            neural_model = DependencyNeuralModel.load(f, self.token_dictionary)
+            parser = TurboParser(options)
+            parser.token_dictionary.load(f)
 
-            self.neural_scorer = DependencyNeuralScorer()
-            self.neural_scorer.set_model(neural_model)
+            model = DependencyNeuralModel.load(f, parser.token_dictionary)
 
-            if self.options.verbose:
-                print('Model summary:', file=sys.stderr)
-                print(neural_model, file=sys.stderr)
+        parser.neural_scorer.set_model(model)
 
         # most of the time, we load a model to run its predictions
-        self.neural_scorer.eval_mode()
+        parser.neural_scorer.eval_mode()
+
+        return parser
 
     def _reset_best_validation_metric(self):
         """
@@ -1083,7 +1076,6 @@ def load_pruner(model_path):
         pruner_options = pickle.load(f)
 
     pruner_options.train = False
-    pruner = TurboParser(pruner_options)
-    pruner.load(model_path)
+    pruner = TurboParser.load(pruner_options)
 
     return pruner
