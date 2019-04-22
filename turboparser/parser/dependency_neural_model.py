@@ -32,8 +32,9 @@ class DependencyNeuralModel(nn.Module):
                  tag_embedding_size,
                  distance_embedding_size,
                  rnn_size,
-                 mlp_size,
+                 arc_mlp_size,
                  label_mlp_size,
+                 ho_mlp_size,
                  rnn_layers,
                  mlp_layers,
                  dropout,
@@ -60,8 +61,9 @@ class DependencyNeuralModel(nn.Module):
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
         self.rnn_size = rnn_size
-        self.mlp_size = mlp_size
+        self.arc_mlp_size = arc_mlp_size
         self.tag_mlp_size = tag_mlp_size
+        self.ho_mlp_size = ho_mlp_size
         self.label_mlp_size = label_mlp_size
         self.rnn_layers = rnn_layers
         self.mlp_layers = mlp_layers
@@ -164,7 +166,7 @@ class DependencyNeuralModel(nn.Module):
             self.morph_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                     bias=True)
 
-        # first order
+        # first order layers
         self.head_mlp = self._create_mlp()
         self.modifier_mlp = self._create_mlp()
         self.arc_scorer = self._create_scorer()
@@ -177,37 +179,48 @@ class DependencyNeuralModel(nn.Module):
         self.label_scorer = self._create_scorer(self.label_mlp_size,
                                                 num_labels)
 
+        # Higher order layers
         if model_type.grandparents:
-            self.gp_grandparent_mlp = self._create_mlp()
-            self.gp_head_mlp = self._create_mlp()
-            self.gp_modifier_mlp = self._create_mlp()
-            self.grandparent_scorer = self._create_scorer()
+            self.gp_grandparent_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.gp_head_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.gp_modifier_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
 
         if model_type.consecutive_siblings:
-            self.sib_head_mlp = self._create_mlp()
-            self.sib_modifier_mlp = self._create_mlp()
-            self.sib_sibling_mlp = self._create_mlp()
-            self.sibling_scorer = self._create_scorer()
+            self.sib_head_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.sib_modifier_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.sib_sibling_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
 
         if model_type.consecutive_siblings or model_type.grandsiblings \
                 or model_type.trisiblings or model_type.arbitrary_siblings:
             self.null_sibling_tensor = self._create_parameter_tensor()
 
         if model_type.grandsiblings:
-            self.gsib_head_mlp = self._create_mlp()
-            self.gsib_modifier_mlp = self._create_mlp()
-            self.gsib_sibling_mlp = self._create_mlp()
-            self.gsib_grandparent_mlp = self._create_mlp()
-            self.grandsibling_scorer = self._create_scorer()
+            self.gsib_head_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.gsib_modifier_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.gsib_sibling_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.gsib_grandparent_mlp = self._create_mlp(
+                hidden_size=self.ho_mlp_size)
+            self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
 
         if self.distance_embedding_size:
             self.distance_projector = nn.Linear(
                 distance_embedding_size,
-                mlp_size,
+                arc_mlp_size,
                 bias=True)
             self.label_distance_projector = nn.Linear(
                 distance_embedding_size,
-                self.label_mlp_size,
+                label_mlp_size,
                 bias=True
             )
         else:
@@ -247,12 +260,12 @@ class DependencyNeuralModel(nn.Module):
         Create the weights for scoring a given tensor representation to a
         single number.
 
-        :param input_size: expected input size. If None, self.hidden_units
+        :param input_size: expected input size. If None, arc_mlp_size
             is used.
         :return: an nn.Linear object
         """
         if input_size is None:
-            input_size = self.mlp_size
+            input_size = self.arc_mlp_size
         linear = nn.Linear(input_size, output_size, bias=bias)
         scorer = nn.Sequential(self.dropout, linear)
 
@@ -271,7 +284,7 @@ class DependencyNeuralModel(nn.Module):
         layers will be (hidden x hidden).
 
         :param input_size: if not given, will be assumed rnn_size * 2
-        :param hidden_size: if not given, will be assumed mlp_size
+        :param hidden_size: if not given, will be assumed arc_mlp_size
         :param num_layers: number of hidden layers (including the last one). If
             not given, will be mlp_layers
         :return: an nn.Linear object, mapping an input with 2*hidden_units
@@ -280,7 +293,7 @@ class DependencyNeuralModel(nn.Module):
         if input_size is None:
             input_size = self.rnn_size * 2
         if hidden_size is None:
-            hidden_size = self.mlp_size
+            hidden_size = self.arc_mlp_size
         if num_layers is None:
             num_layers = self.mlp_layers
 
@@ -306,9 +319,10 @@ class DependencyNeuralModel(nn.Module):
         pickle.dump(self.tag_embedding_size, file)
         pickle.dump(self.distance_embedding_size, file)
         pickle.dump(self.rnn_size, file)
-        pickle.dump(self.mlp_size, file)
+        pickle.dump(self.arc_mlp_size, file)
         pickle.dump(self.tag_mlp_size, file)
         pickle.dump(self.label_mlp_size, file)
+        pickle.dump(self.ho_mlp_size, file)
         pickle.dump(self.rnn_layers, file)
         pickle.dump(self.mlp_layers, file)
         pickle.dump(self.dropout_rate, file)
@@ -331,6 +345,7 @@ class DependencyNeuralModel(nn.Module):
         mlp_size = pickle.load(file)
         tag_mlp_size = pickle.load(file)
         label_mlp_size = pickle.load(file)
+        ho_mlp_size = pickle.load(file)
         rnn_layers = pickle.load(file)
         mlp_layers = pickle.load(file)
         dropout = pickle.load(file)
@@ -348,9 +363,10 @@ class DependencyNeuralModel(nn.Module):
             tag_embedding_size=tag_embedding_size,
             distance_embedding_size=distance_embedding_size,
             rnn_size=rnn_size,
-            mlp_size=mlp_size,
+            arc_mlp_size=mlp_size,
             tag_mlp_size=tag_mlp_size,
             label_mlp_size=label_mlp_size,
+            ho_mlp_size=ho_mlp_size,
             rnn_layers=rnn_layers,
             mlp_layers=mlp_layers,
             dropout=dropout,
@@ -395,7 +411,7 @@ class DependencyNeuralModel(nn.Module):
             distances = self.distance_embeddings(distance_indices)
             distance_projections = self.distance_projector(distances)
             distance_projections = distance_projections.view(
-                -1, self.mlp_size)
+                -1, self.arc_mlp_size)
         else:
             distance_projections = 0
 
