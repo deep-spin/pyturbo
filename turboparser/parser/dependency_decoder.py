@@ -303,8 +303,6 @@ class DependencyDecoder(StructuredDecoder):
         offset = num_arcs
         num_relations = parts.num_relations
 
-        #TODO: set additional_posteriors
-
         if parts.labeled:
             for i in range(len(self.arcs)):
                 label = self.best_labels[i]

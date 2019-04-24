@@ -314,7 +314,7 @@ class TurboParser(object):
         # UAS doesn't consider the root
         length = len(instance) - 1
         pred_heads, pred_labels = self.decode_predictions(
-            len(instance), predicted_parts, parts)
+            predicted_parts, parts)
 
         gold_heads = gold_labels[Target.HEADS]
         gold_deprel = gold_labels[Target.RELATIONS]
@@ -473,7 +473,7 @@ class TurboParser(object):
 
         return instance, parts
 
-    def decode_predictions(self, length, predictions, parts):
+    def decode_predictions(self, predictions, parts):
         """
         Decode the predicted heads and labels after having running the decoder.
 
@@ -481,7 +481,6 @@ class TurboParser(object):
         the decoder does not produce a valid tree running the Chu-Liu-Edmonds
         algorithm.
 
-        :param length: length of the instance, including root
         :param predictions: indicator array of predicted dependency parts (with
             values between 0 and 1)
         :param parts: the dependency parts
@@ -492,11 +491,35 @@ class TurboParser(object):
             If the model is not trained for predicting labels, the second item
             is None.
         """
+        length = len(parts.arc_mask)
         arc_scores = predictions[:parts.num_arcs]
         score_matrix = make_score_matrix(length, parts.arc_mask, arc_scores)
         pred_heads = chu_liu_edmonds(score_matrix)[1:]
 
-        if not self.options.unlabeled:
+        if self.options.single_root:
+            root = -1
+            root_score = -1
+
+            for m, h in enumerate(pred_heads, 1):
+                if h == 0:
+                    # score_matrix is (m, h), starting from 0
+                    score = score_matrix[m - 1, h]
+
+                    if root != -1:
+                        if score > root_score:
+                            # this token is better scored for root
+                            # attach the previous root candidate to it
+                            pred_heads[root] = m
+                            root = m
+                            root_score = score
+                        else:
+                            # attach it to the other root
+                            pred_heads[m] = root
+                    else:
+                        root = m
+                        root_score = score
+
+        if parts.labeled:
             pred_labels = parts.get_labels(pred_heads)
         else:
             pred_labels = None
@@ -529,14 +552,12 @@ class TurboParser(object):
             gold_labels = valid_data.gold_labels[i]
             inst_pred = valid_pred[i]
 
+            real_length = len(instance) - 1
             dep_prediction = inst_pred[Target.DEPENDENCY_PARTS]
-            arc_scores = dep_prediction[:parts.num_arcs]
             gold_heads = instance.heads[1:]
 
-            score_matrix = make_score_matrix(len(instance), parts.arc_mask,
-                                             arc_scores)
-            pred_heads = chu_liu_edmonds(score_matrix)[1:]
-            real_length = len(instance) - 1
+            pred_heads, pred_labels = self.decode_predictions(
+                dep_prediction, parts)
 
             # scale UAS by sentence length; it is normalized later
             head_hits = gold_heads == pred_heads
@@ -545,7 +566,6 @@ class TurboParser(object):
 
             if not self.options.unlabeled:
                 deprel_gold = instance.relations[1:]
-                pred_labels = parts.get_labels(pred_heads)
                 label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
@@ -999,36 +1019,11 @@ class TurboParser(object):
         :param output: dictionary mapping target names to predictions
         :return:
         """
-        root = -1
-        root_score = -1
-
         dep_output = output[Target.DEPENDENCY_PARTS]
-        scores = dep_output[:parts.num_arcs]
-        score_matrix = make_score_matrix(len(instance), parts.arc_mask, scores)
-        heads = chu_liu_edmonds(score_matrix)[1:]
-
-        if parts.labeled:
-            relations = parts.get_labels(heads)
+        heads, relations = self.decode_predictions(dep_output, parts)
 
         for m, h in enumerate(heads, 1):
             instance.heads[m] = h
-            if h == 0:
-                score = score_matrix[m - 1, h]
-
-                if self.options.single_root and root != -1:
-                    self.reassigned_roots += 1
-                    if score > root_score:
-                        # this token is better scored for root
-                        # attach the previous root candidate to it
-                        instance.heads[root] = m
-                        root = m
-                        root_score = score
-                    else:
-                        # attach it to the other root
-                        instance.heads[m] = root
-                else:
-                    root = m
-                    root_score = score
 
             if parts.labeled:
                 relation = relations[m - 1]
@@ -1052,16 +1047,6 @@ class TurboParser(object):
                 tag_name = self.token_dictionary. \
                     morph_singleton_alphabet.get_label_name(tag)
                 instance.morph_singletons[m] = tag_name
-
-        # assign words without heads to the root word
-        for m in range(1, len(instance)):
-            if instance.get_head(m) < 0:
-                logging.info('Word without head.')
-                instance.heads[m] = root
-                if not self.options.unlabeled:
-                    instance.relations[m] = \
-                        self.token_dictionary.deprel_alphabet.\
-                            get_relation_name(0)
 
 
 def load_pruner(model_path):

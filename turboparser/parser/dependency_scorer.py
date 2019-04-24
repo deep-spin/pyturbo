@@ -3,6 +3,7 @@ import torch
 from torch.nn import functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as scheduler
+import logging
 
 
 class DependencyNeuralScorer(object):
@@ -43,10 +44,6 @@ class DependencyNeuralScorer(object):
             loss += _compute_loss(target_gold, logits)
 
         batch_size = len(instance_data)
-        # max_length = max(len(parts) for parts in instance_data.parts)
-        # shape = [batch_size, max_length]
-        # diff = torch.zeros(shape, dtype=torch.float)
-        parts_loss = torch.tensor(0., device=loss.device)
         for i in range(batch_size):
             inst_parts = instance_data.parts[i]
             gold_parts = inst_parts.gold_parts
@@ -56,11 +53,13 @@ class DependencyNeuralScorer(object):
             part_scores = torch.cat(part_score_list)
             diff = torch.tensor(pred_item - gold_parts, dtype=part_scores.dtype,
                                 device=part_scores.device)
-            parts_loss += torch.dot(part_scores, diff) / gold_parts.sum()
+            parts_loss_i = torch.dot(part_scores, diff) / gold_parts.sum()
 
-        # parts_loss /= batch_size
-        if parts_loss > 0:
-            loss += parts_loss
+            if parts_loss_i > 0:
+                loss += parts_loss_i
+            else:
+                if parts_loss_i < -10e-6:
+                    logging.warning('Ignoring negative loss', parts_loss_i)
 
         # Backpropagate to accumulate gradients.
         if loss > 0:
