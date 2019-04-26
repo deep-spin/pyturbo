@@ -59,7 +59,8 @@ class DependencyNeuralScorer(object):
                 loss += parts_loss_i
             else:
                 if parts_loss_i < -10e-6:
-                    logging.warning('Ignoring negative loss', parts_loss_i)
+                    logging.warning(
+                        'Ignoring negative loss: %.6f' % parts_loss_i.item())
 
         # Backpropagate to accumulate gradients.
         if loss > 0:
