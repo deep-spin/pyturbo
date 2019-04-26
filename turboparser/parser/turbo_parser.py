@@ -267,7 +267,7 @@ class TurboParser(object):
         """
         msg = 'Best validation UAS: %f' % self.best_validation_uas
         if not self.options.unlabeled:
-            msg += '\tBest validation LAS: %f' % self.validation_las
+            msg += '\tBest validation LAS: %f' % self.best_validation_las
 
         return msg
 
