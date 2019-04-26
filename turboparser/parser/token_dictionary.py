@@ -310,3 +310,5 @@ class TokenDictionary(Dictionary):
         logging.info('Number of morph tags: %d' % len(self.morph_tag_alphabet))
         logging.info('Number of morph singletons (combination of morph tags '
                      'seen in data): %d' % len(self.morph_singleton_alphabet))
+        logging.info('Number of dependency relations: %d' %
+                     len(self.deprel_alphabet))
