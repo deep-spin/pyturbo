@@ -53,7 +53,7 @@ class DependencyNeuralScorer(object):
             part_scores = torch.cat(part_score_list)
             diff = torch.tensor(pred_item - gold_parts, dtype=part_scores.dtype,
                                 device=part_scores.device)
-            parts_loss_i = torch.dot(part_scores, diff) / gold_parts.sum()
+            parts_loss_i = torch.dot(part_scores, diff)
 
             if parts_loss_i > 0:
                 loss += parts_loss_i
