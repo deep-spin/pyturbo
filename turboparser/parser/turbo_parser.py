@@ -546,7 +546,7 @@ class TurboParser(object):
         self.validation_accuracies = {}
         for target in self.additional_targets:
             self.validation_accuracies[target] = accumulated_tag_hits[
-                                       Target.UPOS] / total_tokens
+                                       target] / total_tokens
 
         # always update UAS; use it as a criterion for saving if no LAS
         if self.validation_uas > self.best_validation_uas:

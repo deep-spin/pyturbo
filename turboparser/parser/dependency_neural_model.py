@@ -432,10 +432,7 @@ class DependencyNeuralModel(nn.Module):
         # we can reuse indices -- every LabeledArc must also appear as Arc
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
-        if self.distance_embedding_size:
-            distance_projections = self.label_distance_projector(distances)
-
-        label_states = self.tanh(heads + modifiers + distance_projections)
+        label_states = self.tanh(heads + modifiers)
         label_scores = self.label_scorer(label_states)
         self.scores[Target.RELATIONS].append(label_scores.view(-1))
 
