@@ -3,7 +3,7 @@
 from ..classifier import utils
 from ..classifier.instance import InstanceData
 from .token_dictionary import TokenDictionary
-from .constants import Target
+from .constants import Target, target2string
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
@@ -14,6 +14,7 @@ from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
 
 import sys
+from collections import defaultdict
 import pickle
 import numpy as np
 import logging
@@ -224,42 +225,6 @@ class TurboParser(object):
         self.total_tokens = 0
         self.validation_uas = 0.
         self.validation_las = 0.
-
-    def _get_task_train_report(self):
-        """
-        Return task-specific metrics on training data.
-
-        :return: a string describing naive UAS on training data
-        """
-        uas = self.accumulated_uas / self.total_tokens
-        msg = 'Naive train UAS: %f' % uas
-        if not self.options.unlabeled:
-            las = self.accumulated_las / self.total_tokens
-            msg += '\tNaive train LAS: %f' % las
-
-        for target in self.additional_targets:
-            acc = self.accumulated_hits[target] / self.total_tokens
-            msg += '\t%s train acc: %f' % (target, acc)
-
-        return msg
-
-    def _get_task_valid_report(self):
-        """
-        Return task-specific metrics on validation data.
-
-        :return: a string describing naive UAS on validation data
-        """
-        msg = 'Naive validation UAS: %f' % self.validation_uas
-        if not self.options.unlabeled:
-            msg += '\tNaive validation LAS: %f' % self.validation_las
-        if self.options.predict_upos:
-            msg += '\tUPOS accuracy: %f' % self.validation_upos
-        if self.options.predict_xpos:
-            msg += '\tXPOS accuracy: %f' % self.validation_xpos
-        if self.options.predict_morph:
-            msg += '\tUFeats accuracy: %f' % self.validation_morph
-
-        return msg
 
     def _get_post_train_report(self):
         """
@@ -578,15 +543,10 @@ class TurboParser(object):
 
         self.validation_uas = accumulated_uas / total_tokens
         self.validation_las = accumulated_las / total_tokens
-        if Target.UPOS in self.additional_targets:
-            self.validation_upos = accumulated_tag_hits[
+        self.validation_accuracies = {}
+        for target in self.additional_targets:
+            self.validation_accuracies[target] = accumulated_tag_hits[
                                        Target.UPOS] / total_tokens
-        if Target.XPOS in self.additional_targets:
-            self.validation_xpos = accumulated_tag_hits[
-                                       Target.XPOS] / total_tokens
-        if Target.MORPH in self.additional_targets:
-            self.validation_morph = accumulated_tag_hits[
-                                        Target.MORPH] / total_tokens
 
         # always update UAS; use it as a criterion for saving if no LAS
         if self.validation_uas > self.best_validation_uas:
@@ -783,7 +743,9 @@ class TurboParser(object):
         self.time_gradient = 0
         start = time.time()
 
-        self.total_loss = 0.
+        self.total_losses = {target: 0. for target in self.additional_targets}
+        self.total_losses[Target.DEPENDENCY_PARTS] = 0.
+
         self._reset_task_metrics()
 
         if epoch == 0:
@@ -803,6 +765,7 @@ class TurboParser(object):
             batch_index = next_batch_index
 
         end = time.time()
+        time_train = end - start
 
         valid_start = time.time()
         self.neural_scorer.eval_mode()
@@ -811,26 +774,72 @@ class TurboParser(object):
         self._get_validation_metrics(valid_data, valid_pred)
         valid_end = time.time()
         time_validation = valid_end - valid_start
-        train_loss = self.total_loss / len(train_data)
-        validation_loss = np.array(valid_losses).mean()
 
-        logging.info('Time: %f' % (end - start))
-        logging.info('Time to score: %f' % self.time_scores)
-        logging.info('Time to decode: %f' % self.time_decoding)
-        logging.info('Time to do gradient step: %f' % self.time_gradient)
-        logging.info('Time to run on validation: %f' % time_validation)
+        self._epoch_report(time_train, time_validation, self.total_losses,
+                           valid_losses, len(train_data), len(valid_data))
+
         if self._should_save:
             self.save()
-            logging.info('Saved model')
             self.num_bad_epochs = 0
         else:
             self.num_bad_epochs += 1
 
-        logging.info('\t'.join(['Total Train Loss (cost augmented): %f'
-                                % train_loss,
-                                self._get_task_train_report(),
-                                'Validation Loss: %f' % validation_loss,
-                                self._get_task_valid_report()]))
+    def _epoch_report(self, train_time, validation_time, train_losses,
+                      valid_losses, train_size, valid_size):
+        """
+        Log a report of the training for an epoch.
+
+        :param train_losses: dictionary mapping targets to loss scalar values,
+            not normalized by number of instances
+        :param valid_losses: same as train_losses
+        """
+        logging.info('Training time: %f' % train_time)
+        logging.info('Time to score: %f' % self.time_scores)
+        logging.info('Time to decode: %f' % self.time_decoding)
+        logging.info('Time to do gradient step: %f' % self.time_gradient)
+        logging.info('Time to run on validation: %f' % validation_time)
+
+        def make_loss_msgs(losses, dataset_size):
+            msgs = []
+            for target in losses:
+                target_name = target2string[target]
+                normalized_loss = losses[target] / dataset_size
+                msg = '%s: %.4f' % (target_name, normalized_loss)
+                msgs.append(msg)
+            return msgs
+
+        msgs = ['Train losses:'] + make_loss_msgs(train_losses, train_size)
+        logging.info('\t'.join(msgs))
+
+        uas = self.accumulated_uas / self.total_tokens
+        msgs = ['Train accuracies:\tUAS: %.6f' % uas]
+        if not self.options.unlabeled:
+            las = self.accumulated_las / self.total_tokens
+            msgs.append('LAS: %.6f' % las)
+
+        for target in self.additional_targets:
+            target_name = target2string[target]
+            acc = self.accumulated_hits[target] / self.total_tokens
+            msgs.append('%s: %.6f' % (target_name, acc))
+        logging.info('\t'.join(msgs))
+
+        msgs = ['Validation losses:'] + make_loss_msgs(valid_losses,
+                                                       valid_size)
+        logging.info('\t'.join(msgs))
+
+        msgs = ['Validation accuracies:\tUAS: %.6f' % self.validation_uas]
+        if not self.options.unlabeled:
+            msgs.append('LAS: %.6f' % self.validation_las)
+        for target in self.additional_targets:
+            target_name = target2string[target]
+            acc = self.validation_accuracies[target]
+            msgs.append('%s: %.6f' % (target_name, acc))
+        logging.info('\t'.join(msgs))
+
+        if self._should_save:
+            logging.info('Saved model')
+
+        logging.info('\n')
 
     def _run_batches(self, instance_data, batch_size, return_loss=False):
         """
@@ -844,11 +853,11 @@ class TurboParser(object):
         :param return_loss: if True, include the losses in the return. This
             can only be True for data which have known gold output.
         :return: a list of predictions. If return_loss is True, a tuple with
-            the list of predictions and the list of losses.
+            the list of predictions and the dictionary of losses.
         """
         batch_index = 0
         predictions = []
-        losses = []
+        losses = defaultdict(float)
 
         while batch_index < len(instance_data):
             next_index = batch_index + batch_size
@@ -856,7 +865,11 @@ class TurboParser(object):
             result = self.run_batch(batch_data, return_loss)
             if return_loss:
                 batch_predictions = result[0]
-                losses.extend(result[1])
+                batch_losses = result[1]
+                batch_size = len(batch_data)
+                for target in batch_losses:
+                    # store non-normalized losses
+                    losses[target] += batch_size * batch_losses[target].item()
             else:
                 batch_predictions = result
 
@@ -885,6 +898,7 @@ class TurboParser(object):
                                                    instance_data.parts)
 
         predictions = []
+        all_predicted_parts = []
         for i in range(len(instance_data)):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
@@ -892,6 +906,8 @@ class TurboParser(object):
 
             predicted_parts = self.decoder.decode(instance, parts, inst_scores)
             inst_prediction = {Target.DEPENDENCY_PARTS: predicted_parts}
+            if return_loss:
+                all_predicted_parts.append(predicted_parts)
             for target in self.additional_targets:
                 model_answer = inst_scores[target].argmax(-1)
                 inst_prediction[target] = model_answer
@@ -899,38 +915,11 @@ class TurboParser(object):
             predictions.append(inst_prediction)
 
         if return_loss:
-            losses = self.compute_loss_batch(instance_data, predictions, scores)
+            losses = self.neural_scorer.compute_loss(instance_data,
+                                                     all_predicted_parts)
             return predictions, losses
 
         return predictions
-
-    def compute_loss_batch(self, instance_data, predictions, scores):
-        """
-        Compute the loss for a batch of predicted parts and label scores.
-
-        :param scores: a list of dictionaries mapping target names to scores
-        """
-        gold_labels = instance_data.gold_labels
-        losses = np.zeros(len(instance_data), np.float)
-
-        for i, inst_predictions in enumerate(predictions):
-            inst_parts = instance_data.parts[i]
-            inst_gold_labels = gold_labels[i]
-            inst_scores = scores[i]
-            inst_predicted_parts = inst_predictions[Target.DEPENDENCY_PARTS]
-            parser_loss = self.decoder.compute_loss(
-                inst_parts, inst_predicted_parts, inst_scores)
-            losses[i] = parser_loss
-
-            for target in self.additional_targets:
-                target_scores = inst_scores[target]
-                gold_labels_target = inst_gold_labels[target]
-
-                target_losses = self.neural_scorer.compute_tag_loss(
-                    target_scores, gold_labels_target)
-                losses += np.array(target_losses)
-
-        return losses
 
     def train_batch(self, instance_data):
         '''
@@ -964,30 +953,16 @@ class TurboParser(object):
 
         # run the gradient step for the whole batch
         start_time = time.time()
-        loss = self.make_gradient_step(instance_data, all_predicted_parts)
-
-        # Update the total loss and cost.
-        if loss < 0.0:
-            if loss < -1e-6:
-                # len 2 means root + one word
-                msg_len_1 = '(sentence length 1)' \
-                    if len(instance) == 2 else ''
-                msg = 'Negative loss set to zero: %f %s' % (loss, msg_len_1)
-                logging.warning(msg)
-            loss = 0.0
-
-        self.total_loss += loss
+        losses = self.neural_scorer.compute_loss(instance_data,
+                                                 all_predicted_parts)
+        self.neural_scorer.make_gradient_step(losses)
+        batch_size = len(instance_data)
+        for target in losses:
+            # store non-normalized losses
+            self.total_losses[target] += batch_size * losses[target].item()
 
         end_time = time.time()
         self.time_gradient += end_time - start_time
-
-    def make_gradient_step(self, instance_data, pred_parts):
-        """
-        Perform a gradient step and return the loss
-        """
-        loss = self.neural_scorer.compute_gradients(instance_data, pred_parts)
-        self.neural_scorer.make_gradient_step()
-        return loss
 
     def decode_train(self, instance, parts, scores):
         """

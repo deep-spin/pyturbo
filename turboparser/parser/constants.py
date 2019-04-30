@@ -16,3 +16,8 @@ class Target(Enum):
     NEXT_SIBLINGS = auto()
     GRANDPARENTS = auto()
     GRANDSIBLINGS = auto()
+
+
+target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
+                 Target.XPOS: 'XPOS', Target.UPOS: 'UPOS',
+                 Target.MORPH: 'UFeats'}

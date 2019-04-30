@@ -14,75 +14,61 @@ class DependencyNeuralScorer(object):
         self.part_scores = None
         self.model = None
 
-    def compute_gradients(self, instance_data, predicted_parts):
+    def compute_loss(self, instance_data, predicted_parts):
         """
-        Compute the error gradients for parsing and tagging.
+        Compute the losses for parsing and tagging.
 
         :param instance_data: InstanceData object
-        :param predicted_parts: same as gold_output
+        :param predicted_parts: list of numpy arrays with predicted parts for
+            each instance
+        :return: dictionary mapping each target to a loss scalar, as a torch
+            variable
         """
-        def _compute_loss(target_gold, logits):
-            targets = pad_labels(target_gold)
-
-            # cross_entropy expects (batch, n_classes, ...)
-            logits = logits.transpose(1, 2)
-            cross_entropy = F.cross_entropy(logits, targets, ignore_index=-1)
-
-            return cross_entropy
-
-        loss = torch.tensor(0.)
+        losses = {}
         gold_labels = instance_data.gold_labels
-        if torch.cuda.is_available():
-            loss = loss.cuda()
 
         for target in [Target.UPOS, Target.XPOS, Target.MORPH]:
             if target not in gold_labels[0]:
                 continue
 
             target_gold = [item[target] for item in gold_labels]
+            padded_gold = pad_labels(target_gold)
             logits = self.model.scores[target]
-            loss += _compute_loss(target_gold, logits)
+
+            # cross_entropy expects (batch, n_classes, ...)
+            logits = logits.transpose(1, 2)
+            losses[target] = F.cross_entropy(logits, padded_gold,
+                                             ignore_index=-1)
+
+        # dependency parts loss
+        parts_loss = torch.tensor(0.)
+        if torch.cuda.is_available():
+            parts_loss = parts_loss.cuda()
 
         batch_size = len(instance_data)
         for i in range(batch_size):
             inst_parts = instance_data.parts[i]
             gold_parts = inst_parts.gold_parts
-            pred_item = predicted_parts[i]
+            inst_pred = predicted_parts[i]
             part_score_list = [self.model.scores[type_][i]
                                for type_ in inst_parts.type_order]
             part_scores = torch.cat(part_score_list)
-            diff = torch.tensor(pred_item - gold_parts, dtype=part_scores.dtype,
+            diff = torch.tensor(inst_pred - gold_parts, dtype=part_scores.dtype,
                                 device=part_scores.device)
-            parts_loss_i = torch.dot(part_scores, diff)
+            error = torch.dot(part_scores, diff)
+            margin, normalizer = inst_parts.get_margin()
+            inst_parts_loss = margin.dot(inst_pred) + normalizer + error
 
-            if parts_loss_i > 0:
-                loss += parts_loss_i
+            if inst_parts_loss > 0:
+                parts_loss += inst_parts_loss
             else:
-                if parts_loss_i < -10e-6:
+                if inst_parts_loss < -10e-6:
                     logging.warning(
-                        'Ignoring negative loss: %.6f' % parts_loss_i.item())
+                        'Ignoring negative loss: %.6f' % inst_parts_loss.item())
 
-        # Backpropagate to accumulate gradients.
-        if loss > 0:
-            loss.backward()
+        losses[target.DEPENDENCY_PARTS] = parts_loss / batch_size
 
-        return loss.item()
-
-    def compute_tag_loss(self, scores, gold_output, reduction='mean'):
-        """Compute the loss for any tagging subtask
-
-        scores and gold_output may be either a batch or a single instance.
-        """
-        if isinstance(gold_output[0], list):
-            gold_output = self.pad_labels(gold_output)
-            loss = F.cross_entropy(scores, gold_output, ignore_index=-1,
-                                   reduction=reduction)
-        else:
-            gold_output = torch.tensor(gold_output, dtype=torch.long)
-            scores = torch.tensor(scores[:len(gold_output)])
-            loss = F.cross_entropy(scores, gold_output, reduction=reduction)
-
-        return loss
+        return losses
 
     def compute_scores(self, instances, parts):
         """
@@ -147,7 +133,13 @@ class DependencyNeuralScorer(object):
         """
         self.scheduler.step(accuracy)
 
-    def make_gradient_step(self):
+    def make_gradient_step(self, losses):
+        """
+        :param losses: dictionary mapping targets to losses
+        """
+        loss = sum(losses.values())
+        loss.backward()
+
         self.optimizer.step()
         # Clear out the gradients before the next batch.
         self.model.zero_grad()

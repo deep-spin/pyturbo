@@ -224,35 +224,6 @@ class DependencyDecoder(StructuredDecoder):
 
         return new_mask
 
-    def _get_margin(self, parts):
-        """
-        Compute and return a margin vector to be used in the loss and a
-        normalization term to be added to it.
-
-        It only affects Arcs or LabeledArcs (in case the latter are used).
-
-        :param parts: DependencyParts object
-        :type parts: DependencyParts
-        :return: a margin array to be added to the model scores and a
-            normalization constant
-        """
-        p = np.zeros(len(parts), dtype=np.float)
-        if parts.labeled:
-            # place the margin on LabeledArcs scores
-            # their offset in the gold vector is immediately after Arcs
-            offset = parts.num_arcs
-            num_parts = parts.num_labeled_arcs
-        else:
-            # place the margin on Arc scores
-            offset = 0
-            num_parts = parts.num_arcs
-
-        gold_values = parts.gold_parts[offset:offset + num_parts]
-        p[offset:offset + num_parts] = 0.5 - gold_values
-        q = 0.5 * gold_values.sum()
-
-        return p, q
-
     def _add_cost_vector(self, parts, scores):
         """
         Add the cost margin to the scores.
@@ -604,16 +575,7 @@ def make_score_matrix(length, arc_mask, scores):
     :return: a 2d numpy array (m, h), starting from 0
     """
     score_matrix = np.full([length, length], -np.inf, np.float32)
-
-    i = 0
     score_matrix[arc_mask] = scores
-    # for h in range(length):
-    #     for m in range(length - 1):
-    #         if not arc_mask[m, h]:
-    #             continue
-    #
-    #         score_matrix[m + 1, h] = scores[i]
-    #         i += 1
 
     return score_matrix.T
 
@@ -756,3 +718,4 @@ def tarjan(heads):
             strong_connect(i)
 
     return cycles
+

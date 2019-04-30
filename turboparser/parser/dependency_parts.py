@@ -433,6 +433,36 @@ class DependencyParts(object):
 
         self.part_lists[Target.GRANDSIBLINGS] = parts
 
+    def get_margin(self):
+        """
+        Compute and return a margin vector to be used in the loss and a
+        normalization term to be added to it.
+
+        It only affects Arcs or LabeledArcs (in case the latter are used).
+
+        :param parts: DependencyParts object
+        :type parts: DependencyParts
+        :return: a margin array to be added to the model scores and a
+            normalization constant. The vector is as long as the number of
+            parts.
+        """
+        p = np.zeros(len(self), dtype=np.float)
+        if self.labeled:
+            # place the margin on LabeledArcs scores
+            # their offset in the gold vector is immediately after Arcs
+            offset = self.num_arcs
+            num_parts = self.num_labeled_arcs
+        else:
+            # place the margin on Arc scores
+            offset = 0
+            num_parts = self.num_arcs
+
+        gold_values = self.gold_parts[offset:offset + num_parts]
+        p[offset:offset + num_parts] = 0.5 - gold_values
+        q = 0.5 * gold_values.sum()
+
+        return p, q
+
     def create_arc_index(self):
         """
         Create a matrix such that cell (h, m) has the position of the given arc
