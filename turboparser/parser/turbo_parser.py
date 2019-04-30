@@ -459,31 +459,37 @@ class TurboParser(object):
         length = len(parts.arc_mask)
         arc_scores = predictions[:parts.num_arcs]
         score_matrix = make_score_matrix(length, parts.arc_mask, arc_scores)
-        pred_heads = chu_liu_edmonds(score_matrix)[1:]
+        pred_heads = chu_liu_edmonds(score_matrix)
 
         if self.options.single_root:
             root = -1
             root_score = -1
 
-            for m, h in enumerate(pred_heads, 1):
+            for m, h in enumerate(pred_heads[1:], 1):
                 if h == 0:
                     # score_matrix is (m, h), starting from 0
                     score = score_matrix[m - 1, h]
 
                     if root != -1:
+                        # we have already found another root before
+
                         if score > root_score:
                             # this token is better scored for root
                             # attach the previous root candidate to it
                             pred_heads[root] = m
                             root = m
                             root_score = score
+
                         else:
                             # attach it to the other root
                             pred_heads[m] = root
+
+                        self.reassigned_roots += 1
                     else:
                         root = m
                         root_score = score
 
+        pred_heads = pred_heads[1:]
         if parts.labeled:
             pred_labels = parts.get_labels(pred_heads)
         else:
