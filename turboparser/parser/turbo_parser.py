@@ -290,7 +290,7 @@ class TurboParser(object):
         if self.options.unlabeled:
             las = 0
         else:
-            label_hits = gold_deprel == gold_deprel
+            label_hits = pred_labels == gold_deprel
             las = np.logical_and(head_hits, label_hits).mean()
 
         for target in self.additional_targets:
@@ -520,12 +520,12 @@ class TurboParser(object):
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
             parts = valid_data.parts[i]
-            gold_labels = valid_data.gold_labels[i]
+            gold_output = valid_data.gold_labels[i]
             inst_pred = valid_pred[i]
 
             real_length = len(instance) - 1
             dep_prediction = inst_pred[Target.DEPENDENCY_PARTS]
-            gold_heads = instance.heads[1:]
+            gold_heads = gold_output[Target.HEADS]
 
             pred_heads, pred_labels = self.decode_predictions(
                 dep_prediction, parts)
@@ -536,13 +536,13 @@ class TurboParser(object):
             total_tokens += real_length
 
             if not self.options.unlabeled:
-                deprel_gold = instance.relations[1:]
+                deprel_gold = gold_output[Target.RELATIONS]
                 label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
             for target in self.additional_targets:
-                target_gold = gold_labels[target]
+                target_gold = gold_output[target]
                 target_pred = inst_pred[target][:len(target_gold)]
                 hits = target_gold == target_pred
                 accumulated_tag_hits[target] += np.sum(hits)
@@ -562,10 +562,8 @@ class TurboParser(object):
             improved_uas = False
 
         if self.options.unlabeled:
-            acc = self.validation_uas
             self._should_save = improved_uas
         else:
-            acc = self.validation_las
             if self.validation_las > self.best_validation_las:
                 self.best_validation_las = self.validation_las
                 self._should_save = True

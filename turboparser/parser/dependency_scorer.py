@@ -66,7 +66,7 @@ class DependencyNeuralScorer(object):
                     logging.warning(
                         'Ignoring negative loss: %.6f' % inst_parts_loss.item())
 
-        losses[target.DEPENDENCY_PARTS] = parts_loss / batch_size
+        losses[Target.DEPENDENCY_PARTS] = parts_loss / batch_size
 
         return losses
 
