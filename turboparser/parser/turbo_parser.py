@@ -572,8 +572,6 @@ class TurboParser(object):
             else:
                 self._should_save = False
 
-        self.neural_scorer.lr_scheduler_step(acc)
-
     def _check_gold_arc(self, instance, head, modifier):
         """
         Auxiliar function to check whether there is an arc from head to
@@ -777,6 +775,10 @@ class TurboParser(object):
         self.neural_scorer.eval_mode()
         valid_pred, valid_losses = self._run_batches(valid_data, 32,
                                                      return_loss=True)
+
+        # adjust learning rate based on validation parsing loss
+        dep_loss = valid_losses[Target.DEPENDENCY_PARTS]
+        self.neural_scorer.lr_scheduler_step(dep_loss)
         self._get_validation_metrics(valid_data, valid_pred)
         valid_end = time.time()
         time_validation = valid_end - valid_start

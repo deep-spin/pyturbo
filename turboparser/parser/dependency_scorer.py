@@ -108,7 +108,7 @@ class DependencyNeuralScorer(object):
         self.optimizer = optim.Adam(
             params, lr=learning_rate, betas=(beta1, beta2))
         self.scheduler = scheduler.ReduceLROnPlateau(
-            self.optimizer, 'max', factor=decay, patience=0, verbose=True)
+            self.optimizer, 'min', factor=decay, patience=0, verbose=True)
 
     def set_model(self, model):
         self.model = model
@@ -127,11 +127,11 @@ class DependencyNeuralScorer(object):
         """
         self.model.eval()
 
-    def lr_scheduler_step(self, accuracy):
+    def lr_scheduler_step(self, loss):
         """
-        Perform a step of the learning rate scheduler, based on accuracy.
+        Perform a step of the learning rate scheduler, based on loss.
         """
-        self.scheduler.step(accuracy)
+        self.scheduler.step(loss)
 
     def make_gradient_step(self, losses):
         """
@@ -139,6 +139,7 @@ class DependencyNeuralScorer(object):
         """
         loss = sum(losses.values())
         loss.backward()
+        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
 
         self.optimizer.step()
         # Clear out the gradients before the next batch.
