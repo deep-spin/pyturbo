@@ -563,12 +563,16 @@ class TurboParser(object):
 
         if self.options.unlabeled:
             self._should_save = improved_uas
+            acc = self.validation_uas
         else:
             if self.validation_las > self.best_validation_las:
                 self.best_validation_las = self.validation_las
                 self._should_save = True
             else:
                 self._should_save = False
+            acc = self.validation_las
+
+        self.neural_scorer.lr_scheduler_step(acc)
 
     def _check_gold_arc(self, instance, head, modifier):
         """
@@ -776,7 +780,6 @@ class TurboParser(object):
 
         # adjust learning rate based on validation parsing loss
         dep_loss = valid_losses[Target.DEPENDENCY_PARTS]
-        self.neural_scorer.lr_scheduler_step(dep_loss)
         self._get_validation_metrics(valid_data, valid_pred)
         valid_end = time.time()
         time_validation = valid_end - valid_start
