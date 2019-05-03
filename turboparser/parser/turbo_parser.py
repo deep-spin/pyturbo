@@ -477,12 +477,14 @@ class TurboParser(object):
                             # this token is better scored for root
                             # attach the previous root candidate to it
                             pred_heads[root] = m
+                            parts.add_dummy_relation(m, root)
                             root = m
                             root_score = score
 
                         else:
                             # attach it to the other root
                             pred_heads[m] = root
+                            parts.add_dummy_relation(root, m)
 
                         self.reassigned_roots += 1
                     else:
