@@ -90,7 +90,11 @@ class DependencyNeuralModel(nn.Module):
 
             self.char_rnn = LSTM(
                 input_size=char_embedding_size, hidden_size=char_embedding_size)
-            char_based_embedding_size = char_embedding_size
+            char_based_embedding_size = 2 * char_embedding_size
+
+            # tensor to replace char representation with word dropout
+            self.char_dropout_replacement = self._create_parameter_tensor(
+                char_based_embedding_size)
         else:
             self.char_embeddings = None
             self.char_rnn = None
@@ -133,7 +137,7 @@ class DependencyNeuralModel(nn.Module):
             self.distance_embeddings = None
 
         input_size = self.word_embedding_size + total_tag_embedding_size + \
-                     (2 * char_based_embedding_size)
+                     char_based_embedding_size
         self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
         self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         if self.predict_tags:
@@ -560,13 +564,14 @@ class DependencyNeuralModel(nn.Module):
 
         self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
 
-    def get_word_representation(self, instances, max_length):
+    def get_word_representations(self, instances, max_length):
         """
-        Get the full embedding representation of a word, including word type
-        embeddings, char level and POS tag embeddings.
+        Get the full embedding representations of words in the batch, including
+        word type embeddings, char level and POS tag embeddings.
 
         :param instances: list of instance objects
         :param max_length: length of the longest instance in the batch
+        :return: a tensor with shape (batch, max_num_tokens, embedding_size)
         """
         all_embeddings = []
         word_embeddings = self._get_embeddings(instances, max_length, 'word')
@@ -691,12 +696,17 @@ class DependencyNeuralModel(nn.Module):
 
         # concatenate the last outputs of both directions
         last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
-        shape = [batch_size * max_sentence_length,
-                 2 * self.char_rnn.hidden_size]
+        num_words = batch_size * max_sentence_length
+        shape = [num_words, 2 * self.char_rnn.hidden_size]
         char_representation = torch.zeros(shape)
         if self.on_gpu:
             char_representation = char_representation.cuda()
         char_representation[sorted_inds] = last_output_bi
+
+        if self.training and self.word_dropout_rate:
+            # sample a dropout mask and replace the dropped representations
+            dropout_mask = torch.rand(num_words) < self.word_dropout_rate
+            char_representation[dropout_mask] = self.char_dropout_replacement
 
         return char_representation.view([batch_size, max_sentence_length, -1])
 
@@ -726,7 +736,7 @@ class DependencyNeuralModel(nn.Module):
 
         # instances = [instances[i] for i in inds]
         max_length = sorted_lengths[0].item()
-        embeddings = self.get_word_representation(instances, max_length)
+        embeddings = self.get_word_representations(instances, max_length)
         sorted_embeddings = embeddings[inds]
 
         # pack to account for variable lengths
