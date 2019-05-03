@@ -150,6 +150,17 @@ class DependencyParts(object):
 
         return pred_labels
 
+    def add_dummy_relation(self, head, modifier):
+        """
+        Add a dummy relation for the arc (head, modifier) in case it didn't 
+        exist. This can be necessary when the single root constraint forces the
+        parser to reassign some head.
+        """
+        if not self.labeled or (head, modifier) in self.best_labels:
+            return
+
+        self.best_labels[(head, modifier)] = 0
+    
     def make_parts(self, instance, model_type):
         """
         Create all the parts to represent the instance
