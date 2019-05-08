@@ -5,11 +5,11 @@ import numpy as np
 
 class DependencyInstanceNumeric(DependencyInstance):
     """An dependency parsing instance with numeric fields."""
-    def __init__(self, instance, token_dictionary):
+    def __init__(self, instance, token_dictionary, case_sensitive):
         """
         :param instance: DependencyInstance
         :param token_dictionary: TokenDictionary
-        :param relation_dictionary: DependencyDictionary
+        :param case_sensitive: bool
         """
         length = len(instance)
 
@@ -34,7 +34,7 @@ class DependencyInstanceNumeric(DependencyInstance):
             # Form and lower-case form.
             form = instance.forms[i]
             form_lower = form.lower()
-            if not token_dictionary.classifier.options.form_case_sensitive:
+            if not case_sensitive:
                 form = form_lower
             id_ = token_dictionary.get_form_id(form)
             assert id_ < 0xffff
@@ -56,18 +56,6 @@ class DependencyInstanceNumeric(DependencyInstance):
             id_ = token_dictionary.get_lemma_id(lemma)
             assert id_ < 0xffff
             self.lemmas[i] = id_
-
-            # Prefix.
-            prefix = form[:token_dictionary.classifier.options.prefix_length]
-            id_ = token_dictionary.get_prefix_id(prefix)
-            assert id_ < 0xffff
-            self.prefixes[i] = id_
-
-            # Suffix.
-            suffix = form[-token_dictionary.classifier.options.suffix_length:]
-            id_ = token_dictionary.get_suffix_id(suffix)
-            assert id_ < 0xffff
-            self.suffixes[i] = id_
 
             # POS tag.
             tag = instance.upos[i]

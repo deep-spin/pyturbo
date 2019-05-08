@@ -246,7 +246,7 @@ class DependencyNeuralModel(nn.Module):
         Create a tensor for representing some special token. It is included in
         the model parameters.
 
-        If shape is None, it will have shape equal to hidden_size.
+        If shape is None, it will have shape equal to rnn_hidden_size.
         """
         if shape is None:
             shape = self.rnn_hidden_size

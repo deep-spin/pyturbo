@@ -52,7 +52,7 @@ class TurboParser(object):
     '''Dependency parser.'''
     def __init__(self, options):
         self.options = options
-        self.token_dictionary = TokenDictionary(self)
+        self.token_dictionary = TokenDictionary()
         self.writer = DependencyWriter()
         self.decoder = DependencyDecoder()
         self.model = None
@@ -63,7 +63,9 @@ class TurboParser(object):
             word_indices, embeddings = self._load_embeddings()
             self.token_dictionary.initialize(
                 self.options.training_path, self.options.form_case_sensitive,
-                word_indices)
+                word_indices, char_cutoff=options.char_cutoff,
+                form_cutoff=options.form_cutoff,
+                lemma_cutoff=options.lemma_cutoff)
             embeddings = self._update_embeddings(embeddings)
 
             if embeddings is None:
@@ -307,7 +309,8 @@ class TurboParser(object):
         self.total_tokens += length
 
     def format_instance(self, instance):
-        return DependencyInstanceNumeric(instance, self.token_dictionary)
+        return DependencyInstanceNumeric(instance, self.token_dictionary,
+                                         self.options.form_case_sensitive)
 
     def run_pruner(self, instance):
         """

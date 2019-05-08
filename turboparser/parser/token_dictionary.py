@@ -10,9 +10,8 @@ UNKNOWN = '_UNKNOWN_'
 
 class TokenDictionary(Dictionary):
     '''A dictionary for storing token information.'''
-    def __init__(self, classifier=None):
+    def __init__(self):
         Dictionary.__init__(self)
-        self.classifier = classifier
         self.character_alphabet = Alphabet()
         self.embedding_alphabet = Alphabet()
         self.form_alphabet = Alphabet()
@@ -188,7 +187,8 @@ class TokenDictionary(Dictionary):
             return id_
         return self.deprel_alphabet.lookup(UNKNOWN)
 
-    def initialize(self, input_path, case_sensitive, word_dict=None):
+    def initialize(self, input_path, case_sensitive, word_dict=None,
+                   char_cutoff=1, form_cutoff=1, lemma_cutoff=1):
         """
         Initializes the dictionary with indices for word forms and tags.
 
@@ -266,10 +266,7 @@ class TokenDictionary(Dictionary):
                 [self.character_alphabet, self.form_alphabet,
                  self.form_lower_alphabet, self.lemma_alphabet],
                 [char_counts, form_counts, form_lower_counts, lemma_counts],
-                [self.classifier.options.char_cutoff,
-                 self.classifier.options.form_cutoff,
-                 self.classifier.options.form_cutoff,
-                 self.classifier.options.lemma_cutoff],
+                [char_cutoff, form_cutoff, form_cutoff, lemma_cutoff],
                 [int(10e6), self.max_forms, self.max_forms, self.max_forms]):
 
             alphabet.clear()
