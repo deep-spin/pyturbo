@@ -91,6 +91,10 @@ class DependencyNeuralModel(nn.Module):
             self.char_rnn = LSTM(
                 input_size=char_embedding_size, hidden_size=char_embedding_size)
             char_based_embedding_size = 2 * char_embedding_size
+
+            # tensor to replace char representation with word dropout
+            self.char_dropout_replacement = self._create_parameter_tensor(
+                char_based_embedding_size)
         else:
             self.char_embeddings = None
             self.char_rnn = None
@@ -134,7 +138,6 @@ class DependencyNeuralModel(nn.Module):
 
         input_size = self.word_embedding_size + total_tag_embedding_size + \
                      char_based_embedding_size
-        self.dropout_replacement = self._create_parameter_tensor(input_size)
         self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
         self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         if self.predict_tags:
@@ -591,12 +594,6 @@ class DependencyNeuralModel(nn.Module):
         embeddings = torch.cat(all_embeddings, dim=2)
         embeddings = self.dropout(embeddings)
 
-        if self.training and self.word_dropout_rate:
-            batch_size, num_tokens = embeddings.size()[:2]
-            draw = torch.rand(batch_size, num_tokens, dtype=torch.float)
-            dropout_mask = draw < self.word_dropout_rate
-            embeddings[dropout_mask] = self.dropout_replacement
-
         return embeddings
 
     def _get_embeddings(self, instances, max_length, word_or_tag):
@@ -624,12 +621,21 @@ class DependencyNeuralModel(nn.Module):
 
         if word_or_tag == 'word':
             embedding_matrix = self.word_embeddings
+            dropout_rate = self.word_dropout_rate
+            unknown_symbol = self.unknown_word
         else:
-            # dropout_rate = self.tag_dropout_rate
+            dropout_rate = self.tag_dropout_rate
             if word_or_tag == 'upos':
                 embedding_matrix = self.upos_embeddings
+                unknown_symbol = self.unknown_upos
             else:
                 embedding_matrix = self.xpos_embeddings
+                unknown_symbol = self.unknown_xpos
+
+        if self.training and dropout_rate:
+            dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
+            inds = dropout_draw < dropout_rate
+            index_matrix[inds] = unknown_symbol
 
         if self.on_gpu:
             index_matrix = index_matrix.cuda()
@@ -696,6 +702,11 @@ class DependencyNeuralModel(nn.Module):
         if self.on_gpu:
             char_representation = char_representation.cuda()
         char_representation[sorted_inds] = last_output_bi
+
+        if self.training and self.word_dropout_rate:
+            # sample a dropout mask and replace the dropped representations
+            dropout_mask = torch.rand(num_words) < self.word_dropout_rate
+            char_representation[dropout_mask] = self.char_dropout_replacement
 
         return char_representation.view([batch_size, max_sentence_length, -1])
 

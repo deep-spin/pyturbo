@@ -60,18 +60,3 @@ def read_embeddings(path, max_words=1000000):
 
     embeddings = np.array(vectors, dtype=np.float32)
     return words, embeddings
-
-
-class DictList(dict):
-    """
-    A hybrid of dictionary and list.
-
-    This class can store a list of values organized by keys, such as a list
-    of gold labels in different categories (e.g., UPOS tag, XPOS tag, etc).
-
-    This class provides easy access to both the i-th value for all keys (i.e.,
-    getting all the labels for the i-th instance in the dataset) and all
-    values for key k (getting all tags in the dataset).
-    """
-    def get_index(self, i):
-        return
