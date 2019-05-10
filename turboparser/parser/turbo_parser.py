@@ -228,6 +228,7 @@ class TurboParser(object):
         self.total_tokens = 0
         self.validation_uas = 0.
         self.validation_las = 0.
+        self.reassigned_roots = 0
 
     def _get_post_train_report(self):
         """
