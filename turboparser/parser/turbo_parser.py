@@ -60,20 +60,21 @@ class TurboParser(object):
         self.neural_scorer = DependencyNeuralScorer()
 
         if self.options.train:
-            word_indices, embeddings = self._load_embeddings()
+            word_indices, fixed_embeddings = self._load_embeddings()
             self.token_dictionary.initialize(
                 self.options.training_path, self.options.form_case_sensitive,
                 word_indices, char_cutoff=options.char_cutoff,
                 form_cutoff=options.form_cutoff,
                 lemma_cutoff=options.lemma_cutoff)
-            embeddings = self._update_embeddings(embeddings)
 
-            if embeddings is None:
-                embeddings = self._create_random_embeddings()
+            # embeddings = self._update_embeddings(embeddings)
+            # if embeddings is None:
+            #     embeddings = self._create_random_embeddings()
 
             model = DependencyNeuralModel(
                 self.model_type,
-                self.token_dictionary, embeddings,
+                self.token_dictionary, fixed_embeddings,
+                traineable_word_embedding_size=self.options.embedding_size,
                 char_embedding_size=self.options.char_embedding_size,
                 tag_embedding_size=self.options.tag_embedding_size,
                 distance_embedding_size=self.options.

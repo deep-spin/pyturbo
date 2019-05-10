@@ -27,7 +27,8 @@ class DependencyNeuralModel(nn.Module):
     def __init__(self,
                  model_type,
                  token_dictionary,
-                 word_embeddings,
+                 fixed_word_embeddings,
+                 traineable_word_embedding_size,
                  char_embedding_size,
                  tag_embedding_size,
                  distance_embedding_size,
@@ -48,15 +49,17 @@ class DependencyNeuralModel(nn.Module):
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
         :type token_dictionary: TokenDictionary
-        :param word_embeddings: numpy or torch embedding matrix
+        :param fixed_word_embeddings: numpy or torch embedding matrix (kept fixed)
+        :param word_embedding_size: size for trainable word embeddings
         :param word_dropout: probability of replacing a word with the unknown
             token
         :param tag_dropout: probability of replacing a POS tag with the unknown
             tag
         """
         super(DependencyNeuralModel, self).__init__()
-        self.embedding_vocab_size = word_embeddings.shape[0]
-        self.word_embedding_size = word_embeddings.shape[1]
+        self.embedding_vocab_size = fixed_word_embeddings.shape[0]
+        self.fixed_word_embedding_size = fixed_word_embeddings.shape[1]
+        self.trainable_word_embedding_size = traineable_word_embedding_size
         self.char_embedding_size = char_embedding_size
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
@@ -70,7 +73,8 @@ class DependencyNeuralModel(nn.Module):
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
         self.tag_dropout_rate = tag_dropout
-        self.unknown_word = token_dictionary.get_embedding_id(UNKNOWN)
+        self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
+        self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
         self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
         self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
@@ -80,9 +84,12 @@ class DependencyNeuralModel(nn.Module):
         self.predict_tags = predict_upos or predict_xpos or predict_morph
         self.model_type = model_type
 
-        word_embeddings = torch.tensor(word_embeddings, dtype=torch.float32)
-        self.word_embeddings = nn.Embedding.from_pretrained(word_embeddings,
-                                                            freeze=False)
+        fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
+                                             dtype=torch.float32)
+        self.fixed_word_embeddings = nn.Embedding.from_pretrained(
+            fixed_word_embeddings, freeze=True)
+        self.fixed_dropout_replacement = self._create_parameter_tensor(
+            self.fixed_word_embedding_size)
 
         if self.char_embedding_size:
             char_vocab = token_dictionary.get_num_characters()
@@ -99,6 +106,13 @@ class DependencyNeuralModel(nn.Module):
             self.char_embeddings = None
             self.char_rnn = None
             char_based_embedding_size = 0
+
+        if self.trainable_word_embedding_size:
+            num_words = token_dictionary.get_num_forms()
+            self.trainable_word_embeddings = nn.Embedding(
+                num_words, traineable_word_embedding_size)
+        else:
+            self.trainable_word_embeddings = None
 
         total_tag_embedding_size = 0
         if tag_embedding_size:
@@ -136,7 +150,9 @@ class DependencyNeuralModel(nn.Module):
             self.distance_bins = None
             self.distance_embeddings = None
 
-        input_size = self.word_embedding_size + total_tag_embedding_size + \
+        input_size = self.fixed_word_embedding_size + \
+                     total_tag_embedding_size + \
+                     self.trainable_word_embedding_size + \
                      char_based_embedding_size
         self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
         self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
@@ -318,7 +334,7 @@ class DependencyNeuralModel(nn.Module):
 
     def save(self, file):
         pickle.dump(self.embedding_vocab_size, file)
-        pickle.dump(self.word_embedding_size, file)
+        pickle.dump(self.fixed_word_embedding_size, file)
         pickle.dump(self.char_embedding_size, file)
         pickle.dump(self.tag_embedding_size, file)
         pickle.dump(self.distance_embedding_size, file)
@@ -574,8 +590,15 @@ class DependencyNeuralModel(nn.Module):
         :return: a tensor with shape (batch, max_num_tokens, embedding_size)
         """
         all_embeddings = []
-        word_embeddings = self._get_embeddings(instances, max_length, 'word')
+        word_embeddings = self._get_embeddings(
+            instances, max_length, 'fixedword')
         all_embeddings.append(word_embeddings)
+
+        if self.trainable_word_embeddings is not None:
+            trainable_embeddings = self._get_embeddings(instances, max_length,
+                                                        'trainableword')
+            all_embeddings.append(trainable_embeddings)
+
         if self.upos_embeddings is not None:
             upos_embeddings = self._get_embeddings(instances,
                                                    max_length, 'upos')
@@ -602,7 +625,7 @@ class DependencyNeuralModel(nn.Module):
 
         This function takes care of padding.
 
-        :param word_or_tag: either 'word' or 'tag'
+        :param word_or_tag: 'fixedword', 'trainableword', 'upos' or 'xpos'
         :param max_length: length of the longest instance
         :return: a tensor with shape (batch, sequence, embedding size)
         """
@@ -619,10 +642,14 @@ class DependencyNeuralModel(nn.Module):
 
             index_matrix[i, :len(instance)] = torch.tensor(indices)
 
-        if word_or_tag == 'word':
-            embedding_matrix = self.word_embeddings
+        if word_or_tag == 'fixedword':
+            embedding_matrix = self.fixed_word_embeddings
             dropout_rate = self.word_dropout_rate
-            unknown_symbol = self.unknown_word
+            unknown_symbol = self.unknown_fixed_word
+        elif word_or_tag == 'trainableword':
+            embedding_matrix = self.trainable_word_embeddings
+            dropout_rate = self.word_dropout_rate
+            unknown_symbol = self.unknown_trainable_word
         else:
             dropout_rate = self.tag_dropout_rate
             if word_or_tag == 'upos':
@@ -632,7 +659,7 @@ class DependencyNeuralModel(nn.Module):
                 embedding_matrix = self.xpos_embeddings
                 unknown_symbol = self.unknown_xpos
 
-        if self.training and dropout_rate:
+        if self.training and dropout_rate and word_or_tag != 'fixedword':
             dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
             inds = dropout_draw < dropout_rate
             index_matrix[inds] = unknown_symbol
@@ -640,7 +667,15 @@ class DependencyNeuralModel(nn.Module):
         if self.on_gpu:
             index_matrix = index_matrix.cuda()
 
-        return embedding_matrix(index_matrix)
+        embeddings = embedding_matrix(index_matrix)
+        if self.training and dropout_rate and word_or_tag == 'fixedword':
+            # since the embedding matrix is fixed, we use a separate
+            # trainable dropout tensor
+            dropout_draw = torch.rand_like(embeddings[:, :, 0])
+            inds = dropout_draw < dropout_rate
+            embeddings[inds] = self.fixed_dropout_replacement
+
+        return embeddings
 
     def _run_char_rnn(self, instances, max_sentence_length):
         """

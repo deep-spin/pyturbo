@@ -87,9 +87,9 @@ class DependencyOptionParser(OptionParser):
                             optionally xzipped.  
                             First line must have number of words and number 
                             of dimensions; each other line must have a word
-                            followed by the values of its vector.""")
-        parser.add_argument('--embedding_size', help="""If an embeddings file is
-                            not given, specify the size of randomly generated 
+                            followed by the values of its vector. These are
+                            kept frozen.""")
+        parser.add_argument('--embedding_size', help="""Dimension of trainable
                             embeddings.""", default=100, type=int)
         parser.add_argument('--char_embedding_size', type=int, default=100,
                             help='Size of char embeddings')

@@ -275,6 +275,8 @@ class TokenDictionary(Dictionary):
             for name, count in counter.most_common(max_length):
                 if count >= cutoff:
                     alphabet.insert(name)
+                else:
+                    break
             alphabet.stop_growth()
 
         if word_dict is not None:
@@ -282,14 +284,14 @@ class TokenDictionary(Dictionary):
             for word in word_list:
                 self.embedding_alphabet.insert(word)
 
-        # update the embedding vocabulary with new words found in training data
-        dataset_words = self.form_alphabet.keys()
-        embedding_words = self.embedding_alphabet.keys()
+        # # update the embedding vocabulary with new words found in training data
+        # dataset_words = self.form_alphabet.keys()
+        # embedding_words = self.embedding_alphabet.keys()
 
-        # get a deterministic ordering
-        new_words = sorted(dataset_words - embedding_words)
-        for new_word in new_words:
-            self.embedding_alphabet.insert(new_word)
+        # # get a deterministic ordering
+        # new_words = sorted(dataset_words - embedding_words)
+        # for new_word in new_words:
+        #     self.embedding_alphabet.insert(new_word)
         self.embedding_alphabet.stop_growth()
 
         logging.info('Number of characters: %d' % len(self.character_alphabet))
