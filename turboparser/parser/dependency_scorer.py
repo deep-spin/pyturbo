@@ -139,7 +139,7 @@ class DependencyNeuralScorer(object):
         """
         loss = sum(losses.values())
         loss.backward()
-        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
 
         self.optimizer.step()
         # Clear out the gradients before the next batch.

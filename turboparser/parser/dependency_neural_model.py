@@ -251,7 +251,7 @@ class DependencyNeuralModel(nn.Module):
         if shape is None:
             shape = self.rnn_hidden_size
 
-        tensor = torch.randn(shape, requires_grad=True)
+        tensor = torch.randn(shape, requires_grad=True) / np.sqrt(shape)
         if self.on_gpu:
             tensor = tensor.cuda()
         
