@@ -28,7 +28,7 @@ class DependencyNeuralModel(nn.Module):
                  model_type,
                  token_dictionary,
                  fixed_word_embeddings,
-                 traineable_word_embedding_size,
+                 trainable_word_embedding_size,
                  char_embedding_size,
                  tag_embedding_size,
                  distance_embedding_size,
@@ -57,9 +57,6 @@ class DependencyNeuralModel(nn.Module):
             tag
         """
         super(DependencyNeuralModel, self).__init__()
-        self.embedding_vocab_size = fixed_word_embeddings.shape[0]
-        self.fixed_word_embedding_size = fixed_word_embeddings.shape[1]
-        self.trainable_word_embedding_size = traineable_word_embedding_size
         self.char_embedding_size = char_embedding_size
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
@@ -89,7 +86,7 @@ class DependencyNeuralModel(nn.Module):
         self.fixed_word_embeddings = nn.Embedding.from_pretrained(
             fixed_word_embeddings, freeze=True)
         self.fixed_dropout_replacement = self._create_parameter_tensor(
-            self.fixed_word_embedding_size)
+            fixed_word_embeddings.shape[1])
 
         if self.char_embedding_size:
             char_vocab = token_dictionary.get_num_characters()
@@ -107,10 +104,10 @@ class DependencyNeuralModel(nn.Module):
             self.char_rnn = None
             char_based_embedding_size = 0
 
-        if self.trainable_word_embedding_size:
+        if trainable_word_embedding_size:
             num_words = token_dictionary.get_num_forms()
             self.trainable_word_embeddings = nn.Embedding(
-                num_words, traineable_word_embedding_size)
+                num_words, trainable_word_embedding_size)
         else:
             self.trainable_word_embeddings = None
 
@@ -150,9 +147,9 @@ class DependencyNeuralModel(nn.Module):
             self.distance_bins = None
             self.distance_embeddings = None
 
-        input_size = self.fixed_word_embedding_size + \
+        input_size = self.fixed_word_embeddings.weight.shape[1] + \
                      total_tag_embedding_size + \
-                     self.trainable_word_embedding_size + \
+                     trainable_word_embedding_size + \
                      char_based_embedding_size
         self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
         self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
@@ -333,8 +330,11 @@ class DependencyNeuralModel(nn.Module):
         return mlp
 
     def save(self, file):
-        pickle.dump(self.embedding_vocab_size, file)
-        pickle.dump(self.fixed_word_embedding_size, file)
+        pickle.dump(self.fixed_word_embeddings.weight.shape[0], file)
+        pickle.dump(self.fixed_word_embeddings.weight.shape[1], file)
+        dim = 0 if self.trainable_word_embeddings is None \
+            else self.trainable_word_embeddings.weight.shape[1]
+        pickle.dump(dim, file)
         pickle.dump(self.char_embedding_size, file)
         pickle.dump(self.tag_embedding_size, file)
         pickle.dump(self.distance_embedding_size, file)
@@ -356,8 +356,9 @@ class DependencyNeuralModel(nn.Module):
 
     @classmethod
     def load(cls, file, token_dictionary):
-        embedding_vocab_size = pickle.load(file)
-        word_embedding_size = pickle.load(file)
+        fixed_embedding_vocab_size = pickle.load(file)
+        fixed_embedding_size = pickle.load(file)
+        trainable_embedding_size = pickle.load(file)
         char_embedding_size = pickle.load(file)
         tag_embedding_size = pickle.load(file)
         distance_embedding_size = pickle.load(file)
@@ -376,10 +377,12 @@ class DependencyNeuralModel(nn.Module):
         predict_morph = pickle.load(file)
         model_type = pickle.load(file)
 
-        dummy_embeddings = np.empty([embedding_vocab_size,
-                                     word_embedding_size], np.float32)
+        dummy_embeddings = np.empty([fixed_embedding_vocab_size,
+                                     fixed_embedding_size], np.float32)
         model = DependencyNeuralModel(
-            model_type, token_dictionary, dummy_embeddings, char_embedding_size,
+            model_type, token_dictionary, dummy_embeddings,
+            trainable_embedding_size,
+            char_embedding_size,
             tag_embedding_size=tag_embedding_size,
             distance_embedding_size=distance_embedding_size,
             rnn_size=rnn_size,
