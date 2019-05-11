@@ -21,3 +21,8 @@ class Target(Enum):
 target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
                  Target.XPOS: 'XPOS', Target.UPOS: 'UPOS',
                  Target.MORPH: 'UFeats'}
+
+
+ROOT = '_root_'
+UNKNOWN = '_unknown_'
+SPECIAL_SYMBOLS = [ROOT, UNKNOWN]

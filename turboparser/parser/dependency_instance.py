@@ -85,3 +85,6 @@ class DependencyInstance():
 
     def get_all_relations(self):
         return self.relations
+
+    def get_all_forms(self):
+        return self.forms

@@ -19,17 +19,20 @@ def nearly_zero_tol(a, tol):
     return (a <= tol) and (a >= -tol)
 
 
-def read_embeddings(path, max_words=1000000):
+def read_embeddings(path, extra_symbols=None, max_words=1000000):
     '''
     Read a text file, or xzipped text file, with word embeddings.
 
     :param path: path to the embeddings file
+    :param extra_symbols: extra symbols such as UNK to create embeddings for.
+        They are placed in the beginning of the matrix and NOT in the
+        dictionary.
     :param max_words: maximum word embeddings to read (the rest will be ignored)
     :return: a dictionary mapping words to indices and a numpy array
     '''
-    counter = 0
-    words = {}
     vectors = []
+    words = {}
+    counter = 0
 
     open_fn = lzma.open if path.endswith('.xz') else open
 
@@ -49,6 +52,8 @@ def read_embeddings(path, max_words=1000000):
                       line_number)
                 continue
 
+            # use a counter instead of len(words) to avoid problems with
+            # repeated words
             words[word] = counter
             counter += 1
 
@@ -58,5 +63,11 @@ def read_embeddings(path, max_words=1000000):
             if len(words) == max_words:
                 break
 
+    assert len(vectors) == len(words)
     embeddings = np.array(vectors, dtype=np.float32)
+    if extra_symbols is not None:
+        shape = (len(extra_symbols), embeddings.shape[1])
+        extra_embeddings = np.zeros(shape, dtype=embeddings.dtype)
+        embeddings = np.concatenate([extra_embeddings, embeddings], 0)
+
     return words, embeddings

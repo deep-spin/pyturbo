@@ -49,8 +49,9 @@ class DependencyNeuralModel(nn.Module):
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
         :type token_dictionary: TokenDictionary
-        :param fixed_word_embeddings: numpy or torch embedding matrix (kept fixed)
-        :param word_embedding_size: size for trainable word embeddings
+        :param fixed_word_embeddings: numpy or torch embedding matrix
+            (kept fixed)
+        :param trainable_word_embedding_size: size for trainable word embeddings
         :param word_dropout: probability of replacing a word with the unknown
             token
         :param tag_dropout: probability of replacing a POS tag with the unknown
@@ -636,12 +637,16 @@ class DependencyNeuralModel(nn.Module):
         index_matrix = torch.full((len(instances), max_length), 0,
                                   dtype=torch.long)
         for i, instance in enumerate(instances):
-            if word_or_tag == 'word':
+            if word_or_tag == 'fixedword':
                 indices = instance.get_all_embedding_ids()
+            elif word_or_tag == 'trainableword':
+                indices = instance.get_all_forms()
             elif word_or_tag == 'upos':
                 indices = instance.get_all_upos()
-            else:
+            elif word_or_tag == 'xpos':
                 indices = instance.get_all_xpos()
+            else:
+                raise ValueError('Invalid embedding type: %s' % word_or_tag)
 
             index_matrix[i, :len(instance)] = torch.tensor(indices)
 

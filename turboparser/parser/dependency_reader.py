@@ -1,5 +1,6 @@
 from ..classifier.reader import AuxiliaryReader, Reader
 from .dependency_instance import DependencyInstance, MultiwordSpan
+from .constants import ROOT
 
 
 class ConllReader(Reader):
@@ -50,7 +51,7 @@ class AuxiliaryConllReader(AuxiliaryReader):
 
         # Sentence length (the first token is the root symbol).
         length = 1 + len(sentence_fields)
-        root_string = '_root_'
+        root_string = ROOT
         forms = [root_string] * length
         lemmas = [root_string] * length
         upos = [root_string] * length

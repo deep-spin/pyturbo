@@ -1,11 +1,10 @@
 from ..classifier.alphabet import Alphabet
 from ..classifier.dictionary import Dictionary
 from .dependency_reader import ConllReader
+from .constants import ROOT, UNKNOWN
 import pickle
 import logging
 from collections import Counter
-
-UNKNOWN = '_UNKNOWN_'
 
 
 class TokenDictionary(Dictionary):
@@ -207,16 +206,14 @@ class TokenDictionary(Dictionary):
         lemma_counts = Counter()
 
         # embeddings not included here to keep the same ordering
-        for alphabet in [self.form_alphabet,
-                         self.form_lower_alphabet,
-                         self.lemma_alphabet,
-                         self.character_alphabet,
-                         self.upos_alphabet,
+        for alphabet in [self.upos_alphabet,
                          self.xpos_alphabet,
                          self.morph_tag_alphabet,
                          self.morph_singleton_alphabet,
                          self.deprel_alphabet]:
             alphabet.insert(UNKNOWN)
+            if alphabet is not self.deprel_alphabet:
+                alphabet.insert(ROOT)
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
@@ -271,6 +268,8 @@ class TokenDictionary(Dictionary):
 
             alphabet.clear()
             alphabet.insert(UNKNOWN)
+            if alphabet != 'char':
+                alphabet.insert(ROOT)
             max_length -= 1  # -1 for the unknown symbol
             for name, count in counter.most_common(max_length):
                 if count >= cutoff:
@@ -279,6 +278,8 @@ class TokenDictionary(Dictionary):
                     break
             alphabet.stop_growth()
 
+        self.embedding_alphabet.insert(UNKNOWN)
+        self.embedding_alphabet.insert(ROOT)
         if word_dict is not None:
             word_list = sorted(word_dict, key=lambda w: word_dict[w])
             for word in word_list:
