@@ -12,34 +12,24 @@ class TokenDictionary(Dictionary):
     def __init__(self):
         Dictionary.__init__(self)
         self.character_alphabet = Alphabet()
-        self.embedding_alphabet = Alphabet()
+        self.pretrain_alphabet = Alphabet()
         self.form_alphabet = Alphabet()
-        self.form_lower_alphabet = Alphabet()
         self.lemma_alphabet = Alphabet()
-        self.prefix_alphabet = Alphabet()
-        self.suffix_alphabet = Alphabet()
         self.morph_tag_alphabet = Alphabet()
         self.morph_singleton_alphabet = Alphabet()
         self.upos_alphabet = Alphabet()
         self.xpos_alphabet = Alphabet()
-        self.shape_alphabet = Alphabet()
         self.deprel_alphabet = Alphabet()
-
-        self.max_forms = 0xffff
 
         # keep all alphabets ordered
         self.alphabets = [self.character_alphabet,
-                          self.embedding_alphabet,
+                          self.pretrain_alphabet,
                           self.form_alphabet,
-                          self.form_lower_alphabet,
                           self.lemma_alphabet,
-                          self.prefix_alphabet,
-                          self.suffix_alphabet,
                           self.morph_tag_alphabet,
                           self.morph_singleton_alphabet,
                           self.upos_alphabet,
                           self.xpos_alphabet,
-                          self.shape_alphabet,
                           self.deprel_alphabet]
 
     def save(self, file):
@@ -49,17 +39,13 @@ class TokenDictionary(Dictionary):
     def load(self, file):
         # TODO: avoid repeating code somehow
         self.character_alphabet = pickle.load(file)
-        self.embedding_alphabet = pickle.load(file)
+        self.pretrain_alphabet = pickle.load(file)
         self.form_alphabet = pickle.load(file)
-        self.form_lower_alphabet = pickle.load(file)
         self.lemma_alphabet = pickle.load(file)
-        self.prefix_alphabet = pickle.load(file)
-        self.suffix_alphabet = pickle.load(file)
         self.morph_tag_alphabet = pickle.load(file)
         self.morph_singleton_alphabet = pickle.load(file)
         self.upos_alphabet = pickle.load(file)
         self.xpos_alphabet = pickle.load(file)
-        self.shape_alphabet = pickle.load(file)
         self.deprel_alphabet = pickle.load(file)
 
     def allow_growth(self):
@@ -85,7 +71,7 @@ class TokenDictionary(Dictionary):
         return len(self.character_alphabet)
 
     def get_num_embeddings(self):
-        return len(self.embedding_alphabet)
+        return len(self.pretrain_alphabet)
 
     def get_num_forms(self):
         return len(self.form_alphabet)
@@ -109,10 +95,10 @@ class TokenDictionary(Dictionary):
         return len(self.deprel_alphabet)
 
     def get_embedding_id(self, form):
-        id_ = self.embedding_alphabet.lookup(form)
+        id_ = self.pretrain_alphabet.lookup(form)
         if id_ >= 0:
             return id_
-        return self.embedding_alphabet.lookup(UNKNOWN)
+        return self.pretrain_alphabet.lookup(UNKNOWN)
 
     def get_character_id(self, character):
         id_ = self.character_alphabet.lookup(character)
@@ -126,29 +112,11 @@ class TokenDictionary(Dictionary):
             return id_
         return self.form_alphabet.lookup(UNKNOWN)
 
-    def get_form_lower_id(self, form_lower):
-        id_ = self.form_lower_alphabet.lookup(form_lower)
-        if id_ >= 0:
-            return id_
-        return self.form_lower_alphabet.lookup(UNKNOWN)
-
     def get_lemma_id(self, lemma):
         id_ = self.lemma_alphabet.lookup(lemma)
         if id_ >= 0:
             return id_
         return self.lemma_alphabet.lookup(UNKNOWN)
-
-    def get_prefix_id(self, prefix):
-        id_ = self.prefix_alphabet.lookup(prefix)
-        if id_ >= 0:
-            return id_
-        return self.prefix_alphabet.lookup(UNKNOWN)
-
-    def get_suffix_id(self, suffix):
-        id_ = self.suffix_alphabet.lookup(suffix)
-        if id_ >= 0:
-            return id_
-        return self.suffix_alphabet.lookup(UNKNOWN)
 
     def get_upos_id(self, tag):
         id_ = self.upos_alphabet.lookup(tag)
@@ -174,20 +142,14 @@ class TokenDictionary(Dictionary):
             return id_
         return self.morph_singleton_alphabet.lookup(UNKNOWN)
 
-    def get_shape_id(self, shape):
-        id_ = self.shape_alphabet.lookup(shape)
-        if id_ >= 0:
-            return id_
-        return self.shape_alphabet.lookup(UNKNOWN)
-
     def get_deprel_id(self, deprel):
         id_ = self.deprel_alphabet.lookup(deprel)
         if id_ >= 0:
             return id_
         return self.deprel_alphabet.lookup(UNKNOWN)
 
-    def initialize(self, input_path, case_sensitive, word_dict=None,
-                   char_cutoff=1, form_cutoff=1, lemma_cutoff=1):
+    def initialize(self, input_path, case_sensitive, word_list=None,
+                   char_cutoff=1, form_cutoff=7, lemma_cutoff=7):
         """
         Initializes the dictionary with indices for word forms and tags.
 
@@ -195,14 +157,12 @@ class TokenDictionary(Dictionary):
         new words found in the training data are added in the beginning of it
 
         :param input_path: path to an input CoNLL file
-        :param word_dict: optional dictionary mapping words to indices, in case
-            pre-trained embeddings are used.
+        :param word_list: optional list with words in pre-trained embeddings
         """
         logging.info('Creating token dictionary...')
 
         char_counts = Counter()
         form_counts = Counter()
-        form_lower_counts = Counter()
         lemma_counts = Counter()
 
         # embeddings not included here to keep the same ordering
@@ -223,16 +183,12 @@ class TokenDictionary(Dictionary):
                 for i in range(len(instance)):
                     # Add form to alphabet.
                     form = instance.get_form(i)
-                    form_lower = form.lower()
-                    if not case_sensitive:
-                        form = form_lower
+                    if case_sensitive:
+                        form = form.lower()
                     form_counts[form] += 1
 
                     for char in form:
                         char_counts[char] += 1
-
-                    # Add lower-case form to alphabet.
-                    form_lower_counts[form_lower] += 1
 
                     # Add lemma to alphabet.
                     lemma = instance.get_lemma(i)
@@ -257,33 +213,29 @@ class TokenDictionary(Dictionary):
                         self.morph_tag_alphabet.insert(morph_tag)
 
         # Now adjust the cutoffs if necessary.
-        # (only using cutoffs for words and chars)
-        for label, alphabet, counter, cutoff, max_length in \
-            zip(['char', 'form', 'form_lower', 'lemma'],
-                [self.character_alphabet, self.form_alphabet,
-                 self.form_lower_alphabet, self.lemma_alphabet],
-                [char_counts, form_counts, form_lower_counts, lemma_counts],
-                [char_cutoff, form_cutoff, form_cutoff, lemma_cutoff],
-                [int(10e6), self.max_forms, self.max_forms, self.max_forms]):
+        # (only using cutoffs for words and lemmas)
+        for alphabet, counter, cutoff in \
+            zip([self.character_alphabet, self.form_alphabet,
+                 self.lemma_alphabet],
+                [char_counts, form_counts, lemma_counts],
+                [char_cutoff, form_cutoff, lemma_cutoff]):
 
             alphabet.clear()
             alphabet.insert(UNKNOWN)
             if alphabet != 'char':
                 alphabet.insert(ROOT)
-            max_length -= 1  # -1 for the unknown symbol
-            for name, count in counter.most_common(max_length):
+
+            for name, count in counter.most_common():
                 if count >= cutoff:
                     alphabet.insert(name)
                 else:
                     break
+
             alphabet.stop_growth()
 
-        self.embedding_alphabet.insert(UNKNOWN)
-        self.embedding_alphabet.insert(ROOT)
-        if word_dict is not None:
-            word_list = sorted(word_dict, key=lambda w: word_dict[w])
+        if word_list is not None:
             for word in word_list:
-                self.embedding_alphabet.insert(word)
+                self.pretrain_alphabet.insert(word)
 
         # # update the embedding vocabulary with new words found in training data
         # dataset_words = self.form_alphabet.keys()
@@ -293,17 +245,13 @@ class TokenDictionary(Dictionary):
         # new_words = sorted(dataset_words - embedding_words)
         # for new_word in new_words:
         #     self.embedding_alphabet.insert(new_word)
-        self.embedding_alphabet.stop_growth()
+        self.pretrain_alphabet.stop_growth()
 
         logging.info('Number of characters: %d' % len(self.character_alphabet))
-        logging.info('Number of embedding forms: %d' %
-                     len(self.embedding_alphabet))
+        logging.info('Number of pretrained embedding forms: %d' %
+                     len(self.pretrain_alphabet))
         logging.info('Number of forms: %d' % len(self.form_alphabet))
-        logging.info('Number of lower-case forms: %d' %
-                     len(self.form_lower_alphabet))
         logging.info('Number of lemmas: %d' % len(self.lemma_alphabet))
-        logging.info('Number of prefixes: %d' % len(self.prefix_alphabet))
-        logging.info('Number of suffixes: %d' % len(self.suffix_alphabet))
         logging.info('Number of coarse POS tags: %d' % len(self.upos_alphabet))
         logging.info('Number of fine POS tags: %d' %
                      len(self.xpos_alphabet))

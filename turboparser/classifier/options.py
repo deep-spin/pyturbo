@@ -16,12 +16,12 @@ class OptionParser(object):
         `prog` and `description` are arguments for the argparse parser.
         """
         parser = argparse.ArgumentParser(prog=prog, description=description)
-        parser.add_argument('--train', action='store_const',
-                            default=0, const=1,
-                            help='1 for training the classifier.')
-        parser.add_argument('--test', action='store_const',
-                            default=0, const=1,
-                            help='1 for testing the classifier.')
+
+        mode = parser.add_mutually_exclusive_group(required=True)
+        mode.add_argument('--train', action='store_true',
+                          help='Training mode')
+        mode.add_argument('--test', action='store_true',
+                          help='Test/running mode')
         parser.add_argument('--training_path', type=str, default=None,
                             help='Path to the training data.')
         parser.add_argument('--valid_path', type=str,
@@ -54,15 +54,15 @@ class OptionParser(object):
         parser.add_argument('-v', '--verbose', action='store_true',
                             help='Verbose mode with some extra information '
                                  'about the models')
+        parser.add_argument('--seed', type=int, default=6,
+                            help='Random seed')
 
         self.parser = parser
 
     def parse_args(self):
-        import sys
         args = self.parser.parse_args()
         args = vars(args)
         self.args = args
-        print(args, file=sys.stderr)
 
         options = Options()
         options.train = bool(args['train'])
@@ -80,5 +80,6 @@ class OptionParser(object):
         options.beta1 = args['beta1']
         options.beta2 = args['beta2']
         options.verbose = args['verbose']
+        options.seed = args['seed']
 
         return options

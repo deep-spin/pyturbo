@@ -15,11 +15,8 @@ class DependencyInstanceNumeric(DependencyInstance):
 
         self.characters = [None for _ in range(length)]
         self.forms = np.full(length, -1, np.int32)
-        self.forms_lower = self.forms.copy()
         self.embedding_ids = self.forms.copy()
         self.lemmas = self.forms.copy()
-        self.prefixes = self.forms.copy()
-        self.suffixes = self.forms.copy()
         self.upos = self.forms.copy()
         self.xpos = self.forms.copy()
         self.morph_tags = [[-1] * len(morph_tags)
@@ -33,16 +30,10 @@ class DependencyInstanceNumeric(DependencyInstance):
         for i in range(length):
             # Form and lower-case form.
             form = instance.forms[i]
-            form_lower = form.lower()
-            if not case_sensitive:
-                form = form_lower
+            if case_sensitive:
+                form = form.lower()
             id_ = token_dictionary.get_form_id(form)
-            assert id_ < 0xffff
             self.forms[i] = id_
-
-            id_ = token_dictionary.get_form_lower_id(form_lower)
-            assert id_ < 0xffff
-            self.forms_lower[i] = id_
 
             id_ = token_dictionary.get_embedding_id(form)
             self.embedding_ids[i] = id_
@@ -54,13 +45,11 @@ class DependencyInstanceNumeric(DependencyInstance):
             # Lemma.
             lemma = instance.lemmas[i]
             id_ = token_dictionary.get_lemma_id(lemma)
-            assert id_ < 0xffff
             self.lemmas[i] = id_
 
             # POS tag.
             tag = instance.upos[i]
             id_ = token_dictionary.get_upos_id(tag)
-            assert id_ < 0xff
             self.upos[i] = id_
 
             tag = instance.xpos[i]
@@ -72,7 +61,6 @@ class DependencyInstanceNumeric(DependencyInstance):
             for j in range(len(morph_tags)):
                 morph_tag = morph_tags[j]
                 id_ = token_dictionary.get_morph_tag_id(morph_tag)
-                assert id_ < 0xffff
                 self.morph_tags[i][j] = id_
 
             morph_singleton = instance.morph_singletons[i]
@@ -91,12 +79,3 @@ class DependencyInstanceNumeric(DependencyInstance):
 
     def get_all_embedding_ids(self):
         return self.embedding_ids
-
-    def get_form_lower(self, i):
-        return self.forms_lower[i]
-
-    def get_prefix(self, i):
-        return self.prefixes[i]
-
-    def get_suffix(self, i):
-        return self.suffixes[i]

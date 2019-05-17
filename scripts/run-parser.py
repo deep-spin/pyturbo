@@ -9,12 +9,6 @@ from turboparser.parser import DependencyOptionParser, TurboParser
 def main():
     """Main function for the dependency parser."""
 
-    random.seed(6)
-    torch.manual_seed(6)
-    torch.cuda.manual_seed(6)
-    np.random.seed(6)
-    torch.backends.cudnn.deterministic = True
-
     # Parse arguments.
     parser = DependencyOptionParser()
     options = parser.parse_args()
@@ -24,15 +18,25 @@ def main():
     elif options.test:
         test_parser(options)
 
+    set_seeds(options.seed)
+
+
+def set_seeds(seed):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 
 def train_parser(options):
-    logging.info('Training the parser...')
+    logging.info('Training the parser')
     dependency_parser = TurboParser(options)
     dependency_parser.train()
 
 
 def test_parser(options):
-    logging.info('Running the parser...')
+    logging.info('Running the parser')
     dependency_parser = TurboParser.load(options)
     dependency_parser.run()
 
