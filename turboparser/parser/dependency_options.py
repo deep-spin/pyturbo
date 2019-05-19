@@ -117,50 +117,9 @@ class DependencyOptionParser(OptionParser):
                             help='Word dropout rate (replace by unknown)')
         parser.add_argument('--tag_dropout', type=float, default=0,
                             help='Tag dropout rate (replace by unknown)')
-        parser.add_argument('--learning_rate', type=float, default=0.001,
-                            help='Neural model learning rate')
 
     def parse_args(self):
         options = super(DependencyOptionParser, self).parse_args()
-        args = self.args
-
-        options.char_cutoff = args['char_cutoff']
-        options.form_cutoff = args['form_cutoff']
-        options.lemma_cutoff = args['lemma_cutoff']
-        options.tag_cutoff = args['tag_cutoff']
-        options.morph_tag_cutoff = args['morph_tag_cutoff']
-        options.prefix_length = args['prefix_length']
-        options.suffix_length = args['suffix_length']
-        options.form_case_sensitive = args['form_case_sensitive']
-
-        options.model_type = args['model_type']
-        options.unlabeled = bool(args['unlabeled'])
-        options.predict_upos = args['upos']
-        options.predict_xpos = args['xpos']
-        options.predict_morph = args['morph']
-        options.prune_relations = args['prune_relations']
-        options.prune_tags = args['prune_tags']
-        options.pruner_path = args['pruner_path']
-        options.pruner_posterior_threshold = args['pruner_posterior_threshold']
-        options.pruner_max_heads = args['pruner_max_heads']
-        options.single_root = args['single_root']
-
-        options.embeddings = args['embeddings']
-        options.embedding_size = args['embedding_size']
-        options.char_embedding_size = args['char_embedding_size']
-        options.tag_embedding_size = args['tag_embedding_size']
-        options.distance_embedding_size = args['distance_embedding_size']
-        options.rnn_size = args['rnn_size']
-        options.arc_mlp_size = args['arc_mlp_size']
-        options.tag_mlp_size = args['tag_mlp_size']
-        options.ho_mlp_size = args['ho_mlp_size']
-        options.label_mlp_size = args['label_mlp_size']
-        options.rnn_layers = args['rnn_layers']
-        options.mlp_layers = args['mlp_layers']
-        options.dropout = args['dropout']
-        options.word_dropout = args['word_dropout']
-        options.tag_dropout = args['tag_dropout']
-        options.learning_rate = args['learning_rate']
 
         if options.model_type == 'basic':
             options.model_type = 'af'

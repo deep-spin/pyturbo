@@ -20,6 +20,7 @@ import pickle
 import numpy as np
 import logging
 import time
+import datetime
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -68,10 +69,6 @@ class TurboParser(object):
                 form_cutoff=options.form_cutoff,
                 lemma_cutoff=options.lemma_cutoff)
 
-            # embeddings = self._update_embeddings(embeddings)
-            # if embeddings is None:
-            #     embeddings = self._create_random_embeddings()
-
             model = DependencyNeuralModel(
                 self.model_type,
                 self.token_dictionary, pretrain_embeddings,
@@ -90,9 +87,9 @@ class TurboParser(object):
                 word_dropout=options.word_dropout,
                 tag_dropout=options.tag_dropout,
                 tag_mlp_size=options.tag_mlp_size,
-                predict_upos=options.predict_upos,
-                predict_xpos=options.predict_xpos,
-                predict_morph=options.predict_morph)
+                predict_upos=options.upos,
+                predict_xpos=options.xpos,
+                predict_morph=options.morph)
 
             self.neural_scorer.initialize(
                 model, self.options.learning_rate, options.decay,
@@ -156,11 +153,11 @@ class TurboParser(object):
             self.pruner = None
 
         self.additional_targets = []
-        if self.options.predict_morph:
+        if self.options.morph:
             self.additional_targets.append(Target.MORPH)
-        if self.options.predict_upos:
+        if self.options.upos:
             self.additional_targets.append(Target.UPOS)
-        if self.options.predict_xpos:
+        if self.options.xpos:
             self.additional_targets.append(Target.XPOS)
 
     def save(self, model_path=None):
@@ -180,9 +177,9 @@ class TurboParser(object):
 
             options.model_type = loaded_options.model_type
             options.unlabeled = loaded_options.unlabeled
-            options.predict_morph = loaded_options.predict_morph
-            options.predict_xpos = loaded_options.predict_xpos
-            options.predict_upos = loaded_options.predict_upos
+            options.morph = loaded_options.morph
+            options.xpos = loaded_options.xpos
+            options.upos = loaded_options.upos
 
             # prune arcs with label/head POS/modifier POS unseen in training
             options.prune_relations = loaded_options.prune_relations
@@ -217,21 +214,6 @@ class TurboParser(object):
         self.best_validation_las = 0.
         self._should_save = False
 
-    def _reset_task_metrics(self):
-        """
-        Reset the accumulated UAS counter
-        """
-        self.accumulated_hits = {}
-        for target in self.additional_targets:
-            self.accumulated_hits[target] = 0
-
-        self.accumulated_uas = 0.
-        self.accumulated_las = 0.
-        self.total_tokens = 0
-        self.validation_uas = 0.
-        self.validation_las = 0.
-        self.reassigned_roots = 0
-
     def _get_post_train_report(self):
         """
         Return the best parsing accuracy.
@@ -253,11 +235,11 @@ class TurboParser(object):
         gold_dict = {}
 
         # [1:] to skip root symbol
-        if self.options.predict_upos:
+        if self.options.upos:
             gold_dict[Target.UPOS] = instance.get_all_upos()[1:]
-        if self.options.predict_xpos:
+        if self.options.xpos:
             gold_dict[Target.XPOS] = instance.get_all_xpos()[1:]
-        if self.options.predict_morph:
+        if self.options.morph:
             gold_dict[Target.MORPH] = instance.get_all_morph_singletons()[1:]
 
         gold_dict[Target.HEADS] = instance.get_all_heads()[1:]
@@ -312,10 +294,6 @@ class TurboParser(object):
         self.accumulated_las += length * las
         self.total_tokens += length
 
-    def format_instance(self, instance):
-        return DependencyInstanceNumeric(instance, self.token_dictionary,
-                                         self.options.form_case_sensitive)
-
     def run_pruner(self, instance):
         """
         Prune out some arcs with the pruner model.
@@ -351,7 +329,7 @@ class TurboParser(object):
             n is the instance length including root. Position (h, m) has True
             if the arc is valid, False otherwise.
         """
-        instance, parts = self.make_parts(instance)
+        instance, parts = self.preprocess_instance(instance)
         scores = self.neural_scorer.compute_scores(instance, parts)[0]
         new_mask = self.decoder.decode_matrix_tree(
             parts, scores, self.options.pruner_max_heads,
@@ -410,11 +388,11 @@ class TurboParser(object):
         :return: numpy array
         """
         targets = {}
-        if self.options.predict_upos:
+        if self.options.upos:
             targets[Target.UPOS] = np.array([instance.get_all_upos()])
-        if self.options.predict_xpos:
+        if self.options.xpos:
             targets[Target.XPOS] = np.array([instance.get_all_xpos()])
-        if self.options.predict_morph:
+        if self.options.morph:
             # TODO: combine singleton morph tags (containing all morph
             # information) with separate tags
             targets[Target.MORPH] = np.array(
@@ -422,7 +400,7 @@ class TurboParser(object):
 
         return targets
 
-    def make_parts(self, instance):
+    def preprocess_instance(self, instance):
         """
         Create the parts (arcs) into which the problem is factored.
 
@@ -437,7 +415,8 @@ class TurboParser(object):
         else:
             prune_mask = None
 
-        instance = self.format_instance(instance)
+        instance = DependencyInstanceNumeric(instance, self.token_dictionary,
+                                             self.options.form_case_sensitive)
         num_relations = self.token_dictionary.get_num_deprels()
         labeled = not self.options.unlabeled
         parts = DependencyParts(instance, self.model_type, prune_mask,
@@ -506,7 +485,7 @@ class TurboParser(object):
 
         return pred_heads, pred_labels
 
-    def _get_validation_metrics(self, valid_data, valid_pred):
+    def compute_validation_metrics(self, valid_data, valid_pred):
         """
         Compute and store internally validation metrics. Also call the neural
         scorer to update learning rate.
@@ -581,25 +560,7 @@ class TurboParser(object):
                 self._should_save = False
             acc = self.validation_las
 
-        self.neural_scorer.lr_scheduler_step(acc)
-
-    def _check_gold_arc(self, instance, head, modifier):
-        """
-        Auxiliar function to check whether there is an arc from head to
-        modifier in the gold output in instance.
-
-        If instance has no gold output, return False.
-
-        :param instance: a DependencyInstance
-        :param head: integer, index of the head
-        :param modifier: integer
-        :return: boolean
-        """
-        if not self.options.train:
-            return False
-        if instance.get_head(modifier) == head:
-            return True
-        return False
+        # self.neural_scorer.lr_scheduler_step(acc)
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
@@ -648,7 +609,7 @@ class TurboParser(object):
 
         instances = read_instances(self.options.test_path)
         logging.info('Number of instances: %d' % len(instances))
-        data = self.make_parts_batch(instances)
+        data = self.preprocess_instances(instances)
         predictions = []
         batch_index = 0
         while batch_index < len(instances):
@@ -703,7 +664,7 @@ class TurboParser(object):
         logging.info('Time: %f' % (toc - tic))
         return train_instances, valid_instances
 
-    def make_parts_batch(self, instances):
+    def preprocess_instances(self, instances):
         """
         Create parts for all instances in the batch.
 
@@ -717,7 +678,7 @@ class TurboParser(object):
         formatted_instances = []
 
         for instance in instances:
-            f_instance, parts = self.make_parts(instance)
+            f_instance, parts = self.preprocess_instance(instance)
             gold_labels = self.get_gold_labels(f_instance)
 
             formatted_instances.append(f_instance)
@@ -728,136 +689,128 @@ class TurboParser(object):
         data = InstanceData(formatted_instances, all_parts, all_gold_labels)
         return data
 
+    def reset_performance_metrics(self):
+        """
+        Reset some variables used to keep track of training performance.
+        """
+        self.num_train_instances = 0
+        self.time_scores = 0
+        self.time_decoding = 0
+        self.time_gradient = 0
+        self.train_losses = {target: 0. for target in self.additional_targets}
+        self.train_losses[Target.DEPENDENCY_PARTS] = 0.
+        self.accumulated_hits = {}
+        for target in self.additional_targets:
+            self.accumulated_hits[target] = 0
+
+        self.accumulated_uas = 0.
+        self.accumulated_las = 0.
+        self.total_tokens = 0
+        self.validation_uas = 0.
+        self.validation_las = 0.
+        self.reassigned_roots = 0
+
     def train(self):
         '''Train with a general online algorithm.'''
         train_instances, valid_instances = self.read_train_instances()
-        train_data = self.make_parts_batch(train_instances)
-        valid_data = self.make_parts_batch(valid_instances)
-        train_data.sort_by_size()
-        self._reset_best_validation_metric()
-        self.lambda_coeff = 1.0 / (self.options.regularization_constant *
-                                   float(len(train_instances)))
-        self.num_bad_epochs = 0
-        for epoch in range(self.options.training_epochs):
-            self.train_epoch(epoch, train_data, valid_data)
+        train_data = self.preprocess_instances(train_instances)
+        valid_data = self.preprocess_instances(valid_instances)
+        train_data.prepare_batches(self.options.batch_size, sort=True)
+        logging.info('Training data spread across %d batches'
+                     % len(train_data.batches))
 
-            if self.num_bad_epochs == self.options.patience:
-                break
+        self._reset_best_validation_metric()
+        self.reset_performance_metrics()
+        using_amsgrad = False
+        num_bad_evals = 0
+
+        for global_step in range(1, self.options.max_steps + 1):
+            batch = train_data.get_next_batch()
+            self.train_batch(batch)
+
+            if global_step % self.options.log_interval == 0:
+                msg = '%s Step %d' % (datetime.datetime.now(), global_step)
+                logging.info(msg)
+                self.train_report(self.num_train_instances)
+                self.reset_performance_metrics()
+
+            if global_step % self.options.eval_interval == 0:
+                self.run_on_validation(valid_data)
+                if self._should_save:
+                    self.save()
+                    num_bad_evals = 0
+                else:
+                    num_bad_evals += 1
+
+                if num_bad_evals == self.options.patience:
+                    if not using_amsgrad:
+                        logging.info('Switching to AMSGrad')
+                        self.neural_scorer.switch_to_amsgrad(
+                            self.options.learning_rate, self.options.beta1,
+                            self.options.beta2)
+                        num_bad_evals = 0
+                    else:
+                        break
+
+            train_data.shuffle_batches()
 
         logging.info(self._get_post_train_report())
 
-    def train_epoch(self, epoch, train_data, valid_data):
-        '''Run one epoch of an online algorithm.
-
-        :param epoch: the number of the epoch, starting from 0
-        :param train_data: InstanceData
-        :param valid_data: InstanceData
-        '''
-        self.time_decoding = 0
-        self.time_scores = 0
-        self.time_gradient = 0
-        start = time.time()
-
-        self.total_losses = {target: 0. for target in self.additional_targets}
-        self.total_losses[Target.DEPENDENCY_PARTS] = 0.
-
-        self._reset_task_metrics()
-
-        if epoch == 0:
-            logging.info('\t'.join(
-                ['Lambda: %f' % self.lambda_coeff,
-                 'Regularization constant: %f' %
-                 self.options.regularization_constant,
-                 'Number of instances: %d' % len(train_data)]))
-        logging.info(' Iteration #%d' % (epoch + 1))
-
-        batch_index = 0
-        batch_size = self.options.batch_size
-        while batch_index < len(train_data):
-            next_batch_index = batch_index + batch_size
-            batch = train_data[batch_index:next_batch_index]
-            self.train_batch(batch)
-            batch_index = next_batch_index
-
-        end = time.time()
-        time_train = end - start
-
+    def run_on_validation(self, valid_data):
+        """
+        Run the model on validation data
+        """
         valid_start = time.time()
         self.neural_scorer.eval_mode()
         valid_pred, valid_losses = self._run_batches(valid_data, 32,
                                                      return_loss=True)
+        self.compute_validation_metrics(valid_data, valid_pred)
 
-        # adjust learning rate based on validation parsing loss
-        dep_loss = valid_losses[Target.DEPENDENCY_PARTS]
-        self._get_validation_metrics(valid_data, valid_pred)
         valid_end = time.time()
         time_validation = valid_end - valid_start
 
-        self._epoch_report(time_train, time_validation, self.total_losses,
-                           valid_losses, len(train_data), len(valid_data))
-
-        if self._should_save:
-            self.save()
-            self.num_bad_epochs = 0
-        else:
-            self.num_bad_epochs += 1
-
-    def _epoch_report(self, train_time, validation_time, train_losses,
-                      valid_losses, train_size, valid_size):
-        """
-        Log a report of the training for an epoch.
-
-        :param train_losses: dictionary mapping targets to loss scalar values,
-            not normalized by number of instances
-        :param valid_losses: same as train_losses
-        """
-        logging.info('Training time: %f' % train_time)
-        logging.info('Time to score: %f' % self.time_scores)
-        logging.info('Time to decode: %f' % self.time_decoding)
-        logging.info('Time to do gradient step: %f' % self.time_gradient)
-        logging.info('Time to run on validation: %f' % validation_time)
-
-        def make_loss_msgs(losses, dataset_size):
-            msgs = []
-            for target in losses:
-                target_name = target2string[target]
-                normalized_loss = losses[target] / dataset_size
-                msg = '%s: %.4f' % (target_name, normalized_loss)
-                msgs.append(msg)
-            return msgs
-
-        msgs = ['Train losses:'] + make_loss_msgs(train_losses, train_size)
-        logging.info('\t'.join(msgs))
-
-        uas = self.accumulated_uas / self.total_tokens
-        msgs = ['Train accuracies:\tUAS: %.6f' % uas]
-        if not self.options.unlabeled:
-            las = self.accumulated_las / self.total_tokens
-            msgs.append('LAS: %.6f' % las)
-
-        for target in self.additional_targets:
-            target_name = target2string[target]
-            acc = self.accumulated_hits[target] / self.total_tokens
-            msgs.append('%s: %.6f' % (target_name, acc))
-        logging.info('\t'.join(msgs))
-
+        logging.info('Time to run on validation: %.2f' % time_validation)
         msgs = ['Validation losses:'] + make_loss_msgs(valid_losses,
-                                                       valid_size)
+                                                       len(valid_data))
         logging.info('\t'.join(msgs))
 
-        msgs = ['Validation accuracies:\tUAS: %.6f' % self.validation_uas]
+        msgs = ['Validation accuracies:\tUAS: %.4f' % self.validation_uas]
         if not self.options.unlabeled:
-            msgs.append('LAS: %.6f' % self.validation_las)
+            msgs.append('LAS: %.4f' % self.validation_las)
         for target in self.additional_targets:
             target_name = target2string[target]
             acc = self.validation_accuracies[target]
-            msgs.append('%s: %.6f' % (target_name, acc))
+            msgs.append('%s: %.4f' % (target_name, acc))
         logging.info('\t'.join(msgs))
 
         if self._should_save:
             logging.info('Saved model')
 
         logging.info('\n')
+
+    def train_report(self, num_instances):
+        """
+        Log a short report of the training loss.
+        """
+        msgs = ['Train losses:'] + make_loss_msgs(self.train_losses,
+                                                  num_instances)
+        logging.info('\t'.join(msgs))
+
+        time_msg = 'Time to score: %.2f\tDecode: %.2f\tGradient step: %.2f'
+        time_msg %= (self.time_scores, self.time_decoding, self.time_gradient)
+        logging.info(time_msg)
+
+        # uas = self.accumulated_uas / self.total_tokens
+        # msgs = ['Train accuracies:\tUAS: %.6f' % uas]
+        # if not self.options.unlabeled:
+        #     las = self.accumulated_las / self.total_tokens
+        #     msgs.append('LAS: %.6f' % las)
+        #
+        # for target in self.additional_targets:
+        #     target_name = target2string[target]
+        #     acc = self.accumulated_hits[target] / self.total_tokens
+        #     msgs.append('%s: %.6f' % (target_name, acc))
+        # logging.info('\t'.join(msgs))
 
     def _run_batches(self, instance_data, batch_size, return_loss=False):
         """
@@ -975,9 +928,10 @@ class TurboParser(object):
                                                  all_predicted_parts)
         self.neural_scorer.make_gradient_step(losses)
         batch_size = len(instance_data)
+        self.num_train_instances += batch_size
         for target in losses:
             # store non-normalized losses
-            self.total_losses[target] += batch_size * losses[target].item()
+            self.train_losses[target] += batch_size * losses[target].item()
 
         end_time = time.time()
         self.time_gradient += end_time - start_time
@@ -1024,18 +978,18 @@ class TurboParser(object):
                     get_label_name(relation)
                 instance.relations[m] = relation_name
 
-            if self.options.predict_upos:
+            if self.options.upos:
                 # -1 because there's no tag for the root
                 tag = output[Target.UPOS][m - 1]
                 tag_name = self.token_dictionary. \
                     upos_alphabet.get_label_name(tag)
                 instance.upos[m] = tag_name
-            if self.options.predict_xpos:
+            if self.options.xpos:
                 tag = output[Target.XPOS][m - 1]
                 tag_name = self.token_dictionary. \
                     xpos_alphabet.get_label_name(tag)
                 instance.xpos[m] = tag_name
-            if self.options.predict_morph:
+            if self.options.morph:
                 tag = output[Target.MORPH][m - 1]
                 tag_name = self.token_dictionary. \
                     morph_singleton_alphabet.get_label_name(tag)
@@ -1057,3 +1011,22 @@ def load_pruner(model_path):
     pruner = TurboParser.load(pruner_options)
 
     return pruner
+
+
+def make_loss_msgs(losses, dataset_size):
+    """
+    Return a list of strings in the shape
+
+    NAME: LOSS_VALUE
+
+    :param losses: dictionary mapping targets to loss values
+    :param dataset_size: value used to normalize (divide) each loss value
+    :return: list of strings
+    """
+    msgs = []
+    for target in losses:
+        target_name = target2string[target]
+        normalized_loss = losses[target] / dataset_size
+        msg = '%s: %.4f' % (target_name, normalized_loss)
+        msgs.append(msg)
+    return msgs

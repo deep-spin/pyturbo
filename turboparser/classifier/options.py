@@ -36,16 +36,23 @@ class OptionParser(object):
                             help="""Decay value to multiply learning rate after 
                             an epoch without improvement in the validation 
                             set.""")
+        parser.add_argument('--log_interval', type=int, default=20,
+                            help="""Steps between each log report""")
+        parser.add_argument('--eval_interval', type=int, default=100,
+                            help="""Steps between each model evaluation""")
+        parser.add_argument('--learning_rate', type=float, default=0.001,
+                            help='Neural model learning rate')
         parser.add_argument('--beta1', type=float, default=0.9,
                             help="""Beta1 parameter of the adam optimizer""")
-        parser.add_argument('--beta2', type=float, default=0.999,
+        parser.add_argument('--beta2', type=float, default=0.95,
                             help="""Beta2 parameter of the adam optimizer""")
-        parser.add_argument('--training_epochs', type=int, default=10,
-                            help='Number of training epochs.''')
-        parser.add_argument('--patience', type=int, default=5,
-                            help='Number of epochs without improvements in the'
-                                 ' validation set to wait before terminating '
-                                 'training.')
+        parser.add_argument('--max_steps', type=int, default=50000,
+                            help='''Maximum number of training steps (batches). 
+                            If the model stops improving it stops earlier.''')
+        parser.add_argument('--patience', type=int, default=10,
+                            help='''Number of evaluations without 
+                            improvement in the validation set to wait before 
+                            terminating training.''')
         parser.add_argument('--regularization_constant', type=float,
                             default=1e12,
                             help='Regularization parameter C.')
@@ -60,26 +67,4 @@ class OptionParser(object):
         self.parser = parser
 
     def parse_args(self):
-        args = self.parser.parse_args()
-        args = vars(args)
-        self.args = args
-
-        options = Options()
-        options.train = bool(args['train'])
-        options.test = bool(args['test'])
-        options.training_path = args['training_path']
-        options.valid_path = args['valid_path']
-        options.test_path = args['test_path']
-        options.model_path = args['model_path']
-        options.output_path = args['output_path']
-        options.training_epochs = args['training_epochs']
-        options.regularization_constant = args['regularization_constant']
-        options.batch_size = args['batch_size']
-        options.patience = args['patience']
-        options.decay = args['decay']
-        options.beta1 = args['beta1']
-        options.beta2 = args['beta2']
-        options.verbose = args['verbose']
-        options.seed = args['seed']
-
-        return options
+        return self.parser.parse_args()

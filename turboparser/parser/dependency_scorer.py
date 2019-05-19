@@ -102,18 +102,26 @@ class DependencyNeuralScorer(object):
         return score_list
 
     def initialize(self, model, learning_rate=0.001, decay=1,
-                   beta1=0.9, beta2=0.999):
+                   beta1=0.9, beta2=0.95):
         self.set_model(model)
         params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
             params, lr=learning_rate, betas=(beta1, beta2))
-        self.scheduler = scheduler.ReduceLROnPlateau(
-            self.optimizer, 'max', factor=decay, patience=0, verbose=True)
+        # self.scheduler = scheduler.ReduceLROnPlateau(
+        #     self.optimizer, 'max', factor=decay, patience=0, verbose=True)
 
     def set_model(self, model):
         self.model = model
         if torch.cuda.is_available():
             self.model.cuda()
+
+    def switch_to_amsgrad(self, learning_rate=0.001, beta1=0.9, beta2=0.95):
+        """
+        Switch the optimizer to AMSGrad.
+        """
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        self.optimizer = optim.Adam(
+            params, amsgrad=True, lr=learning_rate, betas=(beta1, beta2))
 
     def train_mode(self):
         """
@@ -127,11 +135,11 @@ class DependencyNeuralScorer(object):
         """
         self.model.eval()
 
-    def lr_scheduler_step(self, accuracy):
-        """
-        Perform a step of the learning rate scheduler, based on loss.
-        """
-        self.scheduler.step(accuracy)
+    # def lr_scheduler_step(self, accuracy):
+    #     """
+    #     Perform a step of the learning rate scheduler, based on loss.
+    #     """
+    #     self.scheduler.step(accuracy)
 
     def make_gradient_step(self, losses):
         """
