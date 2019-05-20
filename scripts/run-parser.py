@@ -37,15 +37,21 @@ def set_seeds(seed):
 def train_parser(options):
     logging.info('Training the parser')
     dependency_parser = TurboParser(options)
-    logging.info('Parser options:', dependency_parser.options)
+    log_options(dependency_parser)
     dependency_parser.train()
 
 
 def test_parser(options):
     logging.info('Running the parser')
     dependency_parser = TurboParser.load(options)
-    logging.info('Parser options:', dependency_parser.options)
+    log_options(dependency_parser)
     dependency_parser.run()
+
+
+def log_options(parser):
+    """Log parser options"""
+    msg = 'Parser options: ' + str(parser.options)
+    logging.info(msg)
 
 
 if __name__ == '__main__':
