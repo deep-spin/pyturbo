@@ -23,9 +23,6 @@ import time
 import datetime
 
 
-logging.basicConfig(level=logging.DEBUG)
-
-
 class ModelType(object):
     """Dummy class to store the types of parts used by a parser"""
     def __init__(self, type_string):
@@ -716,7 +713,7 @@ class TurboParser(object):
         train_data = self.preprocess_instances(train_instances)
         valid_data = self.preprocess_instances(valid_instances)
         train_data.prepare_batches(self.options.batch_size, sort=True)
-        logging.info('Training data spread across %d batches'
+        logging.info('Training data spread across %d batches\n'
                      % len(train_data.batches))
 
         self._reset_best_validation_metric()
@@ -745,6 +742,7 @@ class TurboParser(object):
                 if num_bad_evals == self.options.patience:
                     if not using_amsgrad:
                         logging.info('Switching to AMSGrad')
+                        using_amsgrad = True
                         self.neural_scorer.switch_to_amsgrad(
                             self.options.learning_rate, self.options.beta1,
                             self.options.beta2)
