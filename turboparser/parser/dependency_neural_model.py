@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target
-from ..classifier.lstm import LSTM
+from ..classifier.lstm import LSTM, CharLSTM
 import numpy as np
 import pickle
 
@@ -30,6 +30,8 @@ class DependencyNeuralModel(nn.Module):
                  fixed_word_embeddings,
                  trainable_word_embedding_size,
                  char_embedding_size,
+                 char_hidden_size,
+                 transform_size,
                  tag_embedding_size,
                  distance_embedding_size,
                  rnn_size,
@@ -59,8 +61,10 @@ class DependencyNeuralModel(nn.Module):
         """
         super(DependencyNeuralModel, self).__init__()
         self.char_embedding_size = char_embedding_size
+        self.char_hidden_size = char_hidden_size
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
+        self.transform_size = transform_size
         self.rnn_size = rnn_size
         self.arc_mlp_size = arc_mlp_size
         self.tag_mlp_size = tag_mlp_size
@@ -86,15 +90,17 @@ class DependencyNeuralModel(nn.Module):
                                              dtype=torch.float32)
         self.fixed_word_embeddings = nn.Embedding.from_pretrained(
             fixed_word_embeddings, freeze=True)
+        self.fixed_embedding_projection = nn.Linear(
+            fixed_word_embeddings.shape[1], transform_size, bias=False)
         self.fixed_dropout_replacement = self._create_parameter_tensor(
             fixed_word_embeddings.shape[1])
 
         if self.char_embedding_size:
             char_vocab = token_dictionary.get_num_characters()
-            self.char_embeddings = nn.Embedding(char_vocab, char_embedding_size)
+            self.char_rnn = CharLSTM(
+                char_vocab, char_embedding_size, char_hidden_size,
+                dropout=dropout)
 
-            self.char_rnn = LSTM(
-                input_size=char_embedding_size, hidden_size=char_embedding_size)
             char_based_embedding_size = 2 * char_embedding_size
 
             # tensor to replace char representation with word dropout
@@ -713,29 +719,8 @@ class DependencyNeuralModel(nn.Module):
                 chars = instance.get_characters(j)
                 char_indices[i, j, :len(chars)] = torch.tensor(chars)
 
-        # now we have a 3d matrix with char indices. let's reshape it to 2d,
-        # stacking all tokens with no sentence separation
-        new_shape = [batch_size * max_sentence_length, max_token_length]
-        char_indices = char_indices.view(new_shape)
-        lengths1d = token_lengths.view(-1)
-
-        # now order by descending length and keep track of the originals
-        sorted_lengths, sorted_inds = lengths1d.sort(descending=True)
-
-        # we can't pass 0-length tensors to the LSTM (they're the padding)
-        nonzero = sorted_lengths > 0
-        sorted_lengths = sorted_lengths[nonzero]
-        sorted_inds = sorted_inds[nonzero]
-
-        sorted_token_inds = char_indices[sorted_inds]
-        if self.on_gpu:
-            sorted_token_inds = sorted_token_inds.cuda()
-
-        # embedded is [batch * max_sentence_len, max_token_len, char_embedding]
-        embedded = self.char_embeddings(sorted_token_inds)
-        packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lengths,
-                                                   batch_first=True)
-        outputs, (last_output, cell) = self.char_rnn(packed)
+        outputs, (last_output, cell) = self.char_rnn(char_indices,
+                                                     token_lengths)
 
         # concatenate the last outputs of both directions
         last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)

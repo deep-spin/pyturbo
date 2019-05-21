@@ -30,3 +30,60 @@ class LSTM(nn.LSTM):
         batch_initial_c = self.initial_c.expand(-1, batch_size, -1).contiguous()
 
         return super(LSTM, self).forward(x, (batch_initial_h, batch_initial_c))
+
+
+class CharLSTM(nn.Module):
+    """
+    A wrapper of the torch LSTM with character-based functionalities.
+    """
+    def __init__(self, char_vocab_size, embedding_size, hidden_size,
+                 num_layers=1, dropout=0, rec_dropout=0, attention=True):
+        super(CharLSTM, self).__init__()
+        self.attention = attention
+        self.embeddings = nn.Embedding(char_vocab_size, embedding_size)
+        self.lstm = LSTM(embedding_size, hidden_size, num_layers, rec_dropout)
+        self.dropout = nn.Dropout(dropout)
+
+        if attention:
+            # 2 times because bidirectional
+            self.attention_layer = nn.Linear(2 * hidden_size, 1, False)
+            nn.init.zeros_(self.attention_layer.weight)
+
+    def forward(self, char_indices, token_lengths):
+        """
+        :param char_indices: tensor (batch, max_sequence_length,
+            max_token_length)
+        :param token_lengths: tensor (batch, max_sequence_length)
+        :return:
+        """
+        batch_size, max_sentence_length, max_token_length = char_indices.shape
+
+        # now we have a 3d matrix with char indices. let's reshape it to 2d,
+        # stacking all tokens with no sentence separation
+        new_shape = [batch_size * max_sentence_length, max_token_length]
+        char_indices = char_indices.view(new_shape)
+        lengths1d = token_lengths.view(-1)
+
+        # now order by descending length and keep track of the originals
+        sorted_lengths, sorted_inds = lengths1d.sort(descending=True)
+
+        # we can't pass 0-length tensors to the LSTM (they're the padding)
+        nonzero = sorted_lengths > 0
+        sorted_lengths = sorted_lengths[nonzero]
+        sorted_inds = sorted_inds[nonzero]
+
+        sorted_token_inds = char_indices[sorted_inds]
+        if torch.cuda.is_available():
+            sorted_token_inds = sorted_token_inds.cuda()
+
+        # embedded is [batch * max_sentence_len, max_token_len, char_embedding]
+        embedded = self.dropout(self.embeddings(sorted_token_inds))
+        packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lengths,
+                                                   batch_first=True)
+        outputs, (last_output, cell) = self.lstm(packed)
+
+        # apply attention
+        if self.attention:
+            pass
+
+        return outputs, (last_output, cell)

@@ -93,8 +93,13 @@ class DependencyOptionParser(OptionParser):
                             embeddings.""", default=100, type=int)
         parser.add_argument('--char_embedding_size', type=int, default=100,
                             help='Size of char embeddings')
+        parser.add_argument('--char_hidden_size', default=400, type=int,
+                            help='''Size of the hidden char RNN''')
         parser.add_argument('--tag_embedding_size', type=int, default=20,
                             help='Size of tag embeddings')
+        parser.add_argument('--transform_size', type=int, default=150,
+                            help='''Size of the linear transformation for 
+                            char-based and pretrained representations''')
         parser.add_argument('--distance_embedding_size', type=int, default=20,
                             help='Size of distance embeddings')
         parser.add_argument('--rnn_size', type=int, default=100,
