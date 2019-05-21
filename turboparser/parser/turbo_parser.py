@@ -121,21 +121,6 @@ class TurboParser(object):
 
         return words, embeddings
 
-    def _update_embeddings(self, embeddings):
-        """
-        Update the embedding matrix creating new ones if needed by the token
-        dictionary.
-        """
-        if embeddings is not None:
-            num_new_words = self.token_dictionary.get_num_embeddings() - \
-                            len(embeddings)
-            dim = embeddings.shape[1]
-            new_vectors = np.random.normal(embeddings.mean(), embeddings.std(),
-                                           [num_new_words, dim])
-            embeddings = np.concatenate([embeddings, new_vectors])
-
-        return embeddings
-
     def _set_options(self):
         """
         Set some parameters of the parser determined from its `options`
@@ -210,16 +195,6 @@ class TurboParser(object):
         self.best_validation_uas = 0.
         self.best_validation_las = 0.
         self._should_save = False
-
-    def _get_post_train_report(self):
-        """
-        Return the best parsing accuracy.
-        """
-        msg = 'Best validation UAS: %f' % self.best_validation_uas
-        if not self.options.unlabeled:
-            msg += '\tBest validation LAS: %f' % self.best_validation_las
-
-        return msg
 
     def get_gold_labels(self, instance):
         """
@@ -372,30 +347,6 @@ class TurboParser(object):
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
-
-    def create_gold_targets(self, instance):
-        """
-        Create the gold targets of an instance that do not depend on parts.
-
-        This will create targets for POS tagging and morphological tags, if
-        used.
-
-        :param instance: a formated instance
-        :type instance: DependencyInstanceNumeric
-        :return: numpy array
-        """
-        targets = {}
-        if self.options.upos:
-            targets[Target.UPOS] = np.array([instance.get_all_upos()])
-        if self.options.xpos:
-            targets[Target.XPOS] = np.array([instance.get_all_xpos()])
-        if self.options.morph:
-            # TODO: combine singleton morph tags (containing all morph
-            # information) with separate tags
-            targets[Target.MORPH] = np.array(
-                [instance.get_all_morph_singletons()])
-
-        return targets
 
     def preprocess_instance(self, instance):
         """
@@ -752,7 +703,10 @@ class TurboParser(object):
 
             train_data.shuffle_batches()
 
-        logging.info(self._get_post_train_report())
+        msg = 'Best validation UAS: %f' % self.best_validation_uas
+        if not self.options.unlabeled:
+            msg += '\tBest validation LAS: %f' % self.best_validation_las
+        logging.info(msg)
 
     def run_on_validation(self, valid_data):
         """
