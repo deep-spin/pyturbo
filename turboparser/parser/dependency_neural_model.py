@@ -106,7 +106,7 @@ class DependencyNeuralModel(nn.Module):
                 2 * char_hidden_size)
 
             self.char_projection = nn.Linear(
-                char_hidden_size * 2, transform_size, bias=False)
+                2 * char_hidden_size, transform_size, bias=False)
             rnn_input_size += transform_size
         else:
             self.char_rnn = None
@@ -722,8 +722,8 @@ class DependencyNeuralModel(nn.Module):
 
         if self.training and self.word_dropout_rate:
             # sample a dropout mask and replace the dropped representations
-            num_words = batch_size * max_sentence_length
-            dropout_mask = torch.rand(num_words) < self.word_dropout_rate
+            shape = [batch_size, max_sentence_length]
+            dropout_mask = torch.rand(shape) < self.word_dropout_rate
             char_representation[dropout_mask] = self.char_dropout_replacement
 
         return char_representation
@@ -755,6 +755,7 @@ class DependencyNeuralModel(nn.Module):
         # instances = [instances[i] for i in inds]
         max_length = sorted_lengths[0].item()
         embeddings = self.get_word_representations(instances, max_length)
+        embeddings = self.dropout(embeddings)
         sorted_embeddings = embeddings[inds]
 
         # pack to account for variable lengths

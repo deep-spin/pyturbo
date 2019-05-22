@@ -4,7 +4,6 @@ import random
 import numpy as np
 
 from turboparser.parser import DependencyOptionParser, TurboParser
-import logging
 
 
 def main():
