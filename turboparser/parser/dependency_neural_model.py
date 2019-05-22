@@ -94,31 +94,31 @@ class DependencyNeuralModel(nn.Module):
             fixed_word_embeddings.shape[1], transform_size, bias=False)
         self.fixed_dropout_replacement = self._create_parameter_tensor(
             fixed_word_embeddings.shape[1])
+        rnn_input_size = transform_size
 
         if self.char_embedding_size:
             char_vocab = token_dictionary.get_num_characters()
             self.char_rnn = CharLSTM(
                 char_vocab, char_embedding_size, char_hidden_size,
                 dropout=dropout)
-
-            char_based_embedding_size = 2 * char_embedding_size
-
             # tensor to replace char representation with word dropout
             self.char_dropout_replacement = self._create_parameter_tensor(
-                char_based_embedding_size)
+                2 * char_hidden_size)
+
+            self.char_projection = nn.Linear(
+                char_hidden_size * 2, transform_size, bias=False)
+            rnn_input_size += transform_size
         else:
-            self.char_embeddings = None
             self.char_rnn = None
-            char_based_embedding_size = 0
 
         if trainable_word_embedding_size:
             num_words = token_dictionary.get_num_forms()
             self.trainable_word_embeddings = nn.Embedding(
                 num_words, trainable_word_embedding_size)
+            rnn_input_size += trainable_word_embedding_size
         else:
             self.trainable_word_embeddings = None
 
-        total_tag_embedding_size = 0
         if tag_embedding_size:
             # only use tag embeddings if there are actual tags
             # 3 means root, unk and the placeholder "_" when there are no tags
@@ -126,7 +126,7 @@ class DependencyNeuralModel(nn.Module):
             if num_upos > 3:
                 self.upos_embeddings = nn.Embedding(num_upos,
                                                     tag_embedding_size)
-                total_tag_embedding_size += tag_embedding_size
+                rnn_input_size += tag_embedding_size
             else:
                 self.upos_embeddings = None
 
@@ -138,7 +138,7 @@ class DependencyNeuralModel(nn.Module):
                     upos_tags != xpos_tags:
                 self.xpos_embeddings = nn.Embedding(num_xpos,
                                                     tag_embedding_size)
-                total_tag_embedding_size += tag_embedding_size
+                rnn_input_size += tag_embedding_size
             else:
                 self.xpos_embeddings = None
         else:
@@ -154,15 +154,10 @@ class DependencyNeuralModel(nn.Module):
             self.distance_bins = None
             self.distance_embeddings = None
 
-        input_size = self.fixed_word_embeddings.weight.shape[1] + \
-                     total_tag_embedding_size + \
-                     trainable_word_embedding_size + \
-                     char_based_embedding_size
-        self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
+        self.shared_rnn = LSTM(rnn_input_size, rnn_size, rnn_layers, dropout)
         self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         if self.predict_tags:
             self.tagger_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
-        self.rnn_hidden_size = 2 * rnn_size
         self.tanh = nn.Tanh()
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
@@ -224,7 +219,8 @@ class DependencyNeuralModel(nn.Module):
 
         if model_type.consecutive_siblings or model_type.grandsiblings \
                 or model_type.trisiblings or model_type.arbitrary_siblings:
-            self.null_sibling_tensor = self._create_parameter_tensor()
+            self.null_sibling_tensor = self._create_parameter_tensor(
+                2 * rnn_size)
 
         if model_type.grandsiblings:
             self.gsib_head_mlp = self._create_mlp(
@@ -261,16 +257,11 @@ class DependencyNeuralModel(nn.Module):
         states = nn.utils.rnn.PackedSequence(states_data, states_lengths)
         return states
 
-    def _create_parameter_tensor(self, shape=None):
+    def _create_parameter_tensor(self, shape):
         """
         Create a tensor for representing some special token. It is included in
         the model parameters.
-
-        If shape is None, it will have shape equal to rnn_hidden_size.
         """
-        if shape is None:
-            shape = self.rnn_hidden_size
-
         tensor = torch.randn(shape) / np.sqrt(shape)
         if self.on_gpu:
             tensor = tensor.cuda()
@@ -345,6 +336,8 @@ class DependencyNeuralModel(nn.Module):
         pickle.dump(self.char_embedding_size, file)
         pickle.dump(self.tag_embedding_size, file)
         pickle.dump(self.distance_embedding_size, file)
+        pickle.dump(self.char_hidden_size, file)
+        pickle.dump(self.transform_size, file)
         pickle.dump(self.rnn_size, file)
         pickle.dump(self.arc_mlp_size, file)
         pickle.dump(self.tag_mlp_size, file)
@@ -369,8 +362,10 @@ class DependencyNeuralModel(nn.Module):
         char_embedding_size = pickle.load(file)
         tag_embedding_size = pickle.load(file)
         distance_embedding_size = pickle.load(file)
+        char_hidden_size = pickle.load(file)
+        transform_size = pickle.load(file)
         rnn_size = pickle.load(file)
-        mlp_size = pickle.load(file)
+        arc_mlp_size = pickle.load(file)
         tag_mlp_size = pickle.load(file)
         label_mlp_size = pickle.load(file)
         ho_mlp_size = pickle.load(file)
@@ -392,8 +387,10 @@ class DependencyNeuralModel(nn.Module):
             char_embedding_size,
             tag_embedding_size=tag_embedding_size,
             distance_embedding_size=distance_embedding_size,
+            char_hidden_size=char_hidden_size,
+            transform_size=transform_size,
             rnn_size=rnn_size,
-            arc_mlp_size=mlp_size,
+            arc_mlp_size=arc_mlp_size,
             tag_mlp_size=tag_mlp_size,
             label_mlp_size=label_mlp_size,
             ho_mlp_size=ho_mlp_size,
@@ -602,7 +599,8 @@ class DependencyNeuralModel(nn.Module):
         all_embeddings = []
         word_embeddings = self._get_embeddings(
             instances, max_length, 'fixedword')
-        all_embeddings.append(word_embeddings)
+        projection = self.fixed_embedding_projection(word_embeddings)
+        all_embeddings.append(projection)
 
         if self.trainable_word_embeddings is not None:
             trainable_embeddings = self._get_embeddings(instances, max_length,
@@ -621,7 +619,8 @@ class DependencyNeuralModel(nn.Module):
 
         if self.char_rnn is not None:
             char_embeddings = self._run_char_rnn(instances, max_length)
-            all_embeddings.append(char_embeddings)
+            projection = self.char_projection(self.dropout(char_embeddings))
+            all_embeddings.append(projection)
 
         # each embedding tensor is (batch, num_tokens, embedding_size)
         embeddings = torch.cat(all_embeddings, dim=2)
@@ -719,24 +718,15 @@ class DependencyNeuralModel(nn.Module):
                 chars = instance.get_characters(j)
                 char_indices[i, j, :len(chars)] = torch.tensor(chars)
 
-        outputs, (last_output, cell) = self.char_rnn(char_indices,
-                                                     token_lengths)
-
-        # concatenate the last outputs of both directions
-        last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
-        num_words = batch_size * max_sentence_length
-        shape = [num_words, 2 * self.char_rnn.hidden_size]
-        char_representation = torch.zeros(shape)
-        if self.on_gpu:
-            char_representation = char_representation.cuda()
-        char_representation[sorted_inds] = last_output_bi
+        char_representation = self.char_rnn(char_indices, token_lengths)
 
         if self.training and self.word_dropout_rate:
             # sample a dropout mask and replace the dropped representations
+            num_words = batch_size * max_sentence_length
             dropout_mask = torch.rand(num_words) < self.word_dropout_rate
             char_representation[dropout_mask] = self.char_dropout_replacement
 
-        return char_representation.view([batch_size, max_sentence_length, -1])
+        return char_representation
 
     def forward(self, instances, parts):
         """

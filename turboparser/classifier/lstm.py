@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-
+from torch.nn import functional as F
 
 class LSTM(nn.LSTM):
     """
@@ -54,7 +54,7 @@ class CharLSTM(nn.Module):
         :param char_indices: tensor (batch, max_sequence_length,
             max_token_length)
         :param token_lengths: tensor (batch, max_sequence_length)
-        :return:
+        :return: a tensor with shape (batch, max_sequence_length, 2*hidden_size)
         """
         batch_size, max_sentence_length, max_token_length = char_indices.shape
 
@@ -82,8 +82,30 @@ class CharLSTM(nn.Module):
                                                    batch_first=True)
         outputs, (last_output, cell) = self.lstm(packed)
 
-        # apply attention
         if self.attention:
-            pass
+            # first, pad the packed sequence
+            padded_outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, True)
 
-        return outputs, (last_output, cell)
+            # restore original order
+            _, rev_inds = sorted_inds.sort()
+            outputs = padded_outputs[rev_inds]
+
+            # apply attention on the outputs of all time steps
+            # attention is (batch, max_token_len, 1)
+            raw_attention = self.attention_layer(self.dropout(outputs))
+            attention = F.sigmoid(raw_attention)
+
+            # TODO: use actual attention instead of just sigmoid
+            attended = outputs * attention
+            last_output_bi = attended.sum(1)
+        else:
+            # concatenate the last outputs of both directions
+            last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
+
+        num_words = batch_size * max_sentence_length
+        shape = [num_words, 2 * self.lstm.hidden_size]
+        char_representation = torch.zeros(shape)
+        char_representation = char_representation.to(last_output_bi.device)
+        char_representation[sorted_inds] = last_output_bi
+
+        return char_representation.view([batch_size, max_sentence_length, -1])
