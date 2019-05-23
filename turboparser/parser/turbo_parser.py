@@ -691,6 +691,7 @@ class TurboParser(object):
                     num_bad_evals = 0
                 else:
                     num_bad_evals += 1
+                    self.neural_scorer.decrease_learning_rate()
 
                 if num_bad_evals == self.options.patience:
                     if not using_amsgrad:

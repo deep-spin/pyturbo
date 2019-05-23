@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 class LSTM(nn.LSTM):
     """
@@ -93,7 +92,7 @@ class CharLSTM(nn.Module):
             # apply attention on the outputs of all time steps
             # attention is (batch, max_token_len, 1)
             raw_attention = self.attention_layer(self.dropout(outputs))
-            attention = F.sigmoid(raw_attention)
+            attention = torch.sigmoid(raw_attention)
 
             # TODO: use actual attention instead of just sigmoid
             attended = outputs * attention

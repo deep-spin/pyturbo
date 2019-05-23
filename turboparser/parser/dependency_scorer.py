@@ -107,8 +107,7 @@ class DependencyNeuralScorer(object):
         params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
             params, lr=learning_rate, betas=(beta1, beta2))
-        # self.scheduler = scheduler.ReduceLROnPlateau(
-        #     self.optimizer, 'max', factor=decay, patience=0, verbose=True)
+        self.decay = decay
 
     def set_model(self, model):
         self.model = model
@@ -135,11 +134,13 @@ class DependencyNeuralScorer(object):
         """
         self.model.eval()
 
-    # def lr_scheduler_step(self, accuracy):
-    #     """
-    #     Perform a step of the learning rate scheduler, based on loss.
-    #     """
-    #     self.scheduler.step(accuracy)
+    def decrease_learning_rate(self):
+        """
+        Decrease the optimizer's learning rate by multiplying it to the decay
+        factor.
+        """
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] *= self.decay
 
     def make_gradient_step(self, losses):
         """
