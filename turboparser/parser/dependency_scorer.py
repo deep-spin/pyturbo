@@ -2,7 +2,6 @@ from .constants import Target
 import torch
 from torch.nn import functional as F
 import torch.optim as optim
-import torch.optim.lr_scheduler as scheduler
 import logging
 
 
@@ -141,8 +140,7 @@ class DependencyNeuralScorer(object):
         """
         for param_group in self.optimizer.param_groups:
             param_group['lr'] *= self.decay
-            logging.info('Setting learning rate of group %s to %f' %
-                         (param_group, param_group['lr']))
+            logging.info('Setting learning rate to %f' % param_group['lr'])
 
     def make_gradient_step(self, losses):
         """
