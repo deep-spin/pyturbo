@@ -141,6 +141,8 @@ class DependencyNeuralScorer(object):
         """
         for param_group in self.optimizer.param_groups:
             param_group['lr'] *= self.decay
+            logging.info('Setting learning rate of group %s to %f' %
+                         (param_group, param_group['lr']))
 
     def make_gradient_step(self, losses):
         """

@@ -501,16 +501,12 @@ class TurboParser(object):
 
         if self.options.unlabeled:
             self._should_save = improved_uas
-            acc = self.validation_uas
         else:
             if self.validation_las > self.best_validation_las:
                 self.best_validation_las = self.validation_las
                 self._should_save = True
             else:
                 self._should_save = False
-            acc = self.validation_las
-
-        # self.neural_scorer.lr_scheduler_step(acc)
 
     def enforce_well_formed_graph(self, instance, arcs):
         if self.options.projective:
@@ -560,14 +556,12 @@ class TurboParser(object):
         instances = read_instances(self.options.test_path)
         logging.info('Number of instances: %d' % len(instances))
         data = self.preprocess_instances(instances)
+        data.prepare_batches(self.options.batch_size, sort=False)
         predictions = []
-        batch_index = 0
-        while batch_index < len(instances):
-            next_index = batch_index + self.options.batch_size
-            batch_data = data[batch_index:next_index]
-            batch_predictions = self.run_batch(batch_data)
+
+        for batch in data.batches:
+            batch_predictions = self.run_batch(batch)
             predictions.extend(batch_predictions)
-            batch_index = next_index
 
         self.write_predictions(instances, data.parts, predictions)
         toc = time.time()
@@ -666,6 +660,7 @@ class TurboParser(object):
         train_data = self.preprocess_instances(train_instances)
         valid_data = self.preprocess_instances(valid_instances)
         train_data.prepare_batches(self.options.batch_size, sort=True)
+        valid_data.prepare_batches(self.options.batch_size, sort=True)
         logging.info('Training data spread across %d batches\n'
                      % len(train_data.batches))
 
@@ -717,15 +712,27 @@ class TurboParser(object):
         """
         valid_start = time.time()
         self.neural_scorer.eval_mode()
-        valid_pred, valid_losses = self._run_batches(valid_data, 32,
-                                                     return_loss=True)
-        self.compute_validation_metrics(valid_data, valid_pred)
+
+        predictions = []
+        losses = defaultdict(float)
+        for batch in valid_data.batches:
+            result = self.run_batch(batch, return_loss=True)
+            batch_predictions = result[0]
+            batch_losses = result[1]
+            batch_size = len(batch)
+            predictions.extend(batch_predictions)
+
+            for target in batch_losses:
+                # store non-normalized losses
+                losses[target] += batch_size * batch_losses[target].item()
+
+        self.compute_validation_metrics(valid_data, predictions)
 
         valid_end = time.time()
         time_validation = valid_end - valid_start
 
         logging.info('Time to run on validation: %.2f' % time_validation)
-        msgs = ['Validation losses:'] + make_loss_msgs(valid_losses,
+        msgs = ['Validation losses:'] + make_loss_msgs(losses,
                                                        len(valid_data))
         logging.info('\t'.join(msgs))
 
@@ -766,46 +773,6 @@ class TurboParser(object):
         #     acc = self.accumulated_hits[target] / self.total_tokens
         #     msgs.append('%s: %.6f' % (target_name, acc))
         # logging.info('\t'.join(msgs))
-
-    def _run_batches(self, instance_data, batch_size, return_loss=False):
-        """
-        Run the model for the given instances, one batch at a time. This is
-        useful when running on validation or test data.
-
-        :param instance_data: InstanceData
-        :param batch_size: the batch size at inference time; it doesn't need
-            to be the same as the one in self.options.batch_size (as a rule of
-            thumb, it can be the largest that fits in memory)
-        :param return_loss: if True, include the losses in the return. This
-            can only be True for data which have known gold output.
-        :return: a list of predictions. If return_loss is True, a tuple with
-            the list of predictions and the dictionary of losses.
-        """
-        batch_index = 0
-        predictions = []
-        losses = defaultdict(float)
-
-        while batch_index < len(instance_data):
-            next_index = batch_index + batch_size
-            batch_data = instance_data[batch_index:next_index]
-            result = self.run_batch(batch_data, return_loss)
-            if return_loss:
-                batch_predictions = result[0]
-                batch_losses = result[1]
-                batch_size = len(batch_data)
-                for target in batch_losses:
-                    # store non-normalized losses
-                    losses[target] += batch_size * batch_losses[target].item()
-            else:
-                batch_predictions = result
-
-            predictions.extend(batch_predictions)
-            batch_index = next_index
-
-        if return_loss:
-            return predictions, losses
-
-        return predictions
 
     def run_batch(self, instance_data, return_loss=False):
         """

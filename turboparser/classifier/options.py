@@ -56,8 +56,8 @@ class OptionParser(object):
         parser.add_argument('--regularization_constant', type=float,
                             default=1e12,
                             help='Regularization parameter C.')
-        parser.add_argument('--batch_size', type=int, default=16,
-                            help='Batch size for neural models')
+        parser.add_argument('--batch_size', type=int, default=3000,
+                            help='Number of words per batch')
         parser.add_argument('-v', '--verbose', action='store_true',
                             help='Verbose mode with some extra information '
                                  'about the models')
