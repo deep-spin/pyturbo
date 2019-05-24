@@ -708,7 +708,7 @@ class DependencyNeuralModel(nn.Module):
         token_lengths = torch.zeros(shape, dtype=torch.long)
 
         shape = [batch_size, max_sentence_length, max_token_length]
-        char_indices = torch.full(shape, 0, dtype=torch.long)
+        char_indices = torch.zeros(shape, dtype=torch.long)
 
         for i, instance in enumerate(instances):
             token_lengths[i, :len(instance)] = torch.tensor(token_lengths_[i])

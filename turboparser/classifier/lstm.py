@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+
 class LSTM(nn.LSTM):
     """
     A wrapper of the torch LSTM with a few built-in functionalities.
@@ -85,17 +86,13 @@ class CharLSTM(nn.Module):
             # first, pad the packed sequence
             padded_outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, True)
 
-            # restore original order
-            _, rev_inds = sorted_inds.sort()
-            outputs = padded_outputs[rev_inds]
-
             # apply attention on the outputs of all time steps
             # attention is (batch, max_token_len, 1)
-            raw_attention = self.attention_layer(self.dropout(outputs))
+            raw_attention = self.attention_layer(self.dropout(padded_outputs))
             attention = torch.sigmoid(raw_attention)
 
             # TODO: use actual attention instead of just sigmoid
-            attended = outputs * attention
+            attended = padded_outputs * attention
             last_output_bi = attended.sum(1)
         else:
             # concatenate the last outputs of both directions
