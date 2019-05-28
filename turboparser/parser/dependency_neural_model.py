@@ -79,6 +79,7 @@ class DependencyNeuralModel(nn.Module):
         self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
         self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
         self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
+        self.unknown_lemma = token_dictionary.get_lemma_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
         self.predict_upos = predict_upos
         self.predict_xpos = predict_xpos
@@ -115,7 +116,11 @@ class DependencyNeuralModel(nn.Module):
             num_words = token_dictionary.get_num_forms()
             self.trainable_word_embeddings = nn.Embedding(
                 num_words, trainable_word_embedding_size)
-            rnn_input_size += trainable_word_embedding_size
+
+            num_lemmas = token_dictionary.get_num_lemmas()
+            self.lemma_embeddings = nn.Embedding(
+                num_lemmas, trainable_word_embedding_size)
+            rnn_input_size += 2 * trainable_word_embedding_size
         else:
             self.trainable_word_embeddings = None
 
@@ -607,6 +612,11 @@ class DependencyNeuralModel(nn.Module):
                                                         'trainableword')
             all_embeddings.append(trainable_embeddings)
 
+        if self.lemma_embeddings is not None:
+            lemma_embeddings = self._get_embeddings(instances, max_length,
+                                                    'lemma')
+            all_embeddings.append(lemma_embeddings)
+
         if self.upos_embeddings is not None:
             upos_embeddings = self._get_embeddings(instances,
                                                    max_length, 'upos')
@@ -628,13 +638,13 @@ class DependencyNeuralModel(nn.Module):
 
         return embeddings
 
-    def _get_embeddings(self, instances, max_length, word_or_tag):
+    def _get_embeddings(self, instances, max_length, type_):
         """
         Get the word or tag embeddings for all tokens in the instances.
 
         This function takes care of padding.
 
-        :param word_or_tag: 'fixedword', 'trainableword', 'upos' or 'xpos'
+        :param type_: 'fixedword', 'trainableword', 'upos' or 'xpos'
         :param max_length: length of the longest instance
         :return: a tensor with shape (batch, sequence, embedding size)
         """
@@ -642,37 +652,43 @@ class DependencyNeuralModel(nn.Module):
         index_matrix = torch.full((len(instances), max_length), 0,
                                   dtype=torch.long)
         for i, instance in enumerate(instances):
-            if word_or_tag == 'fixedword':
+            if type_ == 'fixedword':
                 indices = instance.get_all_embedding_ids()
-            elif word_or_tag == 'trainableword':
+            elif type_ == 'trainableword':
                 indices = instance.get_all_forms()
-            elif word_or_tag == 'upos':
+            elif type_ == 'lemma':
+                indices = instance.get_all_lemmas()
+            elif type_ == 'upos':
                 indices = instance.get_all_upos()
-            elif word_or_tag == 'xpos':
+            elif type_ == 'xpos':
                 indices = instance.get_all_xpos()
             else:
-                raise ValueError('Invalid embedding type: %s' % word_or_tag)
+                raise ValueError('Invalid embedding type: %s' % type_)
 
             index_matrix[i, :len(instance)] = torch.tensor(indices)
 
-        if word_or_tag == 'fixedword':
+        if type_ == 'fixedword':
             embedding_matrix = self.fixed_word_embeddings
             dropout_rate = self.word_dropout_rate
             unknown_symbol = self.unknown_fixed_word
-        elif word_or_tag == 'trainableword':
+        elif type_ == 'trainableword':
             embedding_matrix = self.trainable_word_embeddings
             dropout_rate = self.word_dropout_rate
             unknown_symbol = self.unknown_trainable_word
+        elif type_ == 'lemma':
+            embedding_matrix = self.lemma_embeddings
+            dropout_rate = self.word_dropout_rate
+            unknown_symbol = self.unknown_lemma
         else:
             dropout_rate = self.tag_dropout_rate
-            if word_or_tag == 'upos':
+            if type_ == 'upos':
                 embedding_matrix = self.upos_embeddings
                 unknown_symbol = self.unknown_upos
             else:
                 embedding_matrix = self.xpos_embeddings
                 unknown_symbol = self.unknown_xpos
 
-        if self.training and dropout_rate and word_or_tag != 'fixedword':
+        if self.training and dropout_rate and type_ != 'fixedword':
             dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
             inds = dropout_draw < dropout_rate
             index_matrix[inds] = unknown_symbol
@@ -681,7 +697,7 @@ class DependencyNeuralModel(nn.Module):
             index_matrix = index_matrix.cuda()
 
         embeddings = embedding_matrix(index_matrix)
-        if self.training and dropout_rate and word_or_tag == 'fixedword':
+        if self.training and dropout_rate and type_ == 'fixedword':
             # since the embedding matrix is fixed, we use a separate
             # trainable dropout tensor
             dropout_draw = torch.rand_like(embeddings[:, :, 0])

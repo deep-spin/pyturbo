@@ -88,3 +88,6 @@ class DependencyInstance():
 
     def get_all_forms(self):
         return self.forms
+
+    def get_all_lemmas(self):
+        return self.lemmas

@@ -10,13 +10,13 @@ class DependencyOptionParser(OptionParser):
         parser = self.parser
         
         # Token options.
-        parser.add_argument('--char_cutoff', type=int, default=5,
+        parser.add_argument('--char_cutoff', type=int, default=2,
                             help="""Ignore characters whose frequency is less
                             than this, when using char level embeddings.""")
-        parser.add_argument('--form_cutoff', type=int, default=2,
+        parser.add_argument('--form_cutoff', type=int, default=7,
                             help="""Ignore word forms whose frequency is less
                             than this.""")
-        parser.add_argument('--lemma_cutoff', type=int, default=2,
+        parser.add_argument('--lemma_cutoff', type=int, default=7,
                             help="""Ignore word lemmas whose frequency is less
                             than this.""")
         parser.add_argument('--tag_cutoff', type=int, default=2,
