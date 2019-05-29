@@ -58,14 +58,14 @@ class DependencyInstance():
     def get_all_morph_singletons(self):
         return self.morph_singletons
 
-    def get_num_morph_tags(self, i):
-        return len(self.morph_tags[i])
+    def get_all_morph_tags(self):
+        return self.morph_tags
 
-    def get_morph_tag(self, i, j):
+    def get_morph_tags(self, i):
         """
-        Return the j-th morphological attribute of the i-th word
+        Return the morphological feature dictionary for token i
         """
-        return self.morph_tags[i][j]
+        return self.morph_tags[i]
 
     def get_morph_singleton(self, i):
         """

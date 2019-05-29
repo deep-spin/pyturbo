@@ -12,7 +12,7 @@ from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
-from .constants import SPECIAL_SYMBOLS
+from .constants import ROOT, UNKNOWN
 
 import sys
 from collections import defaultdict
@@ -116,7 +116,7 @@ class TurboParser(object):
         """
         if self.options.embeddings is not None:
             words, embeddings = utils.read_embeddings(self.options.embeddings,
-                                                      SPECIAL_SYMBOLS)
+                                                      [ROOT, UNKNOWN])
         else:
             words = None
             embeddings = None

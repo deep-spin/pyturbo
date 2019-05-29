@@ -1,5 +1,6 @@
 '''This implements a dictionary of labels.'''
 
+
 class Alphabet(dict):
     '''This class implements a dictionary of labels. Labels as mapped to
     integers, and it is efficient to retrieve the label name from its
@@ -61,3 +62,23 @@ class Alphabet(dict):
             name = line.rstrip('\n')
             self.add(name)
         f.close()
+
+
+class MultiAlphabet(object):
+    """
+    Class to store a multitype mapping, such as UFeats.
+
+    It may contain several types of keys, such as tense, number, case, etc. Each
+    key has its own set of possible values, such as past/present/future,
+    plural/sing, etc.
+    """
+    def __init__(self):
+        self.alphabets = []
+
+    def allow_growth(self):
+        for alphabet in self.alphabets:
+            alphabet.allow_growth()
+
+    def stop_growth(self):
+        for alphabet in self.alphabets:
+            alphabet.stop_growth()

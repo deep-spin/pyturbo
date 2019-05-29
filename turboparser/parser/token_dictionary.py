@@ -175,6 +175,7 @@ class TokenDictionary(Dictionary):
             if alphabet is not self.deprel_alphabet:
                 alphabet.insert(ROOT)
 
+
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
         reader = ConllReader()
@@ -208,9 +209,10 @@ class TokenDictionary(Dictionary):
                     # Add morph tags to alphabet.
                     morph_singleton = instance.get_morph_singleton(i)
                     self.morph_singleton_alphabet.insert(morph_singleton)
-                    for j in range(instance.get_num_morph_tags(i)):
-                        morph_tag = instance.get_morph_tag(i, j)
-                        self.morph_tag_alphabet.insert(morph_tag)
+
+                    # Add each key/value UFeats pair
+                    morph_tags = instance.get_morph_tags()
+
 
         # Now adjust the cutoffs if necessary.
         # (only using cutoffs for words and lemmas)
