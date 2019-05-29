@@ -77,7 +77,7 @@ class TokenDictionary(Dictionary):
         return len(self.form_alphabet)
 
     def get_num_lemmas(self):
-        return len(self.form_alphabet)
+        return len(self.lemma_alphabet)
 
     def get_num_upos_tags(self):
         return len(self.upos_alphabet)
