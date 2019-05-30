@@ -1,5 +1,5 @@
 from .dependency_instance import DependencyInstance
-
+from .token_dictionary import TokenDictionary
 import numpy as np
 
 
@@ -9,6 +9,7 @@ class DependencyInstanceNumeric(DependencyInstance):
         """
         :param instance: DependencyInstance
         :param token_dictionary: TokenDictionary
+        :type token_dictionary: TokenDictionary
         :param case_sensitive: bool
         """
         length = len(instance)
@@ -19,8 +20,7 @@ class DependencyInstanceNumeric(DependencyInstance):
         self.lemmas = self.forms.copy()
         self.upos = self.forms.copy()
         self.xpos = self.forms.copy()
-        self.morph_tags = [[-1] * len(morph_tags)
-                           for morph_tags in instance.morph_tags]
+        self.morph_tags = self.characters.copy()
         self.morph_singletons = self.forms.copy()
 
         self.heads = np.full(length, -1, np.int32)
@@ -58,10 +58,7 @@ class DependencyInstanceNumeric(DependencyInstance):
 
             # Morphological tags.
             morph_tags = instance.morph_tags[i]
-            for j in range(len(morph_tags)):
-                morph_tag = morph_tags[j]
-                id_ = token_dictionary.get_morph_tag_id(morph_tag)
-                self.morph_tags[i][j] = id_
+            self.morph_tags[i] = token_dictionary.get_morph_ids(morph_tags)
 
             morph_singleton = instance.morph_singletons[i]
             self.morph_singletons[i] = token_dictionary.\

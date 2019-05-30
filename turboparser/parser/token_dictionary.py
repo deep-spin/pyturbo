@@ -1,7 +1,7 @@
-from ..classifier.alphabet import Alphabet
+from .alphabet import Alphabet, MultiAlphabet
 from ..classifier.dictionary import Dictionary
 from .dependency_reader import ConllReader
-from .constants import ROOT, UNKNOWN
+from .constants import ROOT, UNKNOWN, NONE
 import pickle
 import logging
 from collections import Counter
@@ -15,7 +15,7 @@ class TokenDictionary(Dictionary):
         self.pretrain_alphabet = Alphabet()
         self.form_alphabet = Alphabet()
         self.lemma_alphabet = Alphabet()
-        self.morph_tag_alphabet = Alphabet()
+        self.morph_tag_alphabet = MultiAlphabet()
         self.morph_singleton_alphabet = Alphabet()
         self.upos_alphabet = Alphabet()
         self.xpos_alphabet = Alphabet()
@@ -85,8 +85,12 @@ class TokenDictionary(Dictionary):
     def get_num_xpos_tags(self):
         return len(self.xpos_alphabet)
 
-    def get_num_morph_tags(self):
-        return len(self.morph_tag_alphabet)
+    def get_num_morph_attributes(self):
+        return len(self.morph_tag_alphabet.alphabets)
+
+    def get_num_morph_values(self, i):
+        """Return the number of values for the i-th morph attribute"""
+        return len(self.morph_tag_alphabet.alphabets[i])
 
     def get_num_morph_singletons(self):
         return len(self.morph_singleton_alphabet)
@@ -117,6 +121,9 @@ class TokenDictionary(Dictionary):
         if id_ >= 0:
             return id_
         return self.lemma_alphabet.lookup(UNKNOWN)
+
+    def get_morph_ids(self, morph_dict):
+        return self.morph_tag_alphabet.lookup(morph_dict)
 
     def get_upos_id(self, tag):
         id_ = self.upos_alphabet.lookup(tag)
@@ -168,13 +175,11 @@ class TokenDictionary(Dictionary):
         # embeddings not included here to keep the same ordering
         for alphabet in [self.upos_alphabet,
                          self.xpos_alphabet,
-                         self.morph_tag_alphabet,
                          self.morph_singleton_alphabet,
                          self.deprel_alphabet]:
             alphabet.insert(UNKNOWN)
             if alphabet is not self.deprel_alphabet:
                 alphabet.insert(ROOT)
-
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
@@ -211,8 +216,15 @@ class TokenDictionary(Dictionary):
                     self.morph_singleton_alphabet.insert(morph_singleton)
 
                     # Add each key/value UFeats pair
-                    morph_tags = instance.get_morph_tags()
+                    morph_tags = instance.get_morph_tags(i)
+                    self.morph_tag_alphabet.insert(morph_tags)
 
+        self.morph_tag_alphabet.sort()
+        for sub_alphabet_name in self.morph_tag_alphabet.alphabets:
+            sub_alphabet = self.morph_tag_alphabet.alphabets[sub_alphabet_name]
+            sub_alphabet.insert(UNKNOWN)
+            sub_alphabet.insert(ROOT)
+            sub_alphabet.insert(NONE)
 
         # Now adjust the cutoffs if necessary.
         # (only using cutoffs for words and lemmas)
@@ -257,7 +269,6 @@ class TokenDictionary(Dictionary):
         logging.info('Number of coarse POS tags: %d' % len(self.upos_alphabet))
         logging.info('Number of fine POS tags: %d' %
                      len(self.xpos_alphabet))
-        logging.info('Number of morph tags: %d' % len(self.morph_tag_alphabet))
         logging.info('Number of morph singletons (combination of morph tags '
                      'seen in data): %d' % len(self.morph_singleton_alphabet))
         logging.info('Number of dependency relations: %d' %

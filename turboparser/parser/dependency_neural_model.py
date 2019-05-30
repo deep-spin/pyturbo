@@ -131,7 +131,6 @@ class DependencyNeuralModel(nn.Module):
             if num_upos > 3:
                 self.upos_embeddings = nn.Embedding(num_upos,
                                                     tag_embedding_size)
-                rnn_input_size += tag_embedding_size
             else:
                 self.upos_embeddings = None
 
@@ -143,12 +142,23 @@ class DependencyNeuralModel(nn.Module):
                     upos_tags != xpos_tags:
                 self.xpos_embeddings = nn.Embedding(num_xpos,
                                                     tag_embedding_size)
-                rnn_input_size += tag_embedding_size
             else:
                 self.xpos_embeddings = None
+
+            if self.upos_embeddings is not None or \
+                    self.xpos_embeddings is not None:
+                # both types of POS embeddings are summed
+                rnn_input_size += tag_embedding_size
+
+            self.morph_embeddings = nn.ModuleList()
+            for sub_alphabet in token_dictionary.morph_tag_alphabet.alphabets:
+                embeddings = nn.Embedding(len(sub_alphabet), tag_embedding_size)
+                self.morph_embeddings.append(embeddings)
+            rnn_input_size += tag_embedding_size
         else:
             self.upos_embeddings = None
             self.xpos_embeddings = None
+            self.morph_embeddings = None
 
         if self.distance_embedding_size:
             bins = np.array(list(range(1, 10)) + list(range(10, 31, 5)))
@@ -617,15 +627,17 @@ class DependencyNeuralModel(nn.Module):
                                                     'lemma')
             all_embeddings.append(lemma_embeddings)
 
-        if self.upos_embeddings is not None:
-            upos_embeddings = self._get_embeddings(instances,
-                                                   max_length, 'upos')
-            all_embeddings.append(upos_embeddings)
+        upos = 0 if self.upos_embeddings is None \
+            else self._get_embeddings(instances, max_length, 'upos')
+        xpos = 0 if self.xpos_embeddings is None \
+            else self._get_embeddings(instances, max_length, 'xpos')
+        pos_embeddings = upos + xpos
 
-        if self.xpos_embeddings is not None:
-            xpos_embeddings = self._get_embeddings(instances,
-                                                   max_length, 'xpos')
-            all_embeddings.append(xpos_embeddings)
+        if pos_embeddings is not 0:
+            all_embeddings.append(pos_embeddings)
+
+        if self.morph_embeddings is not None:
+            pass
 
         if self.char_rnn is not None:
             char_embeddings = self._run_char_rnn(instances, max_length)
