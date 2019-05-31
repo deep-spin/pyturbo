@@ -56,7 +56,8 @@ class AuxiliaryConllReader(AuxiliaryReader):
         lemmas = [root_string] * length
         upos = [root_string] * length
         xpos = [root_string] * length
-        morph_tags = [{}] * length
+        # list comprehension creates different dicts
+        morph_tags = [{} for _ in range(length)]
         morph_singletons = [root_string] * length
         heads = [-1] * length
         relations = [root_string] * length

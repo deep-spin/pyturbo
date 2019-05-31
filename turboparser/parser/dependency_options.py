@@ -120,8 +120,6 @@ class DependencyOptionParser(OptionParser):
                             help='Dropout rate')
         parser.add_argument('--word_dropout', type=float, default=0,
                             help='Word dropout rate (replace by unknown)')
-        parser.add_argument('--tag_dropout', type=float, default=0,
-                            help='Tag dropout rate (replace by unknown)')
 
     def parse_args(self):
         options = super(DependencyOptionParser, self).parse_args()

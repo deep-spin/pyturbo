@@ -42,7 +42,6 @@ class DependencyNeuralModel(nn.Module):
                  mlp_layers,
                  dropout,
                  word_dropout,
-                 tag_dropout,
                  predict_upos,
                  predict_xpos,
                  predict_morph,
@@ -56,8 +55,6 @@ class DependencyNeuralModel(nn.Module):
         :param trainable_word_embedding_size: size for trainable word embeddings
         :param word_dropout: probability of replacing a word with the unknown
             token
-        :param tag_dropout: probability of replacing a POS tag with the unknown
-            tag
         """
         super(DependencyNeuralModel, self).__init__()
         self.char_embedding_size = char_embedding_size
@@ -74,18 +71,23 @@ class DependencyNeuralModel(nn.Module):
         self.mlp_layers = mlp_layers
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
-        self.tag_dropout_rate = tag_dropout
-        self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
-        self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
-        self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
-        self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
-        self.unknown_lemma = token_dictionary.get_lemma_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
         self.predict_upos = predict_upos
         self.predict_xpos = predict_xpos
         self.predict_morph = predict_morph
         self.predict_tags = predict_upos or predict_xpos or predict_morph
         self.model_type = model_type
+
+        self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
+        self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
+        self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
+        self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
+        self.unknown_lemma = token_dictionary.get_lemma_id(UNKNOWN)
+        morph_alphabets = token_dictionary.morph_tag_alphabet.alphabets
+        self.unknown_morphs = [0] * len(morph_alphabets)
+        for i, name in enumerate(morph_alphabets):
+            alphabet = morph_alphabets[name]
+            self.unknown_morphs[i] = alphabet.lookup(UNKNOWN)
 
         fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
                                              dtype=torch.float32)
@@ -151,8 +153,9 @@ class DependencyNeuralModel(nn.Module):
                 rnn_input_size += tag_embedding_size
 
             self.morph_embeddings = nn.ModuleList()
-            for sub_alphabet in token_dictionary.morph_tag_alphabet.alphabets:
-                embeddings = nn.Embedding(len(sub_alphabet), tag_embedding_size)
+            for attribute in morph_alphabets:
+                alphabet = morph_alphabets[attribute]
+                embeddings = nn.Embedding(len(alphabet), tag_embedding_size)
                 self.morph_embeddings.append(embeddings)
             rnn_input_size += tag_embedding_size
         else:
@@ -362,7 +365,6 @@ class DependencyNeuralModel(nn.Module):
         pickle.dump(self.mlp_layers, file)
         pickle.dump(self.dropout_rate, file)
         pickle.dump(self.word_dropout_rate, file)
-        pickle.dump(self.tag_dropout_rate, file)
         pickle.dump(self.predict_upos, file)
         pickle.dump(self.predict_xpos, file)
         pickle.dump(self.predict_morph, file)
@@ -388,7 +390,6 @@ class DependencyNeuralModel(nn.Module):
         mlp_layers = pickle.load(file)
         dropout = pickle.load(file)
         word_dropout = pickle.load(file)
-        tag_dropout = pickle.load(file)
         predict_upos = pickle.load(file)
         predict_xpos = pickle.load(file)
         predict_morph = pickle.load(file)
@@ -412,7 +413,7 @@ class DependencyNeuralModel(nn.Module):
             rnn_layers=rnn_layers,
             mlp_layers=mlp_layers,
             dropout=dropout,
-            word_dropout=word_dropout, tag_dropout=tag_dropout,
+            word_dropout=word_dropout,
             predict_upos=predict_upos, predict_xpos=predict_xpos,
             predict_morph=predict_morph)
 
@@ -637,7 +638,9 @@ class DependencyNeuralModel(nn.Module):
             all_embeddings.append(pos_embeddings)
 
         if self.morph_embeddings is not None:
-            pass
+            morph_embeddings = self._get_embeddings(instances, max_length,
+                                                    'morph')
+            all_embeddings.append(morph_embeddings)
 
         if self.char_rnn is not None:
             char_embeddings = self._run_char_rnn(instances, max_length)
@@ -660,9 +663,37 @@ class DependencyNeuralModel(nn.Module):
         :param max_length: length of the longest instance
         :return: a tensor with shape (batch, sequence, embedding size)
         """
-        # padding is not supposed to be used in the end results
-        index_matrix = torch.full((len(instances), max_length), 0,
-                                  dtype=torch.long)
+        if type_ == 'morph':
+            # morph features have multiple embeddings (one for each feature)
+            num_features = len(self.morph_embeddings)
+            shape = (len(instances), max_length, num_features)
+            index_tensor = torch.zeros(
+                shape, dtype=torch.long,
+                device=self.morph_embeddings[0].weight.device)
+
+            for i, instance in enumerate(instances):
+                indices = instance.get_all_morph_tags()
+                index_tensor[i, :len(instance)] = torch.tensor(indices)
+
+            embedding_sum = 0
+            for i, matrix in enumerate(self.morph_embeddings):
+                indices = index_tensor[:, :, i]
+                print('indices', indices)
+                if self.training and self.word_dropout_rate:
+                    #TODO: avoid some repeated code
+                    dropout_draw = torch.rand_like(indices,
+                                                   dtype=torch.float)
+                    drop_indices = dropout_draw < self.word_dropout_rate
+                    indices[drop_indices] = self.unknown_morphs[i]
+
+                # embeddings is (batch, max_length, num_units)
+                embeddings = matrix(indices)
+                embedding_sum += embeddings
+
+            return embedding_sum
+
+        shape = (len(instances), max_length)
+        index_matrix = torch.zeros(shape, dtype=torch.long)
         for i, instance in enumerate(instances):
             if type_ == 'fixedword':
                 indices = instance.get_all_embedding_ids()
@@ -681,18 +712,14 @@ class DependencyNeuralModel(nn.Module):
 
         if type_ == 'fixedword':
             embedding_matrix = self.fixed_word_embeddings
-            dropout_rate = self.word_dropout_rate
             unknown_symbol = self.unknown_fixed_word
         elif type_ == 'trainableword':
             embedding_matrix = self.trainable_word_embeddings
-            dropout_rate = self.word_dropout_rate
             unknown_symbol = self.unknown_trainable_word
         elif type_ == 'lemma':
             embedding_matrix = self.lemma_embeddings
-            dropout_rate = self.word_dropout_rate
             unknown_symbol = self.unknown_lemma
         else:
-            dropout_rate = self.tag_dropout_rate
             if type_ == 'upos':
                 embedding_matrix = self.upos_embeddings
                 unknown_symbol = self.unknown_upos
@@ -700,20 +727,21 @@ class DependencyNeuralModel(nn.Module):
                 embedding_matrix = self.xpos_embeddings
                 unknown_symbol = self.unknown_xpos
 
-        if self.training and dropout_rate and type_ != 'fixedword':
+        if self.training and self.word_dropout_rate and type_ != 'fixedword':
             dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
-            inds = dropout_draw < dropout_rate
+            inds = dropout_draw < self.word_dropout_rate
             index_matrix[inds] = unknown_symbol
 
         if self.on_gpu:
             index_matrix = index_matrix.cuda()
 
         embeddings = embedding_matrix(index_matrix)
-        if self.training and dropout_rate and type_ == 'fixedword':
+
+        if self.training and self.word_dropout_rate and type_ == 'fixedword':
             # since the embedding matrix is fixed, we use a separate
             # trainable dropout tensor
             dropout_draw = torch.rand_like(embeddings[:, :, 0])
-            inds = dropout_draw < dropout_rate
+            inds = dropout_draw < self.word_dropout_rate
             embeddings[inds] = self.fixed_dropout_replacement
 
         return embeddings

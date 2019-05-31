@@ -63,7 +63,7 @@ class DependencyInstance():
 
     def get_morph_tags(self, i):
         """
-        Return the morphological feature dictionary for token i
+        Return the morphological features for token i
         """
         return self.morph_tags[i]
 

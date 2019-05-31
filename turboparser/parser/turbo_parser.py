@@ -84,7 +84,6 @@ class TurboParser(object):
                 mlp_layers=self.options.mlp_layers,
                 dropout=self.options.dropout,
                 word_dropout=options.word_dropout,
-                tag_dropout=options.tag_dropout,
                 tag_mlp_size=options.tag_mlp_size,
                 predict_upos=options.upos,
                 predict_xpos=options.xpos,
