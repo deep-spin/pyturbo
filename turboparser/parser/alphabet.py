@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 
-from .constants import NONE
+from .constants import NONE, UNKNOWN
 
 
 class Alphabet(dict):
@@ -94,21 +94,24 @@ class MultiAlphabet(object):
 
         self.alphabets = new_alphabets
 
-    def lookup(self, attributes):
+    def lookup(self, feature_dict):
         """
-        Lookup attribute dictionary.
+        Lookup feature dictionary.
 
         :return: a list of numeric ids
         """
         ids = [None] * len(self.alphabets)
-        for i, key in enumerate(self.alphabets):
-            alphabet = self.alphabets[key]
-            if key in attributes:
-                value = attributes[key]
+        for i, feature_name in enumerate(self.alphabets):
+            alphabet = self.alphabets[feature_name]
+            if feature_name in feature_dict:
+                label = feature_dict[feature_name]
             else:
                 # no available value for this attribute; e.g. tense in nouns
-                value = NONE
-            ids[i] = alphabet.lookup(value)
+                label = NONE
+            id_ = alphabet.lookup(label)
+            if id_ < 0:
+                id_ = alphabet.lookup(UNKNOWN)
+            ids[i] = id_
 
         return ids
 

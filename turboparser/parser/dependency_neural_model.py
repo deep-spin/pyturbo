@@ -678,9 +678,9 @@ class DependencyNeuralModel(nn.Module):
             embedding_sum = 0
             for i, matrix in enumerate(self.morph_embeddings):
                 indices = index_tensor[:, :, i]
-                print('indices', indices)
                 if self.training and self.word_dropout_rate:
                     #TODO: avoid some repeated code
+                    indices = indices.clone()
                     dropout_draw = torch.rand_like(indices,
                                                    dtype=torch.float)
                     drop_indices = dropout_draw < self.word_dropout_rate
@@ -688,7 +688,7 @@ class DependencyNeuralModel(nn.Module):
 
                 # embeddings is (batch, max_length, num_units)
                 embeddings = matrix(indices)
-                embedding_sum += embeddings
+                embedding_sum = embedding_sum + embeddings
 
             return embedding_sum
 
