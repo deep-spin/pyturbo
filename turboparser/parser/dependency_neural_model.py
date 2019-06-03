@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target
 from ..classifier.lstm import LSTM, CharLSTM
+from ..classifier.biaffine import DeepBiaffineScorer
 import numpy as np
 import pickle
 
@@ -204,17 +206,26 @@ class DependencyNeuralModel(nn.Module):
                                                     bias=True)
 
         # first order layers
-        self.head_mlp = self._create_mlp()
-        self.modifier_mlp = self._create_mlp()
-        self.arc_scorer = self._create_scorer()
-
-        self.label_head_mlp = self._create_mlp(
-            hidden_size=self.label_mlp_size)
-        self.label_modifier_mlp = self._create_mlp(
-            hidden_size=self.label_mlp_size)
         num_labels = token_dictionary.get_num_deprels()
-        self.label_scorer = self._create_scorer(self.label_mlp_size,
-                                                num_labels)
+        self.arc_scorer = DeepBiaffineScorer(
+            2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+        self.label_scorer = DeepBiaffineScorer(
+            2 * rnn_size, 2 * rnn_size, label_mlp_size, num_labels,
+            dropout=dropout)
+        self.linearization_scorer = DeepBiaffineScorer(
+            2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+        self.distance_scorer = DeepBiaffineScorer(
+            2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+        # self.head_mlp = self._create_mlp()
+        # self.modifier_mlp = self._create_mlp()
+        # self.arc_scorer = self._create_scorer()
+
+        # self.label_head_mlp = self._create_mlp(
+        #     hidden_size=self.label_mlp_size)
+        # self.label_modifier_mlp = self._create_mlp(
+        #     hidden_size=self.label_mlp_size)
+        # self.label_scorer = self._create_scorer(self.label_mlp_size,
+        #                                         num_labels)
 
         # Higher order layers
         if model_type.grandparents:
@@ -431,7 +442,7 @@ class DependencyNeuralModel(nn.Module):
 
         return model
 
-    def _compute_arc_scores(self, states, parts):
+    def _compute_arc_scores(self, states, parts, lengths):
         """
         Compute the first order scores and store them in the appropriate
         position in the `scores` tensor.
@@ -440,44 +451,56 @@ class DependencyNeuralModel(nn.Module):
         :param parts: a DependencyParts object
         :type parts: DependencyParts
         """
-        head_tensors = self.head_mlp(states)
-        modifier_tensors = self.modifier_mlp(states)
-        head_indices, modifier_indices = parts.get_arc_indices()
+        batch_size, max_sent_size, _ = states.size()
 
-        if self.distance_embedding_size:
-            distance_diff = head_indices - modifier_indices
-            distance_indices = np.digitize(distance_diff, self.distance_bins)
-            distance_indices = torch.tensor(distance_indices, dtype=torch.long)
-            if self.on_gpu:
-                distance_indices = distance_indices.cuda()
+        # apply dropout separately to get different masks
+        head_scores = self.arc_scorer(self.dropout(states),
+                                      self.dropout(states)).squeeze(3)
+        label_scores = self.label_scorer(self.dropout(states),
+                                         self.dropout(states))
 
-            distances = self.distance_embeddings(distance_indices)
-            distance_projections = self.distance_projector(distances)
-            distance_projections = distance_projections.view(
-                -1, self.arc_mlp_size)
-        else:
-            distance_projections = 0
+        # linearization (scoring heads after/before modifier)
+        arange = torch.arange(max_sent_size, device=states.device)
+        position1 = arange.view(1, 1, -1).expand(batch_size, -1, -1)
+        position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
+        head_offset = position1 - position2
 
-        # now index all of them to process at once
-        heads = head_tensors[head_indices]
-        modifiers = modifier_tensors[modifier_indices]
+        lin_scores = self.linearization_scorer(self.dropout(states),
+                                               self.dropout(states)).squeeze(3)
+        head_scores += F.logsigmoid(
+            lin_scores * torch.sign(head_offset).float()).detach()
 
-        arc_states = self.tanh(heads + modifiers + distance_projections)
-        arc_scores = self.arc_scorer(arc_states)
-        self.scores[Target.HEADS].append(arc_scores.view(-1))
+        # score distances between head and modifier
+        dist_scores = self.distance_scorer(self.dropout(states),
+                                           self.dropout(states)).squeeze(3)
+        dist_pred = 1 + F.softplus(dist_scores)
+        dist_target = torch.abs(head_offset)
+        dist_kld = -torch.log((dist_target.float() - dist_pred) ** 2 / 2 + 1)
+        head_scores += dist_kld.detach()
 
-        if not parts.labeled:
-            return
+        # set arc scores from each word to itself as -inf
+        diag = torch.eye(max_sent_size, dtype=torch.uint8, device=states.device)
+        diag = diag.unsqueeze(0)
+        head_scores.masked_fill_(diag, -np.inf)
 
-        head_tensors = self.label_head_mlp(states)
-        modifier_tensors = self.label_modifier_mlp(states)
+        # set padding head scores to -inf
+        # during training, label loss is computed with respect to the gold
+        # arcs, so there's no need to set -inf scores to invalid positions
+        # in label scores.
+        padding_mask = create_padding_mask(lengths)
+        head_scores.masked_fill_(padding_mask.unsqueeze(1), -np.inf)
 
-        # we can reuse indices -- every LabeledArc must also appear as Arc
-        heads = head_tensors[head_indices]
-        modifiers = modifier_tensors[modifier_indices]
-        label_states = self.tanh(heads + modifiers)
-        label_scores = self.label_scorer(label_states)
-        self.scores[Target.RELATIONS].append(label_scores.view(-1))
+        # exclude attachment for the root symbol
+        head_scores = head_scores[:, 1:, :]
+
+        # stack the head predictions for all words from all sentences
+        head_scores2d = head_scores.contiguous().view(-1, head_scores.size(2))
+
+        # exclude attachment for the root symbol
+        label_scores = label_scores[:, 1:]
+
+        self.scores[Target.HEADS] = head_scores2d
+        self.scores[Target.RELATIONS] = label_scores
 
     def _compute_grandparent_scores(self, states, parts):
         """
@@ -848,13 +871,14 @@ class DependencyNeuralModel(nn.Module):
                 hidden = self.morph_mlp(tagger_batch_states[:, 1:])
                 self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
+        self._compute_arc_scores(parser_batch_states, parts, lengths)
+
         # now go through each batch item
         for i in range(batch_size):
             length = lengths[i].item()
             states = parser_batch_states[i, :length]
             sent_parts = parts[i]
 
-            self._compute_arc_scores(states, sent_parts)
             if self.model_type.consecutive_siblings:
                 self._compute_consecutive_sibling_scores(states, sent_parts)
 
