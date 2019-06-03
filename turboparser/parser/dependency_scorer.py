@@ -17,21 +17,24 @@ def get_gold_tensors(instance_data):
     j (as a modifier)
 
     :param instance_data: InstanceData object
-    :return: two tensors (batch_size, max_instance_length)
+    :return: two tensors (batch_size, max_num_actual_words)
     """
     batch_size = len(instance_data)
     max_length = max(len(inst) for inst in instance_data.instances)
-    heads = torch.full([batch_size, max_length], -1, dtype=torch.long)
-    relations = torch.full([batch_size, max_length], -1, dtype=torch.long)
+
+    # -1 to skip root
+    heads = torch.full([batch_size, max_length - 1], -1, dtype=torch.long)
+    relations = torch.full([batch_size, max_length - 1], -1, dtype=torch.long)
 
     for i, inst in enumerate(instance_data.instances):
         # skip root
         inst_heads = inst.heads[1:]
         inst_relations = inst.relations[1:]
-        heads[i, :len(inst_heads)] = inst_heads
-        relations[i, :len(inst_relations)] = inst_relations
+        heads[i, :len(inst_heads)] = torch.tensor(inst_heads, dtype=torch.long)
+        relations[i, :len(inst_relations)] = torch.tensor(inst_relations,
+                                                          dtype=torch.long)
 
-    return heads
+    return heads, relations
 
 
 class DependencyNeuralScorer(object):
@@ -69,11 +72,6 @@ class DependencyNeuralScorer(object):
             losses[target] = F.cross_entropy(logits, padded_gold,
                                              ignore_index=-1)
 
-        # dependency parts loss
-        parts_loss = torch.tensor(0.)
-        if torch.cuda.is_available():
-            parts_loss = parts_loss.cuda()
-
         head_scores = self.model.scores[Target.HEADS]
         label_scores = self.model.scores[Target.RELATIONS]
         sign_scores = self.model.scores['sign']
@@ -83,40 +81,45 @@ class DependencyNeuralScorer(object):
         # head loss
         # stack the head predictions for all words from all sentences
         scores2d = head_scores.contiguous().view(-1, head_scores.size(2))
-        loss = F.cross_entropy(scores2d, gold_heads.view(-1))
+        loss = F.cross_entropy(scores2d, gold_heads.view(-1), ignore_index=-1)
 
         # label loss
+        # avoid -1 in gather
+        heads3d = gold_heads.unsqueeze(2)
+        negative_inds = heads3d == -1
+        heads3d = heads3d.masked_fill(negative_inds, 0)
+        heads4d = heads3d.unsqueeze(3)
+
         # make 4d indices to gather what were the predicted deprels for the
         # gold arcs. deprel_scores is (batch, num_words, num_words, num_rel)
-        indices = gold_heads.unsqueeze(2).unsqueeze(3)
-        num_labels = self.model.label_scorer.out_features
-        expanded_indices = indices.expand(-1, -1, -1, num_labels)
+        num_labels = self.model.label_scorer.output_size
+        expanded_indices = heads4d.expand(-1, -1, -1, num_labels)
 
         label_scores = torch.gather(label_scores, 2, expanded_indices)
         label_scores = label_scores.view(-1, num_labels)
         loss += F.cross_entropy(label_scores.contiguous(),
-                                gold_relations.view(-1))
+                                gold_relations.view(-1), ignore_index=-1)
 
         # linearization (left/right attachment) loss
-        arange = torch.arange(gold_heads.size(1), device=head_scores.device)
+        arange = torch.arange(head_scores.size(2), device=head_scores.device)
         position1 = arange.view(1, 1, -1).expand(batch_size, -1, -1)
         position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
         head_offset = position1 - position2
 
-        indices = gold_heads.unsqueeze(2)
         sign_scores = torch.gather(
-            sign_scores[:, 1:], 2, indices).view(-1)
+            sign_scores[:, 1:], 2, heads3d).view(-1)
         sign_scores = torch.cat([-sign_scores.unsqueeze(1) / 2,
                                  sign_scores.unsqueeze(1) / 2], 1)
         sign_target = torch.gather((head_offset[:, 1:] > 0).long(),
-                                   2, indices)
-        loss += F.cross_entropy(sign_scores.contiguous(), sign_target.view(-1))
+                                   2, heads3d)
+        loss += F.cross_entropy(sign_scores.contiguous(), sign_target.view(-1),
+                                ignore_index=-1)
 
         # distance loss
-        distance_kld = torch.gather(distance_kld[:, 1:], 2, indices)
+        distance_kld = torch.gather(distance_kld[:, 1:], 2, heads3d)
         loss -= distance_kld.sum()
 
-        loss[Target.DEPENDENCY_PARTS] = loss
+        losses[Target.DEPENDENCY_PARTS] = loss
         # for i in range(batch_size):
         #     inst_parts = instance_data.parts[i]
         #     gold_parts = inst_parts.gold_parts
@@ -155,14 +158,16 @@ class DependencyNeuralScorer(object):
         model_scores = self.model(instances, parts)
         numpy_scores = {}
         for target in model_scores:
-            # # dependency part scores are stored as lists of tensors; tags
-            # # are singleton tensors
-            # if target in [Target.UPOS, Target.XPOS, Target.MORPH]:
-            numpy_scores[target] = model_scores[target].detach()\
-                .cpu().numpy()
-            # else:
-            #     numpy_scores[target] = [tensor.detach().cpu().numpy()
-            #                             for tensor in model_scores[target]]
+            detached = model_scores[target].detach()
+
+            if target == Target.RELATIONS:
+                value = detached.argmax(3)
+            elif target == Target.HEADS:
+                value = F.log_softmax(detached, 2)
+            else:
+                value = detached.argmax(2)
+
+            numpy_scores[target] = value.cpu().numpy()
 
         # now convert a dictionary of arrays into a list of dictionaries
         score_list = []

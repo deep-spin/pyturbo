@@ -493,7 +493,7 @@ class DependencyNeuralModel(nn.Module):
         head_scores.masked_fill_(padding_mask.unsqueeze(1), -np.inf)
 
         # exclude attachment for the root symbol
-        head_scores = head_scores[:, 1:, :]
+        head_scores = head_scores[:, 1:]
         label_scores = label_scores[:, 1:]
 
         self.scores[Target.HEADS] = head_scores

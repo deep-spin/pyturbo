@@ -71,6 +71,7 @@ class DeepBiaffineScorer(nn.Module):
     def __init__(self, input1_size, input2_size, hidden_size, output_size,
                  hidden_func=F.relu, dropout=0):
         super().__init__()
+        self.output_size = output_size
         self.w1 = nn.Linear(input1_size, hidden_size)
         self.w2 = nn.Linear(input2_size, hidden_size)
         self.hidden_func = hidden_func
