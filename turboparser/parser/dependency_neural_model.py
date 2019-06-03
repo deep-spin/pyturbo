@@ -465,16 +465,18 @@ class DependencyNeuralModel(nn.Module):
         position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
         head_offset = position1 - position2
 
-        lin_scores = self.linearization_scorer(self.dropout(states),
-                                               self.dropout(states)).squeeze(3)
+        sign_scores = self.linearization_scorer(self.dropout(states),
+                                                self.dropout(states)).squeeze(3)
         head_scores += F.logsigmoid(
-            lin_scores * torch.sign(head_offset).float()).detach()
+            sign_scores * torch.sign(head_offset).float()).detach()
 
         # score distances between head and modifier
         dist_scores = self.distance_scorer(self.dropout(states),
                                            self.dropout(states)).squeeze(3)
         dist_pred = 1 + F.softplus(dist_scores)
         dist_target = torch.abs(head_offset)
+
+        # KL divergence between predicted distances and actual ones
         dist_kld = -torch.log((dist_target.float() - dist_pred) ** 2 / 2 + 1)
         head_scores += dist_kld.detach()
 
@@ -492,15 +494,12 @@ class DependencyNeuralModel(nn.Module):
 
         # exclude attachment for the root symbol
         head_scores = head_scores[:, 1:, :]
-
-        # stack the head predictions for all words from all sentences
-        head_scores2d = head_scores.contiguous().view(-1, head_scores.size(2))
-
-        # exclude attachment for the root symbol
         label_scores = label_scores[:, 1:]
 
-        self.scores[Target.HEADS] = head_scores2d
+        self.scores[Target.HEADS] = head_scores
         self.scores[Target.RELATIONS] = label_scores
+        self.scores['sign'] = sign_scores
+        self.scores['dist_kld'] = dist_kld
 
     def _compute_grandparent_scores(self, states, parts):
         """
