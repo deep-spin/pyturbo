@@ -77,6 +77,8 @@ class DependencyNeuralScorer(object):
         sign_scores = self.model.scores['sign']
         distance_kld = self.model.scores['dist_kld']
         gold_heads, gold_relations = get_gold_tensors(instance_data)
+        gold_heads = gold_heads.to(head_scores.device)
+        gold_relations = gold_relations.to(head_scores.device)
 
         # head loss
         # stack the head predictions for all words from all sentences
