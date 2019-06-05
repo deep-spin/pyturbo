@@ -477,9 +477,10 @@ class TurboParser(object):
             # dep_prediction = inst_pred[Target.DEPENDENCY_PARTS]
             gold_heads = gold_output[Target.HEADS]
 
+            head_scores = inst_pred[Target.HEADS][:real_length, :len(instance)]
+            deprel_scores = inst_pred[Target.RELATIONS][:real_length, :len(instance)]
             pred_heads, pred_labels = self.decode_predictions(
-                None, parts, inst_pred[Target.HEADS],
-                inst_pred[Target.RELATIONS])
+                None, parts, head_scores, deprel_scores)
 
             # scale UAS by sentence length; it is normalized later
             head_hits = gold_heads == pred_heads
