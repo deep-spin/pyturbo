@@ -281,7 +281,8 @@ class DependencyNeuralModel(nn.Module):
     def _packed_dropout(self, states):
         """Apply dropout to packed states"""
         # shared_states is a packed tuple; (data, lengths)
-        states_data, states_lengths = states
+        states_data = states.data
+        states_lengths = states.batch_sizes
         states_data = self.dropout(states_data)
         states = nn.utils.rnn.PackedSequence(states_data, states_lengths)
         return states

@@ -507,7 +507,7 @@ class TurboParser(object):
                                        target] / total_tokens
 
         # always update UAS; use it as a criterion for saving if no LAS
-        if self.validation_uas > self.best_validation_uas:
+        if self.validation_uas >= self.best_validation_uas:
             self.best_validation_uas = self.validation_uas
             improved_uas = True
         else:
@@ -516,7 +516,7 @@ class TurboParser(object):
         if self.options.unlabeled:
             self._should_save = improved_uas
         else:
-            if self.validation_las > self.best_validation_las:
+            if self.validation_las >= self.best_validation_las:
                 self.best_validation_las = self.validation_las
                 self._should_save = True
             else:
@@ -903,8 +903,11 @@ class TurboParser(object):
         :return:
         """
         # dep_output = output[Target.DEPENDENCY_PARTS]
+        head_scores = output[Target.HEADS][:len(instance) - 1, :len(instance)]
+        deprel_scores = output[Target.RELATIONS][:len(instance) - 1,
+                                                 :len(instance)]
         heads, relations = self.decode_predictions(
-            None, parts, output[Target.HEADS], output[Target.RELATIONS])
+            None, parts, head_scores, deprel_scores)
 
         for m, h in enumerate(heads, 1):
             instance.heads[m] = h

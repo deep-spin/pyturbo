@@ -145,10 +145,13 @@ class DependencyNeuralScorer(object):
             detached = model_scores[target].detach()
 
             if target == Target.RELATIONS:
+                # shape is (batch, modifier, head, label)
                 value = detached.argmax(3)
             elif target == Target.HEADS:
+                # (batch, modifier, head)
                 value = F.log_softmax(detached, 2)
             else:
+                # (batch, word, label)
                 value = detached.argmax(2)
 
             numpy_scores[target] = value.cpu().numpy()
