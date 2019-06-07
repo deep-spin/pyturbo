@@ -1,5 +1,6 @@
 from .constants import Target
 import torch
+from torch import nn
 from torch.nn import functional as F
 import torch.optim as optim
 import logging
@@ -80,10 +81,12 @@ class DependencyNeuralScorer(object):
         gold_heads = gold_heads.to(head_scores.device)
         gold_relations = gold_relations.to(head_scores.device)
 
+        compute_loss = nn.CrossEntropyLoss(ignore_index=-1, reduction='sum')
+
         # head loss
         # stack the head predictions for all words from all sentences
         scores2d = head_scores.contiguous().view(-1, head_scores.size(2))
-        loss = F.cross_entropy(scores2d, gold_heads.view(-1), ignore_index=-1)
+        loss = compute_loss(scores2d, gold_heads.view(-1))
 
         # label loss
         # avoid -1 in gather
@@ -99,33 +102,34 @@ class DependencyNeuralScorer(object):
 
         label_scores = torch.gather(label_scores, 2, expanded_indices)
         label_scores = label_scores.view(-1, num_labels)
-        loss += F.cross_entropy(label_scores.contiguous(),
-                                gold_relations.view(-1), ignore_index=-1)
+        loss += compute_loss(label_scores.contiguous(), gold_relations.view(-1))
 
         # linearization (left/right attachment) loss
         arange = torch.arange(head_scores.size(2), device=head_scores.device)
         position1 = arange.view(1, 1, -1).expand(batch_size, -1, -1)
         position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
         head_offset = position1 - position2
+        head_offset = head_offset[:, 1:]  # exclude root
 
-        sign_scores = torch.gather(
-            sign_scores[:, 1:], 2, heads3d).view(-1)
-        sign_scores = torch.cat([-sign_scores.unsqueeze(1) / 2,
-                                 sign_scores.unsqueeze(1) / 2], 1)
-        sign_target = torch.gather((head_offset[:, 1:] > 0).long(),
-                                   2, heads3d)
-        loss += F.cross_entropy(sign_scores.contiguous(), sign_target.view(-1),
-                                ignore_index=-1)
+        # get the head scores for the gold heads
+        head_sign_scores = torch.gather(sign_scores, 2, heads3d).view(-1)
+        head_sign_scores = head_sign_scores.unsqueeze(1) / 2
+        head_sign_scores = torch.cat([-head_sign_scores, head_sign_scores], 1)
+
+        sign_target = torch.gather((head_offset > 0).long(), 2, heads3d)
+        sign_target[negative_inds] = -1  # -1 to padding
+        loss += compute_loss(head_sign_scores.contiguous(),
+                             sign_target.view(-1))
 
         # distance loss
-        distance_kld = torch.gather(distance_kld[:, 1:], 2, heads3d)
-        # distance_kld = distance_kld.view(-1)
-        # negative_inds = gold_heads.view(-1) == -1
-        # distance_kld[negative_inds] = 0
+        distance_kld = torch.gather(distance_kld, 2, heads3d)
+        distance_kld[negative_inds] = 0
         loss -= distance_kld.sum()
 
+        num_words = sum([len(inst) - 1 for inst in instance_data.instances])
+        loss /= num_words
+
         losses[Target.DEPENDENCY_PARTS] = loss
-        # losses[Target.DEPENDENCY_PARTS] = parts_loss / batch_size
 
         return losses
 
@@ -170,7 +174,7 @@ class DependencyNeuralScorer(object):
         self.set_model(model)
         params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
-            params, lr=learning_rate, betas=(beta1, beta2))
+            params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6)
         self.decay = decay
 
     def set_model(self, model):

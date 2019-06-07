@@ -90,23 +90,23 @@ class DependencyOptionParser(OptionParser):
                             followed by the values of its vector. These are
                             kept frozen.""")
         parser.add_argument('--embedding_size', help="""Dimension of trainable
-                            embeddings.""", default=100, type=int)
+                            embeddings.""", default=75, type=int)
         parser.add_argument('--char_embedding_size', type=int, default=100,
                             help='Size of char embeddings')
         parser.add_argument('--char_hidden_size', default=400, type=int,
                             help='''Size of the hidden char RNN''')
-        parser.add_argument('--tag_embedding_size', type=int, default=20,
+        parser.add_argument('--tag_embedding_size', type=int, default=50,
                             help='Size of tag embeddings')
-        parser.add_argument('--transform_size', type=int, default=150,
+        parser.add_argument('--transform_size', type=int, default=125,
                             help='''Size of the linear transformation for 
                             char-based and pretrained representations''')
         parser.add_argument('--distance_embedding_size', type=int, default=20,
                             help='Size of distance embeddings')
-        parser.add_argument('--rnn_size', type=int, default=100,
+        parser.add_argument('--rnn_size', type=int, default=400,
                             help='Size of hidden RNN layers')
-        parser.add_argument('--arc_mlp_size', type=int, default=100,
+        parser.add_argument('--arc_mlp_size', type=int, default=400,
                             help='Size of dependency arc MLP layers')
-        parser.add_argument('--label_mlp_size', type=int, default=100,
+        parser.add_argument('--label_mlp_size', type=int, default=400,
                             help='Size of dependency label MLP layers')
         parser.add_argument('--ho_mlp_size', type=int, default=100,
                             help='Size of dependency higher-order MLP layers')
@@ -116,9 +116,9 @@ class DependencyOptionParser(OptionParser):
                             help='Number of RNN layers')
         parser.add_argument('--mlp_layers', type=int, default=1,
                             help='Number of MLP layers')
-        parser.add_argument('--dropout', type=float, default=0,
+        parser.add_argument('--dropout', type=float, default=0.5,
                             help='Dropout rate')
-        parser.add_argument('--word_dropout', type=float, default=0,
+        parser.add_argument('--word_dropout', type=float, default=0.33,
                             help='Word dropout rate (replace by unknown)')
 
     def parse_args(self):

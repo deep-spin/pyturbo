@@ -32,7 +32,7 @@ class OptionParser(object):
                             help='Path to the model.')
         parser.add_argument('--output_path', type=str, default=None,
                             help='Path to the output predictions.')
-        parser.add_argument('--decay', type=float, default=0.99,
+        parser.add_argument('--decay', type=float, default=0.9,
                             help="""Decay value to multiply learning rate after 
                             an epoch without improvement in the validation 
                             set.""")
@@ -49,7 +49,7 @@ class OptionParser(object):
         parser.add_argument('--max_steps', type=int, default=50000,
                             help='''Maximum number of training steps (batches). 
                             If the model stops improving it stops earlier.''')
-        parser.add_argument('--patience', type=int, default=10,
+        parser.add_argument('--patience', type=int, default=5,
                             help='''Number of evaluations without 
                             improvement in the validation set to wait before 
                             terminating training.''')

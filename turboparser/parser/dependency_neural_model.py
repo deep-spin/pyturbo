@@ -496,6 +496,8 @@ class DependencyNeuralModel(nn.Module):
         # exclude attachment for the root symbol
         head_scores = head_scores[:, 1:]
         label_scores = label_scores[:, 1:]
+        sign_scores = sign_scores[:, 1:]
+        dist_kld = dist_kld[:, 1:]
 
         self.scores[Target.HEADS] = head_scores
         self.scores[Target.RELATIONS] = label_scores
