@@ -189,7 +189,7 @@ class TokenDictionary(Dictionary):
                 for i in range(len(instance)):
                     # Add form to alphabet.
                     form = instance.get_form(i)
-                    if case_sensitive:
+                    if not case_sensitive:
                         form = form.lower()
                     form_counts[form] += 1
 

@@ -61,7 +61,7 @@ class TurboParser(object):
         if self.options.train:
             pretrain_words, pretrain_embeddings = self._load_embeddings()
             self.token_dictionary.initialize(
-                self.options.training_path, self.options.form_case_sensitive,
+                self.options.training_path, self.options.case_sensitive,
                 pretrain_words, char_cutoff=options.char_cutoff,
                 form_cutoff=options.form_cutoff,
                 lemma_cutoff=options.lemma_cutoff)
@@ -365,7 +365,7 @@ class TurboParser(object):
             prune_mask = None
 
         instance = DependencyInstanceNumeric(instance, self.token_dictionary,
-                                             self.options.form_case_sensitive)
+                                             self.options.case_sensitive)
         num_relations = self.token_dictionary.get_num_deprels()
         labeled = not self.options.unlabeled
         parts = DependencyParts(instance, self.model_type, prune_mask,

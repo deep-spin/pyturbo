@@ -30,7 +30,7 @@ class DependencyInstanceNumeric(DependencyInstance):
         for i in range(length):
             # Form and lower-case form.
             form = instance.forms[i]
-            if case_sensitive:
+            if not case_sensitive:
                 form = form.lower()
             id_ = token_dictionary.get_form_id(form)
             self.forms[i] = id_

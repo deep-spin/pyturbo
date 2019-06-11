@@ -29,7 +29,7 @@ class DependencyOptionParser(OptionParser):
                             help='Length of prefixes')
         parser.add_argument('--suffix_length', type=int, default=4,
                             help='Length of suffixes')
-        parser.add_argument('--form_case_sensitive', action='store_true',
+        parser.add_argument('--case_sensitive', action='store_true',
                             help='Distinguish upper/lower case of word forms.')
 
         # Parser options.
