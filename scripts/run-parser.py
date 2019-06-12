@@ -17,12 +17,12 @@ def main():
     option_parser = DependencyOptionParser()
     options = option_parser.parse_args()
 
+    set_seeds(options.seed)
+
     if options.train:
         train_parser(options)
     elif options.test:
         test_parser(options)
-
-    set_seeds(options.seed)
 
 
 def set_seeds(seed):
