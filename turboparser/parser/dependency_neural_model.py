@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from .token_dictionary import TokenDictionary, UNKNOWN
-from .constants import Target
-from ..classifier.lstm import LSTM, CharLSTM
+from .constants import Target, SPECIAL_SYMBOLS
+from ..classifier.lstm import LSTM, CharLSTM, HighwayLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 import numpy as np
 import pickle
@@ -91,30 +91,7 @@ class DependencyNeuralModel(nn.Module):
             alphabet = morph_alphabets[name]
             self.unknown_morphs[i] = alphabet.lookup(UNKNOWN)
 
-        fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
-                                             dtype=torch.float32)
-        self.fixed_word_embeddings = nn.Embedding.from_pretrained(
-            fixed_word_embeddings, freeze=True)
-        self.fixed_embedding_projection = nn.Linear(
-            fixed_word_embeddings.shape[1], transform_size, bias=False)
-        self.fixed_dropout_replacement = self._create_parameter_tensor(
-            fixed_word_embeddings.shape[1])
-        rnn_input_size = transform_size
-
-        if self.char_embedding_size:
-            char_vocab = token_dictionary.get_num_characters()
-            self.char_rnn = CharLSTM(
-                char_vocab, char_embedding_size, char_hidden_size,
-                dropout=dropout)
-            # tensor to replace char representation with word dropout
-            self.char_dropout_replacement = self._create_parameter_tensor(
-                2 * char_hidden_size)
-
-            self.char_projection = nn.Linear(
-                2 * char_hidden_size, transform_size, bias=False)
-            rnn_input_size += transform_size
-        else:
-            self.char_rnn = None
+        rnn_input_size = 0
 
         if trainable_word_embedding_size:
             num_words = token_dictionary.get_num_forms()
@@ -129,25 +106,25 @@ class DependencyNeuralModel(nn.Module):
             self.trainable_word_embeddings = None
 
         if tag_embedding_size:
-            # only use tag embeddings if there are actual tags
-            # 3 means root, unk and the placeholder "_" when there are no tags
+            # only use tag embeddings if there are actual tags, not only special
+            # symbols for root, unknown, etc
             num_upos = token_dictionary.get_num_upos_tags()
-            if num_upos > 3:
-                self.upos_embeddings = nn.Embedding(num_upos,
-                                                    tag_embedding_size)
-            else:
-                self.upos_embeddings = None
+            # if num_upos > len(SPECIAL_SYMBOLS):
+            self.upos_embeddings = nn.Embedding(num_upos,
+                                                tag_embedding_size)
+            # else:
+            #     self.upos_embeddings = None
 
             # also check if UPOS and XPOS are not the same
             num_xpos = token_dictionary.get_num_xpos_tags()
             xpos_tags = token_dictionary.get_xpos_tags()
             upos_tags = token_dictionary.get_upos_tags()
-            if num_xpos > 3 and \
-                    upos_tags != xpos_tags:
-                self.xpos_embeddings = nn.Embedding(num_xpos,
-                                                    tag_embedding_size)
-            else:
-                self.xpos_embeddings = None
+            # if num_xpos > len(SPECIAL_SYMBOLS):  and \
+            #         upos_tags != xpos_tags:
+            self.xpos_embeddings = nn.Embedding(num_xpos,
+                                                tag_embedding_size)
+            # else:
+            #     self.xpos_embeddings = None
 
             if self.upos_embeddings is not None or \
                     self.xpos_embeddings is not None:
@@ -165,17 +142,46 @@ class DependencyNeuralModel(nn.Module):
             self.xpos_embeddings = None
             self.morph_embeddings = None
 
-        if self.distance_embedding_size:
-            bins = np.array(list(range(1, 10)) + list(range(10, 31, 5)))
-            self.distance_bins = np.concatenate([-bins[::-1], bins])
-            self.distance_embeddings = nn.Embedding(len(self.distance_bins) * 2,
-                                                    distance_embedding_size)
-        else:
-            self.distance_bins = None
-            self.distance_embeddings = None
+        if self.char_embedding_size:
+            num_chars = token_dictionary.get_num_characters()
+            self.char_rnn = CharLSTM(
+                num_chars, char_embedding_size, char_hidden_size,
+                dropout=dropout, bidirectional=False)
 
-        self.shared_rnn = LSTM(rnn_input_size, rnn_size, rnn_layers, dropout)
-        self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
+            num_directions = 1
+            self.char_projection = nn.Linear(
+                num_directions * char_hidden_size, transform_size, bias=False)
+            rnn_input_size += transform_size
+
+            # tensor to replace char representation with word dropout
+            self.char_dropout_replacement = self._create_parameter_tensor(
+                num_directions * char_hidden_size)
+        else:
+            self.char_rnn = None
+
+        fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
+                                             dtype=torch.float32)
+        self.fixed_word_embeddings = nn.Embedding.from_pretrained(
+            fixed_word_embeddings, freeze=True)
+        self.fixed_embedding_projection = nn.Linear(
+            fixed_word_embeddings.shape[1], transform_size, bias=False)
+        # self.fixed_dropout_replacement = self._create_parameter_tensor(
+        #     fixed_word_embeddings.shape[1])
+        rnn_input_size += transform_size
+
+        # if self.distance_embedding_size:
+        #     bins = np.array(list(range(1, 10)) + list(range(10, 31, 5)))
+        #     self.distance_bins = np.concatenate([-bins[::-1], bins])
+        #     self.distance_embeddings = nn.Embedding(len(self.distance_bins) * 2,
+        #                                             distance_embedding_size)
+        # else:
+        #     self.distance_bins = None
+        #     self.distance_embeddings = None
+        # self.shared_rnn = LSTM(rnn_input_size, rnn_size, rnn_layers, dropout)
+        # self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
+        self.shared_rnn = HighwayLSTM(rnn_input_size, rnn_size, rnn_layers,
+                                      dropout=0)
+        self.parser_rnn = HighwayLSTM(2 * rnn_size, rnn_size)
         if self.predict_tags:
             self.tagger_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         self.tanh = nn.Tanh()

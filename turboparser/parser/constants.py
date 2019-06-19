@@ -25,4 +25,6 @@ target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
 
 ROOT = '_root_'
 UNKNOWN = '_unknown_'
+PADDING = '_padding_'
 NONE = '_none_'
+SPECIAL_SYMBOLS = [PADDING, UNKNOWN, NONE, ROOT]

@@ -112,7 +112,7 @@ class DependencyOptionParser(OptionParser):
                             help='Size of dependency higher-order MLP layers')
         parser.add_argument('--tag_mlp_size', type=int, default=100,
                             help='Size of MLP layer for tagging')
-        parser.add_argument('--rnn_layers', type=int, default=1,
+        parser.add_argument('--rnn_layers', type=int, default=2,
                             help='Number of RNN layers')
         parser.add_argument('--mlp_layers', type=int, default=1,
                             help='Number of MLP layers')

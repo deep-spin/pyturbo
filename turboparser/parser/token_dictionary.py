@@ -1,7 +1,7 @@
 from .alphabet import Alphabet, MultiAlphabet
 from ..classifier.dictionary import Dictionary
 from .dependency_reader import ConllReader
-from .constants import ROOT, UNKNOWN, NONE
+from .constants import UNKNOWN, SPECIAL_SYMBOLS
 import pickle
 import logging
 from collections import Counter
@@ -156,7 +156,8 @@ class TokenDictionary(Dictionary):
         return self.deprel_alphabet.lookup(UNKNOWN)
 
     def initialize(self, input_path, case_sensitive, word_list=None,
-                   char_cutoff=1, form_cutoff=7, lemma_cutoff=7):
+                   char_cutoff=1, form_cutoff=7, lemma_cutoff=7,
+                   ignore_value='_'):
         """
         Initializes the dictionary with indices for word forms and tags.
 
@@ -165,6 +166,8 @@ class TokenDictionary(Dictionary):
 
         :param input_path: path to an input CoNLL file
         :param word_list: optional list with words in pre-trained embeddings
+        :param ignore_value: values to be ignored when in tags. Any occurrences
+            of them will be internally represented by a special "EMPTY" symbol.
         """
         logging.info('Creating token dictionary...')
 
@@ -177,16 +180,19 @@ class TokenDictionary(Dictionary):
                          self.xpos_alphabet,
                          self.morph_singleton_alphabet,
                          self.deprel_alphabet]:
-            alphabet.insert(UNKNOWN)
-            if alphabet is not self.deprel_alphabet:
-                alphabet.insert(ROOT)
+            for symbol in SPECIAL_SYMBOLS:
+                alphabet.insert(symbol)
+            # alphabet.insert(UNKNOWN)
+            # if alphabet is not self.deprel_alphabet:
+            #     alphabet.insert(ROOT)
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
         reader = ConllReader()
         with reader.open(input_path) as r:
             for instance in r:
-                for i in range(len(instance)):
+                # start from 1 to skip root
+                for i in range(1, len(instance)):
                     # Add form to alphabet.
                     form = instance.get_form(i)
                     if not case_sensitive:
@@ -207,25 +213,31 @@ class TokenDictionary(Dictionary):
 
                     # Add tags to alphabet.
                     tag = instance.get_upos(i)
-                    self.upos_alphabet.insert(tag)
+                    if tag != ignore_value:
+                        self.upos_alphabet.insert(tag)
 
                     tag = instance.get_xpos(i)
-                    self.xpos_alphabet.insert(tag)
+                    if tag != ignore_value:
+                        self.xpos_alphabet.insert(tag)
 
                     # Add morph tags to alphabet.
                     morph_singleton = instance.get_morph_singleton(i)
-                    self.morph_singleton_alphabet.insert(morph_singleton)
+                    if morph_singleton != ignore_value:
+                        self.morph_singleton_alphabet.insert(morph_singleton)
 
-                    # Add each key/value UFeats pair
-                    morph_tags = instance.get_morph_tags(i)
-                    self.morph_tag_alphabet.insert(morph_tags)
+                        # Add each key/value UFeats pair
+                        morph_tags = instance.get_morph_tags(i)
+                        self.morph_tag_alphabet.insert(morph_tags)
 
+        # sort morph features to ensure deterministic behavior
         self.morph_tag_alphabet.sort()
         for sub_alphabet_name in self.morph_tag_alphabet.alphabets:
             sub_alphabet = self.morph_tag_alphabet.alphabets[sub_alphabet_name]
-            sub_alphabet.insert(UNKNOWN)
-            sub_alphabet.insert(ROOT)
-            sub_alphabet.insert(NONE)
+            for symbol in SPECIAL_SYMBOLS:
+                sub_alphabet.insert(symbol)
+            # sub_alphabet.insert(UNKNOWN)
+            # sub_alphabet.insert(ROOT)
+            # sub_alphabet.insert(NONE)
 
         # Now adjust the cutoffs if necessary.
         # (only using cutoffs for words and lemmas)
@@ -236,9 +248,11 @@ class TokenDictionary(Dictionary):
                 [char_cutoff, form_cutoff, lemma_cutoff]):
 
             alphabet.clear()
-            alphabet.insert(UNKNOWN)
-            if alphabet != 'char':
-                alphabet.insert(ROOT)
+            for symbol in SPECIAL_SYMBOLS:
+                alphabet.insert(symbol)
+            # alphabet.insert(UNKNOWN)
+            # if alphabet != 'char':
+            #     alphabet.insert(ROOT)
 
             for name, count in counter.most_common():
                 if count >= cutoff:
