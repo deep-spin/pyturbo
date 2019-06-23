@@ -63,6 +63,7 @@ class TurboParser(object):
             self.token_dictionary.initialize(
                 self.options.training_path, self.options.case_sensitive,
                 pretrain_words, char_cutoff=options.char_cutoff,
+                morph_cutoff=options.morph_tag_cutoff,
                 form_cutoff=options.form_cutoff,
                 lemma_cutoff=options.lemma_cutoff)
 

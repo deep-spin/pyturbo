@@ -94,10 +94,12 @@ class MultiAlphabet(object):
 
         self.alphabets = new_alphabets
 
-    def lookup(self, feature_dict):
+    def lookup(self, feature_dict, special_symbol=NONE):
         """
         Lookup feature dictionary.
 
+        :param feature_dict: dictionary mapping feature names to values
+        :param special_symbol: symbol to use for missing features
         :return: a list of numeric ids
         """
         ids = [None] * len(self.alphabets)
@@ -107,7 +109,7 @@ class MultiAlphabet(object):
                 label = feature_dict[feature_name]
             else:
                 # no available value for this attribute; e.g. tense in nouns
-                label = NONE
+                label = special_symbol
             id_ = alphabet.lookup(label)
             if id_ < 0:
                 id_ = alphabet.lookup(UNKNOWN)

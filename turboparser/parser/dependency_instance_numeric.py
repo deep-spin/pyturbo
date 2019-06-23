@@ -1,5 +1,6 @@
 from .dependency_instance import DependencyInstance
 from .token_dictionary import TokenDictionary
+from .constants import ROOT, NONE
 import numpy as np
 
 
@@ -40,9 +41,16 @@ class DependencyInstanceNumeric(DependencyInstance):
             id_ = token_dictionary.get_embedding_id(lower_form)
             self.embedding_ids[i] = id_
 
-            # characters
-            self.characters[i] = [token_dictionary.get_character_id(c)
-                                  for c in form]
+            # characters and morph tags
+            morph_tags = instance.morph_tags[i]
+            if i == 0:
+                self.characters[0] = [token_dictionary.get_character_id(ROOT)]
+                self.morph_tags[0] = token_dictionary.get_morph_ids(morph_tags,
+                                                                    ROOT)
+            else:
+                self.characters[i] = [token_dictionary.get_character_id(c)
+                                      for c in form]
+                self.morph_tags[i] = token_dictionary.get_morph_ids(morph_tags)
 
             # Lemma.
             lemma = instance.lemmas[i]
@@ -55,13 +63,12 @@ class DependencyInstanceNumeric(DependencyInstance):
             self.upos[i] = id_
 
             tag = instance.xpos[i]
+            if tag == '_':
+                tag = NONE
             id_ = token_dictionary.get_xpos_id(tag)
             self.xpos[i] = id_
 
             # Morphological tags.
-            morph_tags = instance.morph_tags[i]
-            self.morph_tags[i] = token_dictionary.get_morph_ids(morph_tags)
-
             morph_singleton = instance.morph_singletons[i]
             self.morph_singletons[i] = token_dictionary.\
                 get_morph_singleton_id(morph_singleton)

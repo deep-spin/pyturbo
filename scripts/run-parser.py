@@ -18,6 +18,7 @@ def main():
     options = option_parser.parse_args()
 
     set_seeds(options.seed)
+    torch.set_printoptions(precision=3, edgeitems=5)
 
     if options.train:
         train_parser(options)

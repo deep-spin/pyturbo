@@ -10,7 +10,7 @@ class DependencyOptionParser(OptionParser):
         parser = self.parser
         
         # Token options.
-        parser.add_argument('--char_cutoff', type=int, default=2,
+        parser.add_argument('--char_cutoff', type=int, default=1,
                             help="""Ignore characters whose frequency is less
                             than this, when using char level embeddings.""")
         parser.add_argument('--form_cutoff', type=int, default=7,
@@ -19,16 +19,12 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--lemma_cutoff', type=int, default=7,
                             help="""Ignore word lemmas whose frequency is less
                             than this.""")
-        parser.add_argument('--tag_cutoff', type=int, default=2,
+        parser.add_argument('--tag_cutoff', type=int, default=1,
                             help="""Ignore POS tags whose frequency is less
                             than this.""")
-        parser.add_argument('--morph_tag_cutoff', type=int, default=2,
+        parser.add_argument('--morph_tag_cutoff', type=int, default=1,
                             help="""Ignore morph tags whose frequency is less
                             than this.""")
-        parser.add_argument('--prefix_length', type=int, default=4,
-                            help='Length of prefixes')
-        parser.add_argument('--suffix_length', type=int, default=4,
-                            help='Length of suffixes')
         parser.add_argument('--case_sensitive', action='store_true',
                             help='Distinguish upper/lower case of word forms.')
 
