@@ -119,18 +119,18 @@ class DependencyNeuralScorer(object):
         head_sign_scores = torch.cat([-head_sign_scores, head_sign_scores], 1)
 
         sign_target = torch.gather((head_offset > 0).long(), 2, heads3d)
-        sign_target[negative_inds] = -1  # -1 to padding
+        # sign_target[negative_inds] = -1  # -1 to padding
         sign_loss = compute_loss(head_sign_scores.contiguous(),
                                  sign_target.view(-1))
         loss += sign_loss
 
         # distance loss
         distance_kld = torch.gather(distance_kld, 2, heads3d)
-        distance_kld[negative_inds] = 0
+        # distance_kld[negative_inds] = 0
         kld_sum = distance_kld.sum()
         loss -= kld_sum
 
-        num_words = sum([len(inst) - 1 for inst in instance_data.instances])
+        num_words = sum([len(inst) for inst in instance_data.instances])
         loss /= num_words
 
         losses[Target.DEPENDENCY_PARTS] = loss

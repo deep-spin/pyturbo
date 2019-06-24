@@ -479,8 +479,9 @@ class DependencyNeuralModel(nn.Module):
 
         sign_scores = self.linearization_scorer(self.dropout(states),
                                                 self.dropout(states)).squeeze(3)
-        head_scores += F.logsigmoid(
+        sign_sigmoid = F.logsigmoid(
             sign_scores * torch.sign(head_offset).float()).detach()
+        head_scores += sign_sigmoid
 
         # score distances between head and modifier
         dist_scores = self.distance_scorer(self.dropout(states),
