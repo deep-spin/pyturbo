@@ -102,7 +102,9 @@ class DependencyNeuralScorer(object):
 
         label_scores = torch.gather(label_scores, 2, expanded_indices)
         label_scores = label_scores.view(-1, num_labels)
-        loss += compute_loss(label_scores.contiguous(), gold_relations.view(-1))
+        label_loss = compute_loss(label_scores.contiguous(),
+                                  gold_relations.view(-1))
+        loss += label_loss
 
         # linearization (left/right attachment) loss
         arange = torch.arange(head_scores.size(2), device=head_scores.device)
@@ -118,13 +120,15 @@ class DependencyNeuralScorer(object):
 
         sign_target = torch.gather((head_offset > 0).long(), 2, heads3d)
         sign_target[negative_inds] = -1  # -1 to padding
-        loss += compute_loss(head_sign_scores.contiguous(),
-                             sign_target.view(-1))
+        sign_loss = compute_loss(head_sign_scores.contiguous(),
+                                 sign_target.view(-1))
+        loss += sign_loss
 
         # distance loss
         distance_kld = torch.gather(distance_kld, 2, heads3d)
         distance_kld[negative_inds] = 0
-        loss -= distance_kld.sum()
+        kld_sum = distance_kld.sum()
+        loss -= kld_sum
 
         num_words = sum([len(inst) - 1 for inst in instance_data.instances])
         loss /= num_words

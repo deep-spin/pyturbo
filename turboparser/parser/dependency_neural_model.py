@@ -183,7 +183,7 @@ class DependencyNeuralModel(nn.Module):
                                       dropout=0)
         self.parser_rnn = HighwayLSTM(2 * rnn_size, rnn_size)
 
-        self.drop_replacement = nn.Parameter(
+        self.dropout_replacement = nn.Parameter(
             torch.randn(rnn_input_size) / np.sqrt(rnn_input_size))
 
         if self.predict_tags:
@@ -465,6 +465,7 @@ class DependencyNeuralModel(nn.Module):
         batch_size, max_sent_size, _ = states.size()
 
         # apply dropout separately to get different masks
+        # head_scores is interpreted as (batch, modifier, head)
         head_scores = self.arc_scorer(self.dropout(states),
                                       self.dropout(states)).squeeze(3)
         label_scores = self.label_scorer(self.dropout(states),
@@ -683,6 +684,12 @@ class DependencyNeuralModel(nn.Module):
         # each embedding tensor is (batch, num_tokens, embedding_size)
         embeddings = torch.cat(all_embeddings, dim=2)
 
+        if self.training and self.word_dropout_rate:
+            # apply word dropout -- replace by a random tensor
+            dropout_draw = torch.rand_like(embeddings[:, :, 0])
+            inds = dropout_draw < self.word_dropout_rate
+            embeddings[inds] = self.dropout_replacement
+
         return embeddings
 
     def _get_embeddings(self, instances, max_length, type_):
@@ -820,7 +827,6 @@ class DependencyNeuralModel(nn.Module):
         :param parts: a list of DependencyParts objects
         :return: a score matrix with shape (num_instances, longest_length)
         """
-        instances = instances[::-1]
         self.scores = {Target.HEADS: []}
         if parts[0].labeled:
             self.scores[Target.RELATIONS] = []
