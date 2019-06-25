@@ -127,7 +127,7 @@ class HighwayLSTM(nn.Module):
         self.gates = nn.ModuleList()
         self.highways = nn.ModuleList()
         self.dropout = nn.Dropout(dropout, inplace=True)
-        num_directions = 2 if bidirectional else 2
+        num_directions = 2 if bidirectional else 1
         actual_hidden_size = num_directions * hidden_size
 
         for i in range(num_layers):
@@ -173,7 +173,6 @@ class HighwayLSTM(nn.Module):
             hidden = padded_hidden + g * t
 
             x = pack_padded_sequence(hidden, lengths, batch_first=True)
-            # print('layer output', x)
 
         h_output = torch.cat(h_output, 0)
         c_output = torch.cat(c_output, 0)

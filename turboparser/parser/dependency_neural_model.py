@@ -132,8 +132,8 @@ class DependencyNeuralModel(nn.Module):
                 rnn_input_size += tag_embedding_size
 
             self.morph_embeddings = nn.ModuleList()
-            for attribute in morph_alphabets:
-                alphabet = morph_alphabets[attribute]
+            for feature_name in morph_alphabets:
+                alphabet = morph_alphabets[feature_name]
                 embeddings = nn.Embedding(len(alphabet), tag_embedding_size)
                 self.morph_embeddings.append(embeddings)
             rnn_input_size += tag_embedding_size
@@ -226,6 +226,7 @@ class DependencyNeuralModel(nn.Module):
             2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
         self.distance_scorer = DeepBiaffineScorer(
             2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+
         # self.head_mlp = self._create_mlp()
         # self.modifier_mlp = self._create_mlp()
         # self.arc_scorer = self._create_scorer()
@@ -272,18 +273,18 @@ class DependencyNeuralModel(nn.Module):
                 hidden_size=self.ho_mlp_size)
             self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
 
-        if self.distance_embedding_size:
-            self.distance_projector = nn.Linear(
-                distance_embedding_size,
-                arc_mlp_size,
-                bias=True)
-            self.label_distance_projector = nn.Linear(
-                distance_embedding_size,
-                label_mlp_size,
-                bias=True
-            )
-        else:
-            self.distance_mlp = None
+        # if self.distance_embedding_size:
+        #     self.distance_projector = nn.Linear(
+        #         distance_embedding_size,
+        #         arc_mlp_size,
+        #         bias=True)
+        #     self.label_distance_projector = nn.Linear(
+        #         distance_embedding_size,
+        #         label_mlp_size,
+        #         bias=True
+        #     )
+        # else:
+        #     self.distance_mlp = None
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -900,5 +901,7 @@ class DependencyNeuralModel(nn.Module):
 
             if self.model_type.grandsiblings:
                 self._compute_grandsibling_scores(states, sent_parts)
+
+        # print(self.scores[Target.HEADS][inds])
 
         return self.scores
