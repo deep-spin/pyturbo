@@ -183,6 +183,7 @@ class TokenDictionary(Dictionary):
         char_counts = Counter()
         form_counts = Counter()
         lemma_counts = Counter()
+        deprel_counts = Counter()
 
         # this stores a Counter for each morph feature (tense, number, gender..)
         morph_counts = {}
@@ -221,7 +222,8 @@ class TokenDictionary(Dictionary):
 
                     # Dependency relation
                     deprel = instance.get_relation(i)
-                    self.deprel_alphabet.insert(deprel)
+                    # self.deprel_alphabet.insert(deprel)
+                    deprel_counts[deprel] += 1
 
                     # POS tags
                     tag = instance.get_upos(i)
@@ -281,9 +283,9 @@ class TokenDictionary(Dictionary):
         # (only using cutoffs for words and lemmas)
         for alphabet, counter, cutoff in \
             zip([self.character_alphabet, self.form_alphabet,
-                 self.lemma_alphabet],
-                [char_counts, form_counts, lemma_counts],
-                [char_cutoff, form_cutoff, lemma_cutoff]):
+                 self.lemma_alphabet, self.deprel_alphabet],
+                [char_counts, form_counts, lemma_counts, deprel_counts],
+                [char_cutoff, form_cutoff, lemma_cutoff, 1]):
 
             alphabet.clear()
             for symbol in SPECIAL_SYMBOLS:

@@ -21,8 +21,7 @@ class PairwiseBilinear(nn.Module):
         self.output_size = output_size
 
         self.weight = nn.Parameter(
-            torch.Tensor(input1_size, input2_size, output_size))
-        self.bias = nn.Parameter(torch.Tensor(output_size)) if bias else 0
+            torch.zeros(input1_size, input2_size, output_size))
 
     def forward(self, input1, input2):
         input1_size = list(input1.size())
@@ -54,8 +53,8 @@ class PairwiseBiaffineScorer(nn.Module):
         super().__init__()
         self.w = PairwiseBilinear(input1_size + 1, input2_size + 1, output_size)
 
-        self.w.weight.data.zero_()
-        self.w.bias.data.zero_()
+        # self.w.weight.data.zero_()
+        # self.w.bias.data.zero_()
 
     def forward(self, input1, input2):
         # add bias

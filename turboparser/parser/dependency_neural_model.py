@@ -96,11 +96,11 @@ class DependencyNeuralModel(nn.Module):
         if trainable_word_embedding_size:
             num_words = token_dictionary.get_num_forms()
             self.trainable_word_embeddings = nn.Embedding(
-                num_words, trainable_word_embedding_size)
+                num_words, trainable_word_embedding_size, padding_idx=0)
 
             num_lemmas = token_dictionary.get_num_lemmas()
             self.lemma_embeddings = nn.Embedding(
-                num_lemmas, trainable_word_embedding_size)
+                num_lemmas, trainable_word_embedding_size, padding_idx=0)
             rnn_input_size += 2 * trainable_word_embedding_size
         else:
             self.trainable_word_embeddings = None
@@ -469,8 +469,9 @@ class DependencyNeuralModel(nn.Module):
         # head_scores is interpreted as (batch, modifier, head)
         head_scores = self.arc_scorer(self.dropout(states),
                                       self.dropout(states)).squeeze(3)
-        label_scores = self.label_scorer(self.dropout(states),
-                                         self.dropout(states))
+        s1 = self.dropout(states)
+        s2 = self.dropout(states)
+        label_scores = self.label_scorer(s1, s2)
 
         # linearization (scoring heads after/before modifier)
         arange = torch.arange(max_sent_size, device=states.device)
@@ -478,6 +479,18 @@ class DependencyNeuralModel(nn.Module):
         position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
         head_offset = position1 - position2
 
+        # set arc scores from each word to itself as -inf
+        diag = torch.eye(max_sent_size, dtype=torch.uint8, device=states.device)
+        diag = diag.unsqueeze(0)
+        head_scores.masked_fill_(diag, -np.inf)
+
+        # set padding head scores to -inf
+        # during training, label loss is computed with respect to the gold
+        # arcs, so there's no need to set -inf scores to invalid positions
+        # in label scores.
+        padding_mask = create_padding_mask(lengths)
+        head_scores = head_scores.masked_fill(padding_mask.unsqueeze(1),
+                                              -np.inf)
         sign_scores = self.linearization_scorer(self.dropout(states),
                                                 self.dropout(states)).squeeze(3)
         sign_sigmoid = F.logsigmoid(
@@ -494,23 +507,14 @@ class DependencyNeuralModel(nn.Module):
         dist_kld = -torch.log((dist_target.float() - dist_pred) ** 2 / 2 + 1)
         head_scores += dist_kld.detach()
 
-        # set arc scores from each word to itself as -inf
-        diag = torch.eye(max_sent_size, dtype=torch.uint8, device=states.device)
-        diag = diag.unsqueeze(0)
-        head_scores.masked_fill_(diag, -np.inf)
-
-        # set padding head scores to -inf
-        # during training, label loss is computed with respect to the gold
-        # arcs, so there's no need to set -inf scores to invalid positions
-        # in label scores.
-        padding_mask = create_padding_mask(lengths)
-        head_scores.masked_fill_(padding_mask.unsqueeze(1), -np.inf)
-
         # exclude attachment for the root symbol
         head_scores = head_scores[:, 1:]
         label_scores = label_scores[:, 1:]
         sign_scores = sign_scores[:, 1:]
         dist_kld = dist_kld[:, 1:]
+        print('head')
+        print(head_scores)
+        print()
 
         self.scores[Target.HEADS] = head_scores
         self.scores[Target.RELATIONS] = label_scores
@@ -855,6 +859,7 @@ class DependencyNeuralModel(nn.Module):
         # pack to account for variable lengths
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
             sorted_embeddings, sorted_lengths, batch_first=True)
+
         shared_states, _ = self.shared_rnn(packed_embeddings)
         # shared_states = self._packed_dropout(shared_states)
         parser_packed_states, _ = self.parser_rnn(shared_states)
@@ -901,7 +906,5 @@ class DependencyNeuralModel(nn.Module):
 
             if self.model_type.grandsiblings:
                 self._compute_grandsibling_scores(states, sent_parts)
-
-        # print(self.scores[Target.HEADS][inds])
 
         return self.scores

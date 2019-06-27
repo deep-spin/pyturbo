@@ -45,7 +45,8 @@ class CharLSTM(nn.Module):
                  bidirectional=True):
         super(CharLSTM, self).__init__()
         self.attention = attention
-        self.embeddings = nn.Embedding(char_vocab_size, embedding_size)
+        self.embeddings = nn.Embedding(char_vocab_size, embedding_size,
+                                       padding_idx=0)
         self.num_directions = 2 if bidirectional else 1
         if attention:
             # 2 times because bidirectional

@@ -221,6 +221,18 @@ class DependencyNeuralScorer(object):
         """
         loss = sum(losses.values())
         loss.backward()
+        print('loss', loss.data.item())
+        print('gradients')
+        for name, param in self.model.named_parameters():
+            g = param.grad
+            if g is None:
+                continue
+
+            total_grad = g.sum()
+            if total_grad:
+                print(name, total_grad)
+        print()
+
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
 
         self.optimizer.step()

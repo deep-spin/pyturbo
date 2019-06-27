@@ -49,8 +49,8 @@ class InstanceData(object):
         :param words_per_batch: maximum words per batch (summing all sentences)
         :param sort: whether to sort sentences by size before batching
         """
-        if sort:
-            self.sort_by_size()
+        # if sort:
+        #     self.sort_by_size()
 
         self.batches = []
         last_index = 0
