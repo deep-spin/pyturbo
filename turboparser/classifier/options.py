@@ -40,7 +40,7 @@ class OptionParser(object):
                             help="""Steps between each log report""")
         parser.add_argument('--eval_interval', type=int, default=100,
                             help="""Steps between each model evaluation""")
-        parser.add_argument('--learning_rate', type=float, default=0.001,
+        parser.add_argument('--learning_rate', type=float, default=0.003,
                             help='Neural model learning rate')
         parser.add_argument('--beta1', type=float, default=0.9,
                             help="""Beta1 parameter of the adam optimizer""")
