@@ -97,7 +97,6 @@ class DependencyNeuralModel(nn.Module):
             num_words = token_dictionary.get_num_forms()
             self.trainable_word_embeddings = nn.Embedding(
                 num_words, trainable_word_embedding_size, padding_idx=0)
-
             num_lemmas = token_dictionary.get_num_lemmas()
             self.lemma_embeddings = nn.Embedding(
                 num_lemmas, trainable_word_embedding_size, padding_idx=0)
@@ -130,7 +129,6 @@ class DependencyNeuralModel(nn.Module):
                     self.xpos_embeddings is not None:
                 # both types of POS embeddings are summed
                 rnn_input_size += tag_embedding_size
-
             self.morph_embeddings = nn.ModuleList()
             for feature_name in morph_alphabets:
                 alphabet = morph_alphabets[feature_name]
@@ -473,12 +471,6 @@ class DependencyNeuralModel(nn.Module):
         s2 = self.dropout(states)
         label_scores = self.label_scorer(s1, s2)
 
-        # linearization (scoring heads after/before modifier)
-        arange = torch.arange(max_sent_size, device=states.device)
-        position1 = arange.view(1, 1, -1).expand(batch_size, -1, -1)
-        position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
-        head_offset = position1 - position2
-
         # set arc scores from each word to itself as -inf
         diag = torch.eye(max_sent_size, dtype=torch.uint8, device=states.device)
         diag = diag.unsqueeze(0)
@@ -491,6 +483,12 @@ class DependencyNeuralModel(nn.Module):
         padding_mask = create_padding_mask(lengths)
         head_scores = head_scores.masked_fill(padding_mask.unsqueeze(1),
                                               -np.inf)
+
+        # linearization (scoring heads after/before modifier)
+        arange = torch.arange(max_sent_size, device=states.device)
+        position1 = arange.view(1, 1, -1).expand(batch_size, -1, -1)
+        position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
+        head_offset = position1 - position2
         sign_scores = self.linearization_scorer(self.dropout(states),
                                                 self.dropout(states)).squeeze(3)
         sign_sigmoid = F.logsigmoid(
@@ -512,9 +510,6 @@ class DependencyNeuralModel(nn.Module):
         label_scores = label_scores[:, 1:]
         sign_scores = sign_scores[:, 1:]
         dist_kld = dist_kld[:, 1:]
-        print('head')
-        print(head_scores)
-        print()
 
         self.scores[Target.HEADS] = head_scores
         self.scores[Target.RELATIONS] = label_scores
@@ -719,6 +714,7 @@ class DependencyNeuralModel(nn.Module):
             for i, instance in enumerate(instances):
                 indices = instance.get_all_morph_tags()
                 index_tensor[i, :len(instance)] = torch.tensor(indices)
+
             embedding_sum = 0
             for i, matrix in enumerate(self.morph_embeddings):
                 indices = index_tensor[:, :, i]

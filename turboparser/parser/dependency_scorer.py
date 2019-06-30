@@ -45,6 +45,7 @@ class DependencyNeuralScorer(object):
     def __init__(self):
         self.part_scores = None
         self.model = None
+        self.c = 0
 
     def compute_loss(self, instance_data, predicted_parts):
         """
@@ -193,6 +194,7 @@ class DependencyNeuralScorer(object):
         params = [p for p in self.model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
             params, amsgrad=True, lr=learning_rate, betas=(beta1, beta2))
+        # self.optimizer = optim.SGD(params, lr=learning_rate)
 
     def train_mode(self):
         """
@@ -221,20 +223,7 @@ class DependencyNeuralScorer(object):
         """
         loss = sum(losses.values())
         loss.backward()
-        print('loss', loss.data.item())
-        print('gradients')
-        for name, param in self.model.named_parameters():
-            g = param.grad
-            if g is None:
-                continue
-
-            total_grad = g.sum()
-            if total_grad:
-                print(name, total_grad)
-        print()
-
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
-
         self.optimizer.step()
         # Clear out the gradients before the next batch.
         self.model.zero_grad()

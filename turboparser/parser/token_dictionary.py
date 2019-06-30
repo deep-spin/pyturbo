@@ -184,6 +184,8 @@ class TokenDictionary(Dictionary):
         form_counts = Counter()
         lemma_counts = Counter()
         deprel_counts = Counter()
+        upos_counts = Counter()
+        xpos_counts = Counter()
 
         # this stores a Counter for each morph feature (tense, number, gender..)
         morph_counts = {}
@@ -228,11 +230,13 @@ class TokenDictionary(Dictionary):
                     # POS tags
                     tag = instance.get_upos(i)
                     if tag != ignore_value:
-                        self.upos_alphabet.insert(tag)
+                        upos_counts[tag] += 1
+                        # self.upos_alphabet.insert(tag)
 
                     tag = instance.get_xpos(i)
                     if tag != ignore_value:
-                        self.xpos_alphabet.insert(tag)
+                        xpos_counts[tag] += 1
+                        # self.xpos_alphabet.insert(tag)
 
                     # Morph features
                     morph_singleton = instance.get_morph_singleton(i)
@@ -262,11 +266,12 @@ class TokenDictionary(Dictionary):
             for symbol in SPECIAL_SYMBOLS:
                 feature_alphabet.insert(symbol)
 
-            for value, count in feature_counts.most_common():
+            # now sort all values within this feature
+            values = sorted(feature_counts)
+            for value in values:
+                count = feature_counts[value]
                 if count >= morph_cutoff:
                     feature_alphabet.insert(value)
-                else:
-                    break
 
             self.morph_tag_alphabets[feature] = feature_alphabet
 
@@ -283,9 +288,11 @@ class TokenDictionary(Dictionary):
         # (only using cutoffs for words and lemmas)
         for alphabet, counter, cutoff in \
             zip([self.character_alphabet, self.form_alphabet,
-                 self.lemma_alphabet, self.deprel_alphabet],
-                [char_counts, form_counts, lemma_counts, deprel_counts],
-                [char_cutoff, form_cutoff, lemma_cutoff, 1]):
+                 self.lemma_alphabet, self.deprel_alphabet,
+                 self.upos_alphabet, self.xpos_alphabet],
+                [char_counts, form_counts, lemma_counts, deprel_counts,
+                 upos_counts, xpos_counts],
+                [char_cutoff, form_cutoff, lemma_cutoff, 1, 1, 1]):
 
             alphabet.clear()
             for symbol in SPECIAL_SYMBOLS:

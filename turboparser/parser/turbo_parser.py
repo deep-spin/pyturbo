@@ -695,7 +695,6 @@ class TurboParser(object):
                 self.reset_performance_metrics()
 
             if global_step % self.options.eval_interval == 0:
-                exit()
                 self.run_on_validation(valid_data)
                 if self._should_save:
                     self.save()
