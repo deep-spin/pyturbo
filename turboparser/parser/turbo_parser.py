@@ -714,8 +714,6 @@ class TurboParser(object):
                     else:
                         break
 
-            train_data.shuffle_batches()
-
         msg = 'Best validation UAS: %f' % self.best_validation_uas
         if not self.options.unlabeled:
             msg += '\tBest validation LAS: %f' % self.best_validation_las
