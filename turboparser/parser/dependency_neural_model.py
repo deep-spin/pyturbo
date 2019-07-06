@@ -178,7 +178,7 @@ class DependencyNeuralModel(nn.Module):
         # self.shared_rnn = LSTM(rnn_input_size, rnn_size, rnn_layers, dropout)
         # self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         self.shared_rnn = HighwayLSTM(rnn_input_size, rnn_size, rnn_layers,
-                                      dropout=0)
+                                      dropout=self.dropout_rate)
         self.parser_rnn = HighwayLSTM(2 * rnn_size, rnn_size)
 
         self.dropout_replacement = nn.Parameter(
