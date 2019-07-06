@@ -63,7 +63,8 @@ class CharLSTM(nn.Module):
         :param char_indices: tensor (batch, max_sequence_length,
             max_token_length)
         :param token_lengths: tensor (batch, max_sequence_length)
-        :return: a tensor with shape (batch, max_sequence_length, 2*hidden_size)
+        :return: a tensor with shape
+            (batch, max_sequence_length, num_dir*hidden_size)
         """
         batch_size, max_sentence_length, max_token_length = char_indices.shape
 
