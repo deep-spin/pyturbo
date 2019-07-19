@@ -88,7 +88,6 @@ class InstanceData(object):
 
         if self.next_batch_pointer >= len(self.batches):
             self.next_batch_pointer = 0
-
             if shuffle_on_cycle:
                 self.shuffle_batches()
 
