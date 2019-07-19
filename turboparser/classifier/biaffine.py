@@ -13,7 +13,7 @@ class PairwiseBilinear(nn.Module):
 
     Input: tensors of sizes (N x L1 x D1) and (N x L2 x D2)
     Output: tensor of size (N x L1 x L2 x O)'''
-    def __init__(self, input1_size, input2_size, output_size, bias=True):
+    def __init__(self, input1_size, input2_size, output_size):
         super().__init__()
 
         self.input1_size = input1_size

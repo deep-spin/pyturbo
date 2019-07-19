@@ -16,9 +16,7 @@ def main():
     # Parse arguments.
     option_parser = DependencyOptionParser()
     options = option_parser.parse_args()
-
     set_seeds(options.seed)
-    torch.set_printoptions(precision=3, edgeitems=3)
 
     if options.train:
         train_parser(options)

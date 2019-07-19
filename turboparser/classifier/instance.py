@@ -49,8 +49,8 @@ class InstanceData(object):
         :param words_per_batch: maximum words per batch (summing all sentences)
         :param sort: whether to sort sentences by size before batching
         """
-        # if sort:
-        #     self.sort_by_size()
+        if sort:
+            self.sort_by_size()
 
         self.batches = []
         last_index = 0
@@ -78,14 +78,19 @@ class InstanceData(object):
         """
         random.shuffle(self.batches)
 
-    def get_next_batch(self):
+    def get_next_batch(self, shuffle_on_cycle=True):
         """
         Return the next batch in the data. It keeps track of batches internally
         and will wrap around them once they are finished.
         """
         batch = self.batches[self.next_batch_pointer]
         self.next_batch_pointer += 1
-        self.next_batch_pointer %= len(self.batches)
+
+        if self.next_batch_pointer >= len(self.batches):
+            self.next_batch_pointer = 0
+
+            if shuffle_on_cycle:
+                self.shuffle_batches()
 
         return batch
 

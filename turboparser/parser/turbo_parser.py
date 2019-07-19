@@ -6,7 +6,7 @@ from .token_dictionary import TokenDictionary
 from .constants import Target, target2string
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
-from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
+from .dependency_decoder import DependencyDecoder, chu_liu_edmonds_one_root, \
     make_score_matrix
 from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
@@ -402,7 +402,7 @@ class TurboParser(object):
             zeros = np.zeros_like(head_score_matrix[0]).reshape([1, -1])
             score_matrix = np.concatenate([zeros, head_score_matrix], 0)
 
-        pred_heads = chu_liu_edmonds(score_matrix)
+        pred_heads = chu_liu_edmonds_one_root(score_matrix)
         if self.options.single_root:
             root = -1
             root_score = -1
@@ -479,7 +479,8 @@ class TurboParser(object):
             gold_heads = gold_output[Target.HEADS]
 
             head_scores = inst_pred[Target.HEADS][:real_length, :len(instance)]
-            deprel_scores = inst_pred[Target.RELATIONS][:real_length, :len(instance)]
+            deprel_scores = inst_pred[Target.RELATIONS][:real_length,
+                                                        :len(instance)]
             pred_heads, pred_labels = self.decode_predictions(
                 None, parts, head_scores, deprel_scores)
 
@@ -676,8 +677,10 @@ class TurboParser(object):
         valid_data = self.preprocess_instances(valid_instances)
         train_data.prepare_batches(self.options.batch_size, sort=True)
         valid_data.prepare_batches(self.options.batch_size, sort=True)
-        logging.info('Training data spread across %d batches\n'
+        logging.info('Training data spread across %d batches'
                      % len(train_data.batches))
+        logging.info('Validation data spread across %d batches\n'
+                     % len(valid_data.batches))
 
         self._reset_best_validation_metric()
         self.reset_performance_metrics()
@@ -713,8 +716,6 @@ class TurboParser(object):
                         num_bad_evals = 0
                     else:
                         break
-
-            train_data.shuffle_batches()
 
         msg = 'Best validation UAS: %f' % self.best_validation_uas
         if not self.options.unlabeled:

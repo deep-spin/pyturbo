@@ -45,7 +45,6 @@ class DependencyNeuralScorer(object):
     def __init__(self):
         self.part_scores = None
         self.model = None
-        self.c = 0
 
     def compute_loss(self, instance_data, predicted_parts):
         """

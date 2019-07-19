@@ -719,3 +719,54 @@ def tarjan(heads):
 
     return cycles
 
+
+def chu_liu_edmonds_one_root(score_matrix):
+    """
+    Run the Chu-Liu-Edmonds' algorithm to find the maximum spanning tree with a
+    single root.
+
+    :param score_matrix: a matrix such that cell [m, h] has the score for the
+        arc (h, m).
+    :return: an array heads, such that heads[m] contains the head of token m.
+        The root is in position 0 and has head -1.
+    """
+    def set_root(scores, root):
+        """
+        Return a tuple (new_scores, root_score)
+        The first one is a new version of the original scores in which the token
+        `root` is the new root, and every other token has score -inf for being
+        root.
+        The root_score is the original score for `root` being the actual root.
+        """
+        root_score = scores[root, 0]
+        scores = np.array(scores)
+        scores[1:, 0] = -np.inf
+        scores[root] = -np.inf
+        scores[root, 0] = 0
+        return scores, root_score
+
+    score_matrix = score_matrix.astype(np.float64)
+    tree = chu_liu_edmonds(score_matrix)
+    roots_to_try = np.where(np.equal(tree[1:], 0))[0] + 1
+    if len(roots_to_try) == 1:
+        return tree
+
+    best_score = -np.inf
+    best_tree = None
+    num_tokens = len(score_matrix)
+    for root in roots_to_try:
+        new_scores, root_score = set_root(score_matrix, root)
+        new_tree = chu_liu_edmonds(new_scores)
+
+        # scores are supposed to be the log probabilities of each arc
+        tree_log_probs = new_scores[np.arange(num_tokens), new_tree]
+
+        if (tree_log_probs > -np.inf).all():
+            tree_score = tree_log_probs.sum() + root_score
+            if tree_score > best_score:
+                best_score = tree_score
+                best_tree = new_tree
+
+    assert best_tree is not None
+
+    return best_tree

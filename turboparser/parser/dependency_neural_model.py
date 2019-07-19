@@ -110,7 +110,8 @@ class DependencyNeuralModel(nn.Module):
             num_upos = token_dictionary.get_num_upos_tags()
             # if num_upos > len(SPECIAL_SYMBOLS):
             self.upos_embeddings = nn.Embedding(num_upos,
-                                                tag_embedding_size)
+                                                tag_embedding_size,
+                                                padding_idx=0)
             # else:
             #     self.upos_embeddings = None
 
@@ -121,7 +122,8 @@ class DependencyNeuralModel(nn.Module):
             # if num_xpos > len(SPECIAL_SYMBOLS):  and \
             #         upos_tags != xpos_tags:
             self.xpos_embeddings = nn.Embedding(num_xpos,
-                                                tag_embedding_size)
+                                                tag_embedding_size,
+                                                padding_idx=0)
             # else:
             #     self.xpos_embeddings = None
 
@@ -132,7 +134,8 @@ class DependencyNeuralModel(nn.Module):
             self.morph_embeddings = nn.ModuleList()
             for feature_name in morph_alphabets:
                 alphabet = morph_alphabets[feature_name]
-                embeddings = nn.Embedding(len(alphabet), tag_embedding_size)
+                embeddings = nn.Embedding(len(alphabet), tag_embedding_size,
+                                          padding_idx=0)
                 self.morph_embeddings.append(embeddings)
             rnn_input_size += tag_embedding_size
         else:
@@ -158,7 +161,7 @@ class DependencyNeuralModel(nn.Module):
             self.char_rnn = None
 
         fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
-                                             dtype=torch.float32)
+                                             dtype=torch.float)
         self.fixed_word_embeddings = nn.Embedding.from_pretrained(
             fixed_word_embeddings, freeze=True)
         self.fixed_embedding_projection = nn.Linear(
@@ -178,7 +181,7 @@ class DependencyNeuralModel(nn.Module):
         # self.shared_rnn = LSTM(rnn_input_size, rnn_size, rnn_layers, dropout)
         # self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         self.shared_rnn = HighwayLSTM(rnn_input_size, rnn_size, rnn_layers,
-                                      dropout=0)
+                                      dropout=self.dropout_rate)
         self.parser_rnn = HighwayLSTM(2 * rnn_size, rnn_size)
 
         self.dropout_replacement = nn.Parameter(
@@ -517,7 +520,7 @@ class DependencyNeuralModel(nn.Module):
         self.scores['dist_kld'] = dist_kld
 
     def _compute_grandparent_scores(self, states, parts):
-        """
+        """`
         Compute the grandparent scores and store them in the
         appropriate position in the `scores` tensor.
 

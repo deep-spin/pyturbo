@@ -1,6 +1,7 @@
 import torch
 from torch import nn
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, \
+    PackedSequence
 
 
 class LSTM(nn.LSTM):
@@ -93,25 +94,27 @@ class CharLSTM(nn.Module):
 
         if self.attention:
             # first, pad the packed sequence
-            padded_outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, True)
+            raw_data = outputs.data
 
             # apply attention on the outputs of all time steps
             # attention is (batch, max_token_len, 1)
-            raw_attention = self.attention_layer(self.dropout(padded_outputs))
+            raw_attention = self.attention_layer(self.dropout(raw_data))
             attention = torch.sigmoid(raw_attention)
 
-            # TODO: use actual attention instead of just sigmoid
-            attended = padded_outputs * attention
-            last_output_bi = attended.sum(1)
+            packed = PackedSequence(attention * raw_data, outputs.batch_sizes)
+            padded, _ = pad_packed_sequence(packed, True)
+            last_output = padded.sum(1)
+            # # TODO: use actual attention instead of just sigmoid
         else:
             # concatenate the last outputs of both directions
-            last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
+            if self.num_directions == 2:
+                last_output = torch.cat([last_output[0], last_output[1]],
+                                        dim=-1)
 
         num_words = batch_size * max_sentence_length
         shape = [num_words, self.num_directions * self.lstm.hidden_size]
-        char_representation = torch.zeros(shape)
-        char_representation = char_representation.to(last_output_bi.device)
-        char_representation[sorted_inds] = last_output_bi
+        char_representation = torch.zeros(shape, device=last_output.device)
+        char_representation[sorted_inds] = last_output
 
         return char_representation.view([batch_size, max_sentence_length, -1])
 
