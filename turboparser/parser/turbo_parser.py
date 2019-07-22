@@ -7,7 +7,7 @@ from .constants import Target, target2string
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
 from .dependency_decoder import DependencyDecoder, chu_liu_edmonds_one_root, \
-    make_score_matrix
+    make_score_matrix, chu_liu_edmonds
 from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
@@ -402,36 +402,10 @@ class TurboParser(object):
             zeros = np.zeros_like(head_score_matrix[0]).reshape([1, -1])
             score_matrix = np.concatenate([zeros, head_score_matrix], 0)
 
-        pred_heads = chu_liu_edmonds_one_root(score_matrix)
         if self.options.single_root:
-            root = -1
-            root_score = -1
-
-            for m, h in enumerate(pred_heads[1:], 1):
-                if h == 0:
-                    # score_matrix is (m, h), starting from 0
-                    score = score_matrix[m - 1, h]
-
-                    if root != -1:
-                        # we have already found another root before
-
-                        if score > root_score:
-                            # this token is better scored for root
-                            # attach the previous root candidate to it
-                            pred_heads[root] = m
-                            parts.add_dummy_relation(m, root)
-                            root = m
-                            root_score = score
-
-                        else:
-                            # attach it to the other root
-                            pred_heads[m] = root
-                            parts.add_dummy_relation(root, m)
-
-                        self.reassigned_roots += 1
-                    else:
-                        root = m
-                        root_score = score
+            pred_heads = chu_liu_edmonds_one_root(score_matrix)
+        else:
+            pred_heads = chu_liu_edmonds(score_matrix)
 
         pred_heads = pred_heads[1:]
         if parts.labeled:
@@ -786,7 +760,7 @@ class TurboParser(object):
         #
         # for target in self.additional_targets:
         #     target_name = target2string[target]
-        #     acc = self.accumulated_hits[target] / self.total_tokens
+        #     acc = self.accumulated_hits[target] / self.total_ tokens
         #     msgs.append('%s: %.6f' % (target_name, acc))
         # logging.info('\t'.join(msgs))
 
@@ -857,8 +831,8 @@ class TurboParser(object):
             # predicted_parts = self.decode_train(instance, parts, inst_scores)
             # all_predicted_parts.append(predicted_parts)
 
-            self._update_task_metrics(
-                None, instance, inst_scores, parts, gold_labels)
+            # self._update_task_metrics(
+            #     None, instance, inst_scores, parts, gold_labels)
 
         # run the gradient step for the whole batch
         start_time = time.time()
