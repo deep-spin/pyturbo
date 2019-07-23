@@ -81,7 +81,7 @@ class DependencyNeuralScorer(object):
         gold_heads = gold_heads.to(head_scores.device)
         gold_relations = gold_relations.to(head_scores.device)
 
-        compute_loss = nn.CrossEntropyLoss(ignore_index=-1, reduction='sum')
+        compute_loss = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
 
         # head loss
         # stack the head predictions for all words from all sentences
@@ -127,11 +127,11 @@ class DependencyNeuralScorer(object):
         # distance loss
         distance_kld = torch.gather(distance_kld, 2, heads3d)
         distance_kld[negative_inds] = 0
-        kld_sum = distance_kld.sum()
+        kld_sum = distance_kld.mean()
         loss -= kld_sum
 
-        num_words = sum([len(inst) for inst in instance_data.instances])
-        loss /= num_words
+        # num_words = sum([len(inst) - 1 for inst in instance_data.instances])
+        # loss /= num_words
 
         losses[Target.DEPENDENCY_PARTS] = loss
 

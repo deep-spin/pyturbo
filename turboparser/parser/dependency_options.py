@@ -89,8 +89,9 @@ class DependencyOptionParser(OptionParser):
                             embeddings.""", default=75, type=int)
         parser.add_argument('--char_embedding_size', type=int, default=100,
                             help='Size of char embeddings')
-        parser.add_argument('--char_hidden_size', default=400, type=int,
-                            help='''Size of the hidden char RNN''')
+        parser.add_argument('--char_hidden_size', default=200, type=int,
+                            help='''Size of the hidden char RNN (each 
+                            direction)''')
         parser.add_argument('--tag_embedding_size', type=int, default=50,
                             help='Size of tag embeddings')
         parser.add_argument('--transform_size', type=int, default=125,

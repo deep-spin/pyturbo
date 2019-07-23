@@ -96,10 +96,10 @@ class DependencyNeuralModel(nn.Module):
         if trainable_word_embedding_size:
             num_words = token_dictionary.get_num_forms()
             self.trainable_word_embeddings = nn.Embedding(
-                num_words, trainable_word_embedding_size, padding_idx=0)
+                num_words, trainable_word_embedding_size)
             num_lemmas = token_dictionary.get_num_lemmas()
             self.lemma_embeddings = nn.Embedding(
-                num_lemmas, trainable_word_embedding_size, padding_idx=0)
+                num_lemmas, trainable_word_embedding_size)
             rnn_input_size += 2 * trainable_word_embedding_size
         else:
             self.trainable_word_embeddings = None
@@ -108,24 +108,22 @@ class DependencyNeuralModel(nn.Module):
             # only use tag embeddings if there are actual tags, not only special
             # symbols for root, unknown, etc
             num_upos = token_dictionary.get_num_upos_tags()
-            # if num_upos > len(SPECIAL_SYMBOLS):
-            self.upos_embeddings = nn.Embedding(num_upos,
-                                                tag_embedding_size,
-                                                padding_idx=0)
-            # else:
-            #     self.upos_embeddings = None
+            if num_upos > len(SPECIAL_SYMBOLS):
+                self.upos_embeddings = nn.Embedding(num_upos,
+                                                    tag_embedding_size)
+            else:
+                self.upos_embeddings = None
 
             # also check if UPOS and XPOS are not the same
             num_xpos = token_dictionary.get_num_xpos_tags()
             xpos_tags = token_dictionary.get_xpos_tags()
             upos_tags = token_dictionary.get_upos_tags()
-            # if num_xpos > len(SPECIAL_SYMBOLS):  and \
-            #         upos_tags != xpos_tags:
-            self.xpos_embeddings = nn.Embedding(num_xpos,
-                                                tag_embedding_size,
-                                                padding_idx=0)
-            # else:
-            #     self.xpos_embeddings = None
+            if num_xpos > len(SPECIAL_SYMBOLS) and \
+                    upos_tags != xpos_tags:
+                self.xpos_embeddings = nn.Embedding(num_xpos,
+                                                    tag_embedding_size)
+            else:
+                self.xpos_embeddings = None
 
             if self.upos_embeddings is not None or \
                     self.xpos_embeddings is not None:
@@ -134,8 +132,7 @@ class DependencyNeuralModel(nn.Module):
             self.morph_embeddings = nn.ModuleList()
             for feature_name in morph_alphabets:
                 alphabet = morph_alphabets[feature_name]
-                embeddings = nn.Embedding(len(alphabet), tag_embedding_size,
-                                          padding_idx=0)
+                embeddings = nn.Embedding(len(alphabet), tag_embedding_size)
                 self.morph_embeddings.append(embeddings)
             rnn_input_size += tag_embedding_size
         else:
@@ -147,9 +144,9 @@ class DependencyNeuralModel(nn.Module):
             num_chars = token_dictionary.get_num_characters()
             self.char_rnn = CharLSTM(
                 num_chars, char_embedding_size, char_hidden_size,
-                dropout=dropout, bidirectional=False)
+                dropout=dropout, bidirectional=True)
 
-            num_directions = 1
+            num_directions = 2
             self.char_projection = nn.Linear(
                 num_directions * char_hidden_size, transform_size, bias=False)
             rnn_input_size += transform_size
@@ -170,16 +167,6 @@ class DependencyNeuralModel(nn.Module):
         #     fixed_word_embeddings.shape[1])
         rnn_input_size += transform_size
 
-        # if self.distance_embedding_size:
-        #     bins = np.array(list(range(1, 10)) + list(range(10, 31, 5)))
-        #     self.distance_bins = np.concatenate([-bins[::-1], bins])
-        #     self.distance_embeddings = nn.Embedding(len(self.distance_bins) * 2,
-        #                                             distance_embedding_size)
-        # else:
-        #     self.distance_bins = None
-        #     self.distance_embeddings = None
-        # self.shared_rnn = LSTM(rnn_input_size, rnn_size, rnn_layers, dropout)
-        # self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
         self.shared_rnn = HighwayLSTM(rnn_input_size, rnn_size, rnn_layers,
                                       dropout=self.dropout_rate)
         self.parser_rnn = HighwayLSTM(2 * rnn_size, rnn_size)
@@ -273,19 +260,6 @@ class DependencyNeuralModel(nn.Module):
             self.gsib_grandparent_mlp = self._create_mlp(
                 hidden_size=self.ho_mlp_size)
             self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
-
-        # if self.distance_embedding_size:
-        #     self.distance_projector = nn.Linear(
-        #         distance_embedding_size,
-        #         arc_mlp_size,
-        #         bias=True)
-        #     self.label_distance_projector = nn.Linear(
-        #         distance_embedding_size,
-        #         label_mlp_size,
-        #         bias=True
-        #     )
-        # else:
-        #     self.distance_mlp = None
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
