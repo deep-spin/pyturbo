@@ -822,17 +822,6 @@ class TurboParser(object):
         self.time_scores += end_time - start_time
 
         all_predicted_parts = []
-        for i in range(len(instance_data)):
-            instance = instance_data.instances[i]
-            parts = instance_data.parts[i]
-            gold_labels = instance_data.gold_labels[i]
-            inst_scores = scores[i]
-
-            # predicted_parts = self.decode_train(instance, parts, inst_scores)
-            # all_predicted_parts.append(predicted_parts)
-
-            # self._update_task_metrics(
-            #     None, instance, inst_scores, parts, gold_labels)
 
         # run the gradient step for the whole batch
         start_time = time.time()
