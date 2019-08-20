@@ -105,7 +105,7 @@ class CharLSTM(nn.Module):
             packed = PackedSequence(attention * raw_data, outputs.batch_sizes)
             padded, _ = pad_packed_sequence(packed, True)
             last_output = padded.sum(1)
-            # # TODO: use actual attention instead of just sigmoid
+            # TODO: use actual attention instead of just sigmoid
         else:
             # concatenate the last outputs of both directions
             if self.num_directions == 2:
@@ -175,7 +175,7 @@ class HighwayLSTM(nn.Module):
 
             g = torch.sigmoid(gate(padded_x))
             t = torch.tanh(highway(padded_x))
-            hidden = padded_hidden + g * t
+            hidden = g * padded_hidden + (1 - g) * t
 
             x = pack_padded_sequence(hidden, lengths, batch_first=True)
 

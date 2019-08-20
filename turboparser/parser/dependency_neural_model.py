@@ -144,7 +144,7 @@ class DependencyNeuralModel(nn.Module):
             num_chars = token_dictionary.get_num_characters()
             self.char_rnn = CharLSTM(
                 num_chars, char_embedding_size, char_hidden_size,
-                dropout=dropout, bidirectional=True)
+                dropout=dropout, bidirectional=False)
 
             num_directions = 2
             self.char_projection = nn.Linear(
