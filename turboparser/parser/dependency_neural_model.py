@@ -146,7 +146,7 @@ class DependencyNeuralModel(nn.Module):
                 num_chars, char_embedding_size, char_hidden_size,
                 dropout=dropout, bidirectional=False)
 
-            num_directions = 2
+            num_directions = 1
             self.char_projection = nn.Linear(
                 num_directions * char_hidden_size, transform_size, bias=False)
             rnn_input_size += transform_size
@@ -434,6 +434,10 @@ class DependencyNeuralModel(nn.Module):
         """
         Compute the first order scores and store them in the appropriate
         position in the `scores` tensor.
+
+        The score matrices have shape (modifer, head), and do not have the row
+        corresponding to the root as a modifier. Thus they have shape
+        (num_words - 1, num_words).
 
         :param states: hidden states returned by the RNN; one for each word
         :param lengths: length of each sentence in the batch (including root)
@@ -800,10 +804,58 @@ class DependencyNeuralModel(nn.Module):
 
         return char_representation
 
-    def forward(self, instances, parts):
+    def convert_arc_scores_to_parts(self, instances, parts):
+        """
+        Convert the stored matrices with arc scores and label scores to 1d
+        arrays, in the same order as in parts. Masks are also applied.
+
+        :param instances: list of DependencyInstanceNumeric
+        :param parts: a DependencyParts object
+        """
+        new_head_scores = []
+        new_label_scores = []
+
+        # arc_mask has shape (head, modifier) but scores are
+        # (modifier, head); so we transpose
+        all_head_scores = torch.transpose(self.scores[Target.HEADS], 1, 2)
+        all_label_scores = torch.transpose(self.scores[Target.RELATIONS], 1, 2)
+
+        for i, instance in enumerate(instances):
+            mask = parts[i].arc_mask
+            mask = torch.tensor(mask.astype(np.uint8))
+            length = len(instance)
+
+            # get a matrix [inst_length, inst_length - 1]
+            # (root has already been discarded as a modifier)
+            head_scores = all_head_scores[i, :length, :length - 1]
+
+            # get a tensor [inst_length, inst_length, num_labels - 1]
+            label_scores = all_label_scores[i, :length, :length - 1]
+
+            mask = mask[:, 1:]
+            head_scores1d = head_scores[mask]
+            label_scores1d = label_scores[mask].view(-1)
+            new_head_scores.append(head_scores1d)
+            new_label_scores.append(label_scores1d)
+
+        self.scores[Target.HEADS] = new_head_scores
+        self.scores[Target.RELATIONS] = new_label_scores
+
+    def forward(self, instances, parts, normalization='local'):
         """
         :param instances: a list of DependencyInstance objects
         :param parts: a list of DependencyParts objects
+        :param normalization: either "local" or "global". It only affects
+            first order parts (arcs and labeled arcs).
+
+            If "local", the losses for each word (as a modifier) is computed
+            independently. The model will store a tensor with all arc scores
+            (including padding) for efficient loss computation.
+
+            If "global", the loss is a hinge margin over the global structure.
+            The model will store scores as a list of 1d arrays (without padding)
+            that can easily be used with AD3 decoding functions.
+
         :return: a score matrix with shape (num_instances, longest_length)
         """
         self.scores = {Target.HEADS: []}
@@ -879,5 +931,8 @@ class DependencyNeuralModel(nn.Module):
 
             if self.model_type.grandsiblings:
                 self._compute_grandsibling_scores(states, sent_parts)
+
+        if normalization == 'global':
+            self.convert_arc_scores_to_parts(instances, parts)
 
         return self.scores

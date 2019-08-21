@@ -91,8 +91,8 @@ class TurboParser(object):
                 predict_morph=options.morph)
 
             self.neural_scorer.initialize(
-                model, self.options.learning_rate, options.decay,
-                options.beta1, options.beta2)
+                model, self.options.normalization, self.options.learning_rate,
+                options.decay, options.beta1, options.beta2)
 
             if self.options.verbose:
                 print('Model summary:', file=sys.stderr)
@@ -705,18 +705,6 @@ class TurboParser(object):
         time_msg %= (self.time_scores, self.time_decoding, self.time_gradient)
         logging.info(time_msg)
 
-        # uas = self.accumulated_uas / self.total_tokens
-        # msgs = ['Train accuracies:\tUAS: %.6f' % uas]
-        # if not self.options.unlabeled:
-        #     las = self.accumulated_las / self.total_tokens
-        #     msgs.append('LAS: %.6f' % las)
-        #
-        # for target in self.additional_targets:
-        #     target_name = target2string[target]
-        #     acc = self.accumulated_hits[target] / self.total_ tokens
-        #     msgs.append('%s: %.6f' % (target_name, acc))
-        # logging.info('\t'.join(msgs))
-
     def run_batch(self, instance_data, return_loss=False):
         """
         Predict the output for the given instances.
@@ -775,13 +763,16 @@ class TurboParser(object):
         self.time_scores += end_time - start_time
 
         all_predicted_parts = []
-        for i in range(len(instance_data)):
-            instance = instance_data.instances[i]
-            parts = instance_data.parts[i]
-            inst_scores = scores[i]
+        if self.options.normalization == 'global':
+            # need to decode sentences in order to compute global loss
+            for i in range(len(instance_data)):
+                instance = instance_data.instances[i]
+                parts = instance_data.parts[i]
+                inst_scores = scores[i]
 
-            predicted_parts = self.decode_train(instance, parts, inst_scores)
-            all_predicted_parts.append(predicted_parts)
+                predicted_parts = self.decode_train(
+                    instance, parts, inst_scores)
+                all_predicted_parts.append(predicted_parts)
 
         # run the gradient step for the whole batch
         start_time = time.time()

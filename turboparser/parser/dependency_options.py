@@ -49,6 +49,13 @@ class DependencyOptionParser(OptionParser):
                             default=0, const=1,
                             help="""Make the parser output just the backbone
                             dependencies.""")
+        parser.add_argument('--normalization', default='global',
+                            choices=['local', 'global'],
+                            help="""Type of output score normalization for 
+                            arc-factored models. local treats the head of each 
+                            word as an independent softmax, while global applies
+                            a margin loss over the complete structure. global 
+                            is slower but tends to give better results.""")
         parser.add_argument('--upos', action='store_true',
                             help='Predict UPOS tags')
         parser.add_argument('--xpos', action='store_true',

@@ -46,7 +46,7 @@ class DependencyNeuralScorer(object):
         self.part_scores = None
         self.model = None
 
-    def compute_loss_margin(self, instance_data, predicted_parts):
+    def compute_loss_global_margin(self, instance_data, predicted_parts):
         """
         Compute the losses for parsing and tagging.
 
@@ -88,9 +88,10 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    def compute_loss(self, instance_data, predicted_parts):
+    def compute_loss(self, instance_data, predicted_parts=None):
         """
-        Compute the losses for parsing and tagging.
+        Compute the losses for parsing and tagging. The appropriate function
+        will be called depending on local or global normalization.
 
         :param instance_data: InstanceData object
         :param predicted_parts: list of numpy arrays with predicted parts for
@@ -98,10 +99,29 @@ class DependencyNeuralScorer(object):
         :return: dictionary mapping each target to a loss scalar, as a torch
             variable
         """
-        batch_size = len(instance_data)
-        losses = {}
-        gold_labels = instance_data.gold_labels
+        losses = self.compute_tagging_loss(instance_data)
 
+        if self.normalization == 'global':
+            dep_losses = self.compute_loss_global_margin(instance_data,
+                                                         predicted_parts)
+        else:
+            dep_losses = self.compute_loss_local(instance_data)
+
+        losses.update(dep_losses)
+
+        return losses
+
+    def compute_tagging_loss(self, instance_data):
+        """
+        Compute losses of tagging tasks. No structure is considered, only
+        the cross-entropy.
+
+        :param instance_data: InstanceData object
+        :return: dictionary mapping each target to a loss scalar, as a torch
+            variable
+        """
+        gold_labels = instance_data.gold_labels
+        losses = {}
         for target in [Target.UPOS, Target.XPOS, Target.MORPH]:
             if target not in gold_labels[0]:
                 continue
@@ -114,6 +134,20 @@ class DependencyNeuralScorer(object):
             logits = logits.transpose(1, 2)
             losses[target] = F.cross_entropy(logits, padded_gold,
                                              ignore_index=-1)
+
+        return losses
+
+    def compute_loss_local(self, instance_data):
+        """
+        Compute the losses for parsing, treating each word as an independent
+        instance.
+
+        :param instance_data: InstanceData object
+        :return: dictionary mapping each target to a loss scalar, as a torch
+            variable
+        """
+        batch_size = len(instance_data)
+        losses = {}
 
         head_scores = self.model.scores[Target.HEADS]
         label_scores = self.model.scores[Target.RELATIONS]
@@ -189,35 +223,56 @@ class DependencyNeuralScorer(object):
             instances = [instances]
             parts = [parts]
 
-        model_scores = self.model(instances, parts)
+        model_scores = self.model(instances, parts, self.normalization)
         numpy_scores = {}
         for target in model_scores:
-            detached = model_scores[target].detach()
+            if self.normalization == 'local':
+                detached = model_scores[target].detach()
 
-            if target == Target.RELATIONS:
-                # shape is (batch, modifier, head, label)
-                value = detached.argmax(3)
-            elif target == Target.HEADS:
-                # (batch, modifier, head)
-                value = F.log_softmax(detached, 2)
-            else:
+                # local normalization stores tensors (num_words, num_words)
+                if target == Target.RELATIONS:
+                    # shape is (batch, modifier, head, label)
+                    value = detached.argmax(3)
+                elif target == Target.HEADS:
+                    # (batch, modifier, head)
+                    value = F.log_softmax(detached, 2)
+                else:
+                    # (batch, word, label)
+                    value = detached.argmax(2)
+
+                numpy_scores[target] = value.cpu().numpy()
+
+            elif target not in (Target.RELATIONS, Target.HEADS):
+                detached = model_scores[target].detach()
+
+                # global normalization stores the scores of each part separately
+                # So, only deal with tagging here
                 # (batch, word, label)
                 value = detached.argmax(2)
-
-            numpy_scores[target] = value.cpu().numpy()
+                numpy_scores[target] = value.cpu().numpy()
 
         # now convert a dictionary of arrays into a list of dictionaries
         score_list = []
         for i in range(len(instances)):
             instance_scores = {target: numpy_scores[target][i]
                                for target in numpy_scores}
+
+            # in the global normalization case, we have to detach tensors one by
+            # one
+            if self.normalization == 'global':
+                instance_scores[Target.HEADS] = model_scores[Target.HEADS][i].\
+                    detach().cpu().numpy()
+                instance_scores[Target.RELATIONS] = \
+                    model_scores[Target.RELATIONS][i].detach().cpu().numpy()
+
             score_list.append(instance_scores)
 
         return score_list
 
-    def initialize(self, model, learning_rate=0.001, decay=1,
-                   beta1=0.9, beta2=0.95):
+    def initialize(self, model, normalization='local', learning_rate=0.001,
+                   decay=1, beta1=0.9, beta2=0.95):
         self.set_model(model)
+        self.normalization = normalization
         params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
             params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6)
