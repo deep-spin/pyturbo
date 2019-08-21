@@ -98,9 +98,15 @@ class DependencyParts(object):
         self.index = None
         self.index_labeled = None
         self.num_parts = 0
+
+        # the mask is to be interpreted as (head, modifier)
         self.arc_mask = mask
         self.labeled = labeled
         self.num_relations = num_relations
+
+        # offsets indicate the position in which the scores of a given target
+        # should start in the array with all part scores
+        self.offsets = {}
 
         # store the order in which part types are used
         self.type_order = []
@@ -178,6 +184,7 @@ class DependencyParts(object):
         # if there are gold labels, store them
         self.gold_parts = self._make_gold_arcs(instance)
         self.type_order.append(Target.HEADS)
+        self.offsets[Target.HEADS] = 0
 
         # all non-masked arcs count as a part
         possible_arcs = self.arc_mask.size
@@ -186,17 +193,26 @@ class DependencyParts(object):
         if self.labeled:
             self.num_labeled_arcs = self.num_arcs * self.num_relations
             self.type_order.append(Target.RELATIONS)
+            self.offsets[Target.RELATIONS] = self.num_arcs
         else:
             self.num_labeled_arcs = 0
 
+        offset = self.num_arcs + self.num_labeled_arcs
+
         if model_type.consecutive_siblings:
             self.make_consecutive_siblings(instance)
+            self.offsets[Target.NEXT_SIBLINGS] = offset
+            offset += len(self.part_lists[Target.NEXT_SIBLINGS])
 
         if model_type.grandparents:
             self.make_grandparents(instance)
+            self.offsets[Target.GRANDPARENTS] = offset
+            offset += len(self.part_lists[Target.GRANDPARENTS])
 
         if model_type.grandsiblings:
             self.make_grandsiblings(instance)
+            self.offsets[Target.GRANDSIBLINGS] = offset
+            offset += len(self.part_lists[Target.GRANDSIBLINGS])
 
         self.num_parts = self.num_arcs + self.num_labeled_arcs + \
             sum(len(parts) for parts in self.part_lists.values())

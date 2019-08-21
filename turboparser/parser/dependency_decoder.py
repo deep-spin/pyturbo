@@ -231,19 +231,21 @@ class DependencyDecoder(StructuredDecoder):
         It only affects Arcs or LabeledArcs (in case the latter are used).
 
         This is used before actually decoding.
+
+        :type parts: DependencyParts
+        :param scores: a dictionary mapping target names to scores produced by
+            the network. The scores must be 1-d arrays.
         """
         if parts.labeled:
             # place the margin on LabeledArcs scores
-            # their offset in the gold vector is immediately after Arcs
-            offset = parts.num_arcs
-            num_parts = parts.num_labeled_arcs
             key = Target.RELATIONS
+            num_parts = parts.num_labeled_arcs
         else:
             # place the margin on Arc scores
-            offset = 0
-            num_parts = parts.num_arcs
             key = Target.HEADS
+            num_parts = parts.num_arcs
 
+        offset = parts.offsets[key]
         gold_values = parts.gold_parts[offset:offset + num_parts]
         scores[key] += 0.5 - gold_values
 

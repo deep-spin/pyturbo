@@ -430,14 +430,13 @@ class DependencyNeuralModel(nn.Module):
 
         return model
 
-    def _compute_arc_scores(self, states, parts, lengths):
+    def _compute_arc_scores(self, states, lengths):
         """
         Compute the first order scores and store them in the appropriate
         position in the `scores` tensor.
 
         :param states: hidden states returned by the RNN; one for each word
-        :param parts: a DependencyParts object
-        :type parts: DependencyParts
+        :param lengths: length of each sentence in the batch (including root)
         """
         batch_size, max_sent_size, _ = states.size()
 
@@ -491,8 +490,8 @@ class DependencyNeuralModel(nn.Module):
 
         self.scores[Target.HEADS] = head_scores
         self.scores[Target.RELATIONS] = label_scores
-        self.scores['sign'] = sign_scores
-        self.scores['dist_kld'] = dist_kld
+        self.scores[Target.SIGN] = sign_scores
+        self.scores[Target.DISTANCE] = dist_kld
 
     def _compute_grandparent_scores(self, states, parts):
         """`
@@ -864,7 +863,7 @@ class DependencyNeuralModel(nn.Module):
                 hidden = self.morph_mlp(tagger_batch_states[:, 1:])
                 self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
-        self._compute_arc_scores(parser_batch_states, parts, lengths)
+        self._compute_arc_scores(parser_batch_states, lengths)
 
         # now go through each batch item
         for i in range(batch_size):

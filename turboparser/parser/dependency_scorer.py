@@ -46,6 +46,48 @@ class DependencyNeuralScorer(object):
         self.part_scores = None
         self.model = None
 
+    def compute_loss_margin(self, instance_data, predicted_parts):
+        """
+        Compute the losses for parsing and tagging.
+
+        :param instance_data: InstanceData object
+        :param predicted_parts: list of numpy arrays with predicted parts for
+            each instance
+        :return: dictionary mapping each target to a loss scalar, as a torch
+            variable
+        """
+        losses = {}
+
+        # dependency parts loss
+        parts_loss = torch.tensor(0.)
+        if torch.cuda.is_available():
+            parts_loss = parts_loss.cuda()
+
+        batch_size = len(instance_data)
+        for i in range(batch_size):
+            inst_parts = instance_data.parts[i]
+            gold_parts = inst_parts.gold_parts
+            inst_pred = predicted_parts[i]
+            part_score_list = [self.model.scores[type_][i]
+                               for type_ in inst_parts.type_order]
+            part_scores = torch.cat(part_score_list)
+            diff = torch.tensor(inst_pred - gold_parts, dtype=part_scores.dtype,
+                                device=part_scores.device)
+            error = torch.dot(part_scores, diff)
+            margin, normalizer = inst_parts.get_margin()
+            inst_parts_loss = margin.dot(inst_pred) + normalizer + error
+
+            if inst_parts_loss > 0:
+                parts_loss += inst_parts_loss
+            else:
+                if inst_parts_loss < -10e-6:
+                    logging.warning(
+                        'Ignoring negative loss: %.6f' % inst_parts_loss.item())
+
+        losses[Target.DEPENDENCY_PARTS] = parts_loss / batch_size
+
+        return losses
+
     def compute_loss(self, instance_data, predicted_parts):
         """
         Compute the losses for parsing and tagging.
@@ -75,8 +117,8 @@ class DependencyNeuralScorer(object):
 
         head_scores = self.model.scores[Target.HEADS]
         label_scores = self.model.scores[Target.RELATIONS]
-        sign_scores = self.model.scores['sign']
-        distance_kld = self.model.scores['dist_kld']
+        sign_scores = self.model.scores[Target.SIGN]
+        distance_kld = self.model.scores[Target.DISTANCE]
         gold_heads, gold_relations = get_gold_tensors(instance_data)
         gold_heads = gold_heads.to(head_scores.device)
         gold_relations = gold_relations.to(head_scores.device)

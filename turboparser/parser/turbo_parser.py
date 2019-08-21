@@ -221,53 +221,6 @@ class TurboParser(object):
 
         return gold_dict
 
-    def _update_task_metrics(self, predicted_parts, instance, scores, parts,
-                             gold_labels):
-        """
-        Update the accumulated UAS, LAS and other targets count for one
-        sentence.
-
-        It sums the metrics for one
-        sentence scaled by its number of tokens; when reporting performance,
-        this value is divided by the total number of tokens seen in all
-        sentences combined.
-
-        :param predicted_parts: predicted parts of one sentence.
-        :param scores: dictionary mapping target names to scores
-        :type predicted_parts: list
-        :type scores: dict
-        :param gold_labels: dictionary mapping targets to the gold output
-        """
-        # UAS doesn't consider the root
-        length = len(instance) - 1
-        pred_heads, pred_labels = self.decode_predictions(
-            None, parts, scores[Target.HEADS], scores[Target.RELATIONS])
-
-        gold_heads = gold_labels[Target.HEADS]
-        gold_deprel = gold_labels[Target.RELATIONS]
-
-        head_hits = pred_heads == gold_heads
-        uas = np.mean(head_hits)
-
-        if self.options.unlabeled:
-            las = 0
-        else:
-            label_hits = pred_labels == gold_deprel
-            las = np.logical_and(head_hits, label_hits).mean()
-
-        for target in self.additional_targets:
-            gold = gold_labels[target]
-            predicted = scores[target]
-
-            # remove padding
-            predicted = predicted[:len(gold)]
-            hits = np.sum(gold == predicted)
-            self.accumulated_hits[target] += hits
-
-        self.accumulated_uas += length * uas
-        self.accumulated_las += length * las
-        self.total_tokens += length
-
     def run_pruner(self, instance):
         """
         Prune out some arcs with the pruner model.
@@ -822,6 +775,13 @@ class TurboParser(object):
         self.time_scores += end_time - start_time
 
         all_predicted_parts = []
+        for i in range(len(instance_data)):
+            instance = instance_data.instances[i]
+            parts = instance_data.parts[i]
+            inst_scores = scores[i]
+
+            predicted_parts = self.decode_train(instance, parts, inst_scores)
+            all_predicted_parts.append(predicted_parts)
 
         # run the gradient step for the whole batch
         start_time = time.time()
@@ -847,7 +807,8 @@ class TurboParser(object):
         :param parts: DependencyParts
         :type parts: DependencyParts
         :param scores: a dictionary mapping target names to scores produced by
-            the network
+            the network. The scores must be 1-d arrays (matrixes should be
+            converted)
         :return: prediction array
         """
         # Do the decoding.
