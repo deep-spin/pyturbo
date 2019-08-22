@@ -1,4 +1,4 @@
-from .constants import Target
+from .constants import Target, dependency_targets
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -45,6 +45,7 @@ class DependencyNeuralScorer(object):
     def __init__(self):
         self.part_scores = None
         self.model = None
+        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
 
     def compute_loss_global_margin(self, instance_data, predicted_parts):
         """
@@ -86,6 +87,11 @@ class DependencyNeuralScorer(object):
 
         losses[Target.DEPENDENCY_PARTS] = parts_loss / batch_size
 
+        gold_heads, _ = get_gold_tensors(instance_data)
+        negative_inds = gold_heads == -1
+        loss_position = self.compute_loss_position(gold_heads, negative_inds)
+        losses.update(loss_position)
+
         return losses
 
     def compute_loss(self, instance_data, predicted_parts=None):
@@ -100,7 +106,6 @@ class DependencyNeuralScorer(object):
             variable
         """
         losses = self.compute_tagging_loss(instance_data)
-
         if self.normalization == 'global':
             dep_losses = self.compute_loss_global_margin(instance_data,
                                                          predicted_parts)
@@ -122,6 +127,7 @@ class DependencyNeuralScorer(object):
         """
         gold_labels = instance_data.gold_labels
         losses = {}
+
         for target in [Target.UPOS, Target.XPOS, Target.MORPH]:
             if target not in gold_labels[0]:
                 continue
@@ -146,23 +152,18 @@ class DependencyNeuralScorer(object):
         :return: dictionary mapping each target to a loss scalar, as a torch
             variable
         """
-        batch_size = len(instance_data)
         losses = {}
 
         head_scores = self.model.scores[Target.HEADS]
         label_scores = self.model.scores[Target.RELATIONS]
-        sign_scores = self.model.scores[Target.SIGN]
-        distance_kld = self.model.scores[Target.DISTANCE]
         gold_heads, gold_relations = get_gold_tensors(instance_data)
         gold_heads = gold_heads.to(head_scores.device)
         gold_relations = gold_relations.to(head_scores.device)
 
-        compute_loss = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
-
         # head loss
         # stack the head predictions for all words from all sentences
         scores2d = head_scores.contiguous().view(-1, head_scores.size(2))
-        loss = compute_loss(scores2d, gold_heads.view(-1))
+        loss = self.loss_fn(scores2d, gold_heads.view(-1))
 
         # label loss
         # avoid -1 in gather
@@ -178,12 +179,37 @@ class DependencyNeuralScorer(object):
 
         label_scores = torch.gather(label_scores, 2, expanded_indices)
         label_scores = label_scores.view(-1, num_labels)
-        label_loss = compute_loss(label_scores.contiguous(),
+        label_loss = self.loss_fn(label_scores.contiguous(),
                                   gold_relations.view(-1))
         loss += label_loss
+        losses[Target.DEPENDENCY_PARTS] = loss
+
+        positional_loss = self.compute_loss_position(gold_heads,
+                                                     negative_inds.squeeze(2))
+        losses.update(positional_loss)
+
+        return losses
+
+    def compute_loss_position(self, gold_heads, padding_inds):
+        """
+        Compute the loss with respect to the relative position of heads and
+        modifiers. This is only used for first order parts.
+
+        :param gold_heads: a tensor (batch, num_actual_words) such that position
+            (i, j) has the head of word j in the i-th sentence in the batch.
+        :param padding_inds: a byte tensor with the same shape as gold_heads,
+            indicating which positions are padding (with non-zero)
+        """
+        heads3d = gold_heads.unsqueeze(2)
+        padding_inds = padding_inds.unsqueeze(2)
+        heads3d = heads3d.masked_fill(padding_inds, 0)
+
+        sign_scores = self.model.scores[Target.SIGN]
+        distance_kld = self.model.scores[Target.DISTANCE]
+        batch_size = len(sign_scores)
 
         # linearization (left/right attachment) loss
-        arange = torch.arange(head_scores.size(2), device=head_scores.device)
+        arange = torch.arange(sign_scores.size(2), device=sign_scores.device)
         position1 = arange.view(1, 1, -1).expand(batch_size, -1, -1)
         position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
         head_offset = position1 - position2
@@ -195,21 +221,16 @@ class DependencyNeuralScorer(object):
         head_sign_scores = torch.cat([-head_sign_scores, head_sign_scores], 1)
 
         sign_target = torch.gather((head_offset > 0).long(), 2, heads3d)
-        sign_target[negative_inds] = -1  # -1 to padding
-        sign_loss = compute_loss(head_sign_scores.contiguous(),
+        sign_target[padding_inds] = -1  # -1 to padding
+        sign_loss = self.loss_fn(head_sign_scores.contiguous(),
                                  sign_target.view(-1))
-        loss += sign_loss
 
         # distance loss
         distance_kld = torch.gather(distance_kld, 2, heads3d)
-        distance_kld[negative_inds] = 0
+        distance_kld[padding_inds] = 0
         kld_sum = distance_kld.mean()
-        loss -= kld_sum
 
-        # num_words = sum([len(inst) - 1 for inst in instance_data.instances])
-        # loss /= num_words
-
-        losses[Target.DEPENDENCY_PARTS] = loss
+        losses = {Target.DISTANCE: -kld_sum, Target.SIGN: sign_loss}
 
         return losses
 
@@ -236,13 +257,16 @@ class DependencyNeuralScorer(object):
                 elif target == Target.HEADS:
                     # (batch, modifier, head)
                     value = F.log_softmax(detached, 2)
-                else:
+                elif target not in dependency_targets:
                     # (batch, word, label)
                     value = detached.argmax(2)
+                else:
+                    # sign scores, distance scores
+                    continue
 
                 numpy_scores[target] = value.cpu().numpy()
 
-            elif target not in (Target.RELATIONS, Target.HEADS):
+            elif target not in dependency_targets:
                 detached = model_scores[target].detach()
 
                 # global normalization stores the scores of each part separately

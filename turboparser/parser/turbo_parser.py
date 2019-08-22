@@ -327,17 +327,18 @@ class TurboParser(object):
 
         return instance, parts
 
-    def decode_predictions(self, predictions, parts, head_score_matrix=None,
+    def decode_predictions(self, predicted_parts, parts, head_score_matrix=None,
                            label_matrix=None):
         """
-        Decode the predicted heads and labels after having running the decoder.
+        Decode the predicted heads and labels over the output of the AD3 decoder
+        or just score matrices.
 
         This function takes care of the cases when the variable assignments by
         the decoder does not produce a valid tree running the Chu-Liu-Edmonds
         algorithm.
 
-        :param predictions: indicator array of predicted dependency parts (with
-            values between 0 and 1)
+        :param predicted_parts: indicator array of predicted dependency parts
+            (with values between 0 and 1)
         :param parts: the dependency parts
         :type parts: DependencyParts
         :return: a tuple (pred_heads, pred_labels)
@@ -348,7 +349,7 @@ class TurboParser(object):
         """
         if head_score_matrix is None:
             length = len(parts.arc_mask)
-            arc_scores = predictions[:parts.num_arcs]
+            arc_scores = predicted_parts[:parts.num_arcs]
             score_matrix = make_score_matrix(length, parts.arc_mask, arc_scores)
         else:
             # TODO: provide the matrix already (n x n)
@@ -381,7 +382,7 @@ class TurboParser(object):
         scorer to update learning rate.
 
         At least the UAS is computed. Depending on the options, also LAS and
-        POS accuracy.
+        tagging accuracy.
 
         :param valid_data: InstanceData
         :type valid_data: InstanceData
@@ -397,19 +398,12 @@ class TurboParser(object):
 
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
-            parts = valid_data.parts[i]
             gold_output = valid_data.gold_labels[i]
             inst_pred = valid_pred[i]
 
             real_length = len(instance) - 1
-            # dep_prediction = inst_pred[Target.DEPENDENCY_PARTS]
             gold_heads = gold_output[Target.HEADS]
-
-            head_scores = inst_pred[Target.HEADS][:real_length, :len(instance)]
-            deprel_scores = inst_pred[Target.RELATIONS][:real_length,
-                                                        :len(instance)]
-            pred_heads, pred_labels = self.decode_predictions(
-                None, parts, head_scores, deprel_scores)
+            pred_heads = inst_pred[Target.HEADS]
 
             # scale UAS by sentence length; it is normalized later
             head_hits = gold_heads == pred_heads
@@ -417,6 +411,7 @@ class TurboParser(object):
             total_tokens += real_length
 
             if not self.options.unlabeled:
+                pred_labels = inst_pred[Target.RELATIONS]
                 deprel_gold = gold_output[Target.RELATIONS]
                 label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
@@ -584,8 +579,7 @@ class TurboParser(object):
         self.time_scores = 0
         self.time_decoding = 0
         self.time_gradient = 0
-        self.train_losses = {target: 0. for target in self.additional_targets}
-        self.train_losses[Target.DEPENDENCY_PARTS] = 0.
+        self.train_losses = defaultdict(float)
         self.accumulated_hits = {}
         for target in self.additional_targets:
             self.accumulated_hits[target] = 0
@@ -657,17 +651,9 @@ class TurboParser(object):
         self.neural_scorer.eval_mode()
 
         predictions = []
-        losses = defaultdict(float)
         for batch in valid_data.batches:
-            result = self.run_batch(batch, return_loss=True)
-            batch_predictions = result[0]
-            batch_losses = result[1]
-            batch_size = len(batch)
+            batch_predictions = self.run_batch(batch)
             predictions.extend(batch_predictions)
-
-            for target in batch_losses:
-                # store non-normalized losses
-                losses[target] += batch_size * batch_losses[target].item()
 
         self.compute_validation_metrics(valid_data, predictions)
 
@@ -675,9 +661,6 @@ class TurboParser(object):
         time_validation = valid_end - valid_start
 
         logging.info('Time to run on validation: %.2f' % time_validation)
-        msgs = ['Validation losses:'] + make_loss_msgs(losses,
-                                                       len(valid_data))
-        logging.info('\t'.join(msgs))
 
         msgs = ['Validation accuracies:\tUAS: %.4f' % self.validation_uas]
         if not self.options.unlabeled:
@@ -705,13 +688,11 @@ class TurboParser(object):
         time_msg %= (self.time_scores, self.time_decoding, self.time_gradient)
         logging.info(time_msg)
 
-    def run_batch(self, instance_data, return_loss=False):
+    def run_batch(self, instance_data):
         """
         Predict the output for the given instances.
 
         :type instance_data: InstanceData
-        :param return_loss: if True, also return the loss (only use if
-            instance_data has the gold outputs) as a list of values
         :return: a list of arrays with the predicted outputs if return_loss is
             False. If it's True, a tuple with predictions and losses.
             Each prediction is a dictionary mapping a target name to the
@@ -720,30 +701,41 @@ class TurboParser(object):
         self.neural_scorer.eval_mode()
         scores = self.neural_scorer.compute_scores(instance_data.instances,
                                                    instance_data.parts)
-        #
-        # predictions = []
-        # all_predicted_parts = []
-        # for i in range(len(instance_data)):
-        #     instance = instance_data.instances[i]
-        #     parts = instance_data.parts[i]
-        #     inst_scores = scores[i]
-        #
-        #     predicted_parts = self.decoder.decode(instance, parts, inst_scores)
-        #     inst_prediction = {Target.DEPENDENCY_PARTS: predicted_parts}
-        #     if return_loss:
-        #         all_predicted_parts.append(predicted_parts)
-        #     for target in self.additional_targets:
-        #         model_answer = inst_scores[target].argmax(-1)
-        #         inst_prediction[target] = model_answer
-        #
-        #     predictions.append(inst_prediction)
 
-        if return_loss:
-            losses = self.neural_scorer.compute_loss(instance_data,
-                                                     None)
-            return scores, losses
+        predictions = []
+        for i in range(len(instance_data)):
+            instance = instance_data.instances[i]
+            parts = instance_data.parts[i]
+            inst_scores = scores[i]
 
-        return scores
+            if self.options.normalization == 'global':
+                predicted_parts = self.decoder.decode(
+                    instance, parts, inst_scores)
+                head_scores = None
+                label_scores = None
+            else:
+                predicted_parts = None
+                head_scores = inst_scores[Target.HEADS]
+                label_scores = inst_scores[Target.RELATIONS]
+
+            pred_heads, pred_labels = self.decode_predictions(
+                predicted_parts, parts, head_scores, label_scores)
+
+            inst_prediction = {Target.HEADS: pred_heads,
+                               Target.RELATIONS: pred_labels}
+
+            for target in self.additional_targets:
+                # argmax is computed in the scorer
+                inst_prediction[target] = inst_scores[target]
+
+            predictions.append(inst_prediction)
+
+        # if return_loss:
+        #     losses = self.neural_scorer.compute_loss(instance_data,
+        #                                              None)
+        #     return scores, losses
+
+        return predictions
 
     def train_batch(self, instance_data):
         '''
@@ -819,12 +811,8 @@ class TurboParser(object):
         :param output: dictionary mapping target names to predictions
         :return:
         """
-        # dep_output = output[Target.DEPENDENCY_PARTS]
-        head_scores = output[Target.HEADS][:len(instance) - 1, :len(instance)]
-        deprel_scores = output[Target.RELATIONS][:len(instance) - 1,
-                                                 :len(instance)]
-        heads, relations = self.decode_predictions(
-            None, parts, head_scores, deprel_scores)
+        heads = output[Target.HEADS]
+        relations = output[Target.RELATIONS]
 
         for m, h in enumerate(heads, 1):
             instance.heads[m] = h

@@ -20,9 +20,12 @@ class Target(Enum):
     GRANDSIBLINGS = auto()
 
 
+dependency_targets = {Target.HEADS, Target.RELATIONS, Target.DISTANCE,
+                      Target.SIGN}
 target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
                  Target.XPOS: 'XPOS', Target.UPOS: 'UPOS',
-                 Target.MORPH: 'UFeats'}
+                 Target.MORPH: 'UFeats', Target.SIGN: 'Linearization',
+                 Target.DISTANCE: 'Head distance'}
 
 
 ROOT = '_root_'

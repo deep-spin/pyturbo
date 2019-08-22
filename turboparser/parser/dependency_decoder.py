@@ -568,13 +568,13 @@ def _populate_structure_list(left_list, right_list, parts, scores,
 def make_score_matrix(length, arc_mask, scores):
     """
     Makes a score matrix from an array of scores ordered in the same way as a
-    list of DependencyPartArcs. Positions [h, m] corresponding to non-existing
+    list of DependencyPartArcs. Positions [m, h] corresponding to non-existing
     arcs have score of -inf.
 
     :param length: length of the sentence, including the root pseudo-token
-    :param arc_mask: Arc mask as in DependencyParts
+    :param arc_mask: Arc mask as in DependencyParts, with shape (h, m),
     :param scores: array with score of each arc
-    :return: a 2d numpy array (m, h), starting from 0
+    :return: a 2d numpy array (m, h), starting from 0.
     """
     score_matrix = np.full([length, length], -np.inf, np.float32)
     score_matrix[arc_mask] = scores
