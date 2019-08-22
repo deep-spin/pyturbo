@@ -403,7 +403,7 @@ class TurboParser(object):
 
             real_length = len(instance) - 1
             gold_heads = gold_output[Target.HEADS]
-            pred_heads = inst_pred[Target.HEADS]
+            pred_heads = inst_pred[Target.HEADS][:real_length]
 
             # scale UAS by sentence length; it is normalized later
             head_hits = gold_heads == pred_heads
@@ -411,7 +411,7 @@ class TurboParser(object):
             total_tokens += real_length
 
             if not self.options.unlabeled:
-                pred_labels = inst_pred[Target.RELATIONS]
+                pred_labels = inst_pred[Target.RELATIONS][:real_length]
                 deprel_gold = gold_output[Target.RELATIONS]
                 label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
@@ -419,7 +419,7 @@ class TurboParser(object):
 
             for target in self.additional_targets:
                 target_gold = gold_output[target]
-                target_pred = inst_pred[target][:len(target_gold)]
+                target_pred = inst_pred[target][:real_length]
                 hits = target_gold == target_pred
                 accumulated_tag_hits[target] += np.sum(hits)
 
