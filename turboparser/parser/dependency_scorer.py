@@ -207,6 +207,7 @@ class DependencyNeuralScorer(object):
         sign_scores = self.model.scores[Target.SIGN]
         distance_kld = self.model.scores[Target.DISTANCE]
         batch_size = len(sign_scores)
+        heads3d = heads3d.to(sign_scores.device)
 
         # linearization (left/right attachment) loss
         arange = torch.arange(sign_scores.size(2), device=sign_scores.device)
