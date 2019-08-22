@@ -164,6 +164,7 @@ class TurboParser(object):
             options.morph = loaded_options.morph
             options.xpos = loaded_options.xpos
             options.upos = loaded_options.upos
+            options.normalization = loaded_options.normalization
 
             # prune arcs with label/head POS/modifier POS unseen in training
             options.prune_relations = loaded_options.prune_relations
@@ -184,6 +185,7 @@ class TurboParser(object):
             model = DependencyNeuralModel.load(f, parser.token_dictionary)
 
         parser.neural_scorer.set_model(model)
+        parser.neural_scorer.normalization = options.normalization
 
         # most of the time, we load a model to run its predictions
         parser.neural_scorer.eval_mode()
