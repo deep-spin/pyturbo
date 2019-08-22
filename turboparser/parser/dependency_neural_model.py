@@ -666,11 +666,16 @@ class DependencyNeuralModel(nn.Module):
         # each embedding tensor is (batch, num_tokens, embedding_size)
         embeddings = torch.cat(all_embeddings, dim=2)
 
-        if self.training and self.word_dropout_rate:
-            # apply word dropout -- replace by a random tensor
-            dropout_draw = torch.rand_like(embeddings[:, :, 0])
-            inds = dropout_draw < self.word_dropout_rate
-            embeddings[inds] = self.dropout_replacement
+        if self.word_dropout_rate:
+            if self.training:
+                # apply word dropout -- replace by a random tensor
+                dropout_draw = torch.rand_like(embeddings[:, :, 0])
+                inds = dropout_draw < self.word_dropout_rate
+                embeddings[inds] = self.dropout_replacement
+            else:
+                # weight embeddings by the training dropout rate
+                embeddings *= (1 - self.word_dropout_rate)
+                embeddings += self.word_dropout_rate * self.dropout_replacement
 
         return embeddings
 
