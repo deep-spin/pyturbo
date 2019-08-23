@@ -826,7 +826,8 @@ class DependencyNeuralModel(nn.Module):
         all_label_scores = torch.transpose(self.scores[Target.RELATIONS], 1, 2)
 
         for i, instance in enumerate(instances):
-            mask = parts[i].arc_mask
+            inst_parts = parts[i]
+            mask = inst_parts.arc_mask
             mask = torch.tensor(mask.astype(np.uint8))
             length = len(instance)
 
@@ -834,12 +835,25 @@ class DependencyNeuralModel(nn.Module):
             # (root has already been discarded as a modifier)
             head_scores = all_head_scores[i, :length, :length - 1]
 
-            # get a tensor [inst_length, inst_length, num_labels - 1]
+            # get a tensor [inst_length, inst_length - 1, num_labels]
             label_scores = all_label_scores[i, :length, :length - 1]
 
             mask = mask[:, 1:]
             head_scores1d = head_scores[mask]
             label_scores1d = label_scores[mask].view(-1)
+
+            if self.training:
+                # apply the margin on the scores of gold parts
+                gold_arc_parts = torch.tensor(
+                    inst_parts.gold_parts[:inst_parts.num_arcs])
+
+                offset = inst_parts.offsets[Target.RELATIONS]
+                num_labeled = inst_parts.num_labeled_arcs
+                gold_label_parts = torch.tensor(
+                    inst_parts.gold_parts[offset:offset + num_labeled])
+                head_scores1d = head_scores1d - gold_arc_parts
+                label_scores1d = label_scores1d - gold_label_parts
+
             new_head_scores.append(head_scores1d)
             new_label_scores.append(label_scores1d)
 
@@ -861,6 +875,9 @@ class DependencyNeuralModel(nn.Module):
             The model will store scores as a list of 1d arrays (without padding)
             that can easily be used with AD3 decoding functions.
 
+        :param gold_heads: tensor (batch, max_num_words) with gold heads. Only
+            used if training with global margin loss
+        :param gold_labels: same as above, with gold label for each token.
         :return: a score matrix with shape (num_instances, longest_length)
         """
         self.scores = {Target.HEADS: []}

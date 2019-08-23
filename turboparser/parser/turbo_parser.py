@@ -10,7 +10,7 @@ from .dependency_decoder import DependencyDecoder, chu_liu_edmonds_one_root, \
     make_score_matrix, chu_liu_edmonds
 from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
-from .dependency_scorer import DependencyNeuralScorer
+from .dependency_scorer import DependencyNeuralScorer, get_gold_tensors
 from .dependency_instance_numeric import DependencyInstanceNumeric
 from .constants import SPECIAL_SYMBOLS
 
@@ -259,7 +259,8 @@ class TurboParser(object):
             if the arc is valid, False otherwise.
         """
         instance, parts = self.preprocess_instance(instance)
-        scores = self.neural_scorer.compute_scores(instance, parts)[0]
+        instance_data = InstanceData([instance], [parts])
+        scores = self.neural_scorer.compute_scores(instance_data)[0]
         new_mask = self.decoder.decode_matrix_tree(
             parts, scores, self.options.pruner_max_heads,
             self.options.pruner_posterior_threshold)
@@ -701,8 +702,7 @@ class TurboParser(object):
             prediction vector.
         """
         self.neural_scorer.eval_mode()
-        scores = self.neural_scorer.compute_scores(instance_data.instances,
-                                                   instance_data.parts)
+        scores = self.neural_scorer.compute_scores(instance_data)
 
         predictions = []
         for i in range(len(instance_data)):
@@ -750,9 +750,9 @@ class TurboParser(object):
         self.neural_scorer.train_mode()
 
         start_time = time.time()
+
         # scores is a list of dictionaries [target] -> score array
-        scores = self.neural_scorer.compute_scores(instance_data.instances,
-                                                   instance_data.parts)
+        scores = self.neural_scorer.compute_scores(instance_data)
         end_time = time.time()
         self.time_scores += end_time - start_time
 
@@ -798,8 +798,7 @@ class TurboParser(object):
         """
         # Do the decoding.
         start_decoding = time.time()
-        predicted_output = self.decoder.decode_cost_augmented(
-            instance, parts, scores)
+        predicted_output = self.decoder.decode(instance, parts, scores)
 
         end_decoding = time.time()
         self.time_decoding += end_decoding - start_decoding

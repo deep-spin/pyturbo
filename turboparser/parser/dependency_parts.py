@@ -185,9 +185,7 @@ class DependencyParts(object):
         self.offsets[Target.HEADS] = 0
 
         # all non-masked arcs count as a part
-        possible_arcs = self.arc_mask.size
-        num_masked = np.sum(self.arc_mask == 0)
-        self.num_arcs = possible_arcs - num_masked
+        self.num_arcs = self.arc_mask.sum()
         if self.labeled:
             # labeled arcs are represented in the same order as arcs,
             # with each arc (i, j) repeated k times, for each of k labels

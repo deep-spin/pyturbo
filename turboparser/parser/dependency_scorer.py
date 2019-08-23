@@ -47,13 +47,13 @@ class DependencyNeuralScorer(object):
         self.model = None
         self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
 
-    def compute_loss_global_margin(self, instance_data, predicted_parts):
+    def compute_loss_global_margin(self, instance_data, all_predicted_parts):
         """
         Compute the losses for parsing and tagging.
 
         :param instance_data: InstanceData object
-        :param predicted_parts: list of numpy arrays with predicted parts for
-            each instance
+        :param all_predicted_parts: list of numpy arrays with predicted parts
+            for each instance
         :return: dictionary mapping each target to a loss scalar, as a torch
             variable
         """
@@ -67,16 +67,15 @@ class DependencyNeuralScorer(object):
         batch_size = len(instance_data)
         for i in range(batch_size):
             inst_parts = instance_data.parts[i]
-            gold_parts = inst_parts.gold_parts
-            inst_pred = predicted_parts[i]
+            gold_parts = torch.tensor(inst_parts.gold_parts, dtype=torch.float)
+            pred_parts = torch.tensor(all_predicted_parts[i], dtype=torch.float)
             part_score_list = [self.model.scores[type_][i]
                                for type_ in inst_parts.type_order]
             part_scores = torch.cat(part_score_list)
-            diff = torch.tensor(inst_pred - gold_parts, dtype=part_scores.dtype,
-                                device=part_scores.device)
-            error = torch.dot(part_scores, diff)
-            margin, normalizer = inst_parts.get_margin()
-            inst_parts_loss = margin.dot(inst_pred) + normalizer + error
+
+            pred_scores = pred_parts.dot(part_scores)
+            gold_scores = gold_parts.dot(part_scores)
+            inst_parts_loss = pred_scores - gold_scores
 
             if inst_parts_loss > 0:
                 parts_loss += inst_parts_loss
@@ -235,17 +234,15 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    def compute_scores(self, instances, parts):
+    def compute_scores(self, instance_data):
         """
         Compute the scores for all the targets this scorer
 
         :return: a list of dictionaries mapping each target name to its scores
         """
-        if not isinstance(instances, list):
-            instances = [instances]
-            parts = [parts]
+        model_scores = self.model(instance_data.instances, instance_data.parts,
+                                  self.normalization)
 
-        model_scores = self.model(instances, parts, self.normalization)
         numpy_scores = {}
         for target in model_scores:
             if self.normalization == 'local':
@@ -278,7 +275,7 @@ class DependencyNeuralScorer(object):
 
         # now convert a dictionary of arrays into a list of dictionaries
         score_list = []
-        for i in range(len(instances)):
+        for i in range(len(instance_data)):
             instance_scores = {target: numpy_scores[target][i]
                                for target in numpy_scores}
 
