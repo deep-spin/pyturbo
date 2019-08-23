@@ -12,9 +12,9 @@ class StructuredDecoder(object):
         as parts.'''
         raise NotImplementedError
 
-    def _add_cost_vector(self, parts, scores):
+    def _add_margin_vector(self, parts, scores):
         """
-        Add the cost margin to the scores.
+        Add the margin to the scores.
 
         This is used before actually decoding.
         """
@@ -23,7 +23,7 @@ class StructuredDecoder(object):
     def decode_mira(self, instance, parts, scores, old_mira=False):
         '''Perform cost-augmented decoding or classical MIRA.'''
         if not old_mira:
-            self._add_cost_vector(parts, scores)
+            self._add_margin_vector(parts, scores)
 
         predicted_outputs = self.decode(instance, parts, scores)
 

@@ -224,9 +224,9 @@ class DependencyDecoder(StructuredDecoder):
 
         return new_mask
 
-    def _add_cost_vector(self, parts, scores):
+    def _add_margin_vector(self, parts, scores):
         """
-        Add the cost margin to the scores.
+        Add the margin to the scores.
 
         It only affects Arcs or LabeledArcs (in case the latter are used).
 

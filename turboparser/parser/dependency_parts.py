@@ -467,8 +467,6 @@ class DependencyParts(object):
 
         It only affects Arcs or LabeledArcs (in case the latter are used).
 
-        :param parts: DependencyParts object
-        :type parts: DependencyParts
         :return: a margin array to be added to the model scores and a
             normalization constant. The vector is as long as the number of
             parts.
