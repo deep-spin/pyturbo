@@ -35,6 +35,10 @@ def get_gold_tensors(instance_data):
         relations[i, :len(inst_relations)] = torch.tensor(inst_relations,
                                                           dtype=torch.long)
 
+    if torch.cuda.is_available():
+        heads = heads.cuda()
+        relations = relations.cuda()
+
     return heads, relations
 
 
@@ -75,9 +79,8 @@ class DependencyNeuralScorer(object):
                                for type_ in inst_parts.type_order]
             part_scores = torch.cat(part_score_list)
 
-            pred_scores = pred_parts.dot(part_scores)
-            gold_scores = gold_parts.dot(part_scores)
-            inst_parts_loss = pred_scores - gold_scores
+            diff_predictions = pred_parts - gold_parts
+            inst_parts_loss = diff_predictions.dot(part_scores)
 
             if inst_parts_loss > 0:
                 parts_loss += inst_parts_loss
@@ -87,11 +90,6 @@ class DependencyNeuralScorer(object):
                         'Ignoring negative loss: %.6f' % inst_parts_loss.item())
 
         losses[Target.DEPENDENCY_PARTS] = parts_loss / batch_size
-
-        gold_heads, _ = get_gold_tensors(instance_data)
-        negative_inds = gold_heads == -1
-        loss_position = self.compute_loss_position(gold_heads, negative_inds)
-        losses.update(loss_position)
 
         return losses
 
@@ -107,13 +105,19 @@ class DependencyNeuralScorer(object):
             variable
         """
         losses = self.compute_tagging_loss(instance_data)
+
+        gold_heads, gold_relations = get_gold_tensors(instance_data)
+
         if self.normalization == 'global':
             dep_losses = self.compute_loss_global_margin(instance_data,
                                                          predicted_parts)
         else:
-            dep_losses = self.compute_loss_local(instance_data)
+            dep_losses = self.compute_loss_local(gold_heads, gold_relations)
 
         losses.update(dep_losses)
+
+        # positional_losses = self.compute_loss_position(gold_heads)
+        # losses.update(positional_losses)
 
         return losses
 
@@ -144,12 +148,12 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    def compute_loss_local(self, instance_data):
+    def compute_loss_local(self, gold_heads, gold_relations):
         """
         Compute the losses for parsing, treating each word as an independent
         instance.
 
-        :param instance_data: InstanceData object
+        :param gold_heads: tensor (batch, num_words) with gold heads
         :return: dictionary mapping each target to a loss scalar, as a torch
             variable
         """
@@ -157,9 +161,6 @@ class DependencyNeuralScorer(object):
 
         head_scores = self.model.scores[Target.HEADS]
         label_scores = self.model.scores[Target.RELATIONS]
-        gold_heads, gold_relations = get_gold_tensors(instance_data)
-        gold_heads = gold_heads.to(head_scores.device)
-        gold_relations = gold_relations.to(head_scores.device)
 
         # head loss
         # stack the head predictions for all words from all sentences
@@ -185,24 +186,18 @@ class DependencyNeuralScorer(object):
         loss += label_loss
         losses[Target.DEPENDENCY_PARTS] = loss
 
-        positional_loss = self.compute_loss_position(gold_heads,
-                                                     negative_inds.squeeze(2))
-        losses.update(positional_loss)
-
         return losses
 
-    def compute_loss_position(self, gold_heads, padding_inds):
+    def compute_loss_position(self, gold_heads):
         """
         Compute the loss with respect to the relative position of heads and
         modifiers. This is only used for first order parts.
 
         :param gold_heads: a tensor (batch, num_actual_words) such that position
             (i, j) has the head of word j in the i-th sentence in the batch.
-        :param padding_inds: a byte tensor with the same shape as gold_heads,
-            indicating which positions are padding (with non-zero)
         """
         heads3d = gold_heads.unsqueeze(2)
-        padding_inds = padding_inds.unsqueeze(2)
+        padding_inds = heads3d == -1
         heads3d = heads3d.masked_fill(padding_inds, 0)
 
         sign_scores = self.model.scores[Target.SIGN]
