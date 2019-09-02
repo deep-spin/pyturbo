@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('logs', help='Logs produced by the turbo parser',
                         nargs='+')
     parser.add_argument('output', help='File to print log')
-    parser.add_argument('-y', help='Y limits to show (2 values)',
+    parser.add_argument('-y', help='Vertical axis limits to show (2 values)',
                         nargs=2, default=[0, 1], type=float)
     parser.add_argument('--names', nargs='+',
                         help='Names of the plots. If not given, filenames will '
