@@ -430,7 +430,7 @@ class DependencyNeuralModel(nn.Module):
 
         return model
 
-    def _compute_arc_scores(self, states, lengths):
+    def _compute_arc_scores(self, states, lengths, normalization):
         """
         Compute the first order scores and store them in the appropriate
         position in the `scores` tensor.
@@ -441,6 +441,7 @@ class DependencyNeuralModel(nn.Module):
 
         :param states: hidden states returned by the RNN; one for each word
         :param lengths: length of each sentence in the batch (including root)
+        :param normalization: 'global' or 'local'
         """
         batch_size, max_sent_size, _ = states.size()
 
@@ -456,6 +457,10 @@ class DependencyNeuralModel(nn.Module):
         diag = torch.eye(max_sent_size, dtype=torch.uint8, device=states.device)
         diag = diag.unsqueeze(0)
         head_scores.masked_fill_(diag, -np.inf)
+
+        if self.training and normalization == 'global':
+            head_scores += torch.randn_like(head_scores)
+            label_scores += torch.randn_like(label_scores)
 
         # set padding head scores to -inf
         # during training, label loss is computed with respect to the gold
@@ -941,7 +946,7 @@ class DependencyNeuralModel(nn.Module):
                 hidden = self.morph_mlp(tagger_batch_states[:, 1:])
                 self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
-        self._compute_arc_scores(parser_batch_states, lengths)
+        self._compute_arc_scores(parser_batch_states, lengths, normalization)
 
         # now go through each batch item
         for i in range(batch_size):
