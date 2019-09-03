@@ -230,8 +230,8 @@ class DependencyParts(object):
         :return: a list of 0s and 1s
         """
         heads = instance.get_all_heads()
-        # [1] to skip root
         if heads[1] == -1:
+            # check if the first non-root token has a head
             self.make_gold = False
             return
 
@@ -260,7 +260,6 @@ class DependencyParts(object):
                         gold_relations.append(1)
                     else:
                         gold_relations.append(0)
-
         gold_parts.extend(gold_relations)
         return gold_parts
 

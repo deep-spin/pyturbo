@@ -896,6 +896,8 @@ class DependencyNeuralModel(nn.Module):
 
         # packed sequences must be sorted by decreasing length
         sorted_lengths, inds = lengths.sort(descending=True)
+
+        # rev_inds are used to unsort the sorted sentences back
         _, rev_inds = inds.sort()
         if self.on_gpu:
             sorted_lengths = sorted_lengths.cuda()

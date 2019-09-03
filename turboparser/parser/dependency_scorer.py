@@ -71,15 +71,15 @@ class DependencyNeuralScorer(object):
         batch_size = len(instance_data)
         for i in range(batch_size):
             inst_parts = instance_data.parts[i]
-            gold_parts = torch.tensor(inst_parts.gold_parts, dtype=torch.float,
-                                      device=parts_loss.device)
-            pred_parts = torch.tensor(all_predicted_parts[i], dtype=torch.float,
-                                      device=parts_loss.device)
             part_score_list = [self.model.scores[type_][i]
                                for type_ in inst_parts.type_order]
             part_scores = torch.cat(part_score_list)
 
-            diff_predictions = pred_parts - gold_parts
+            gold_parts = inst_parts.gold_parts
+            pred_parts = all_predicted_parts[i]
+            diff_predictions = torch.tensor(pred_parts - gold_parts,
+                                            dtype=torch.float,
+                                            device=parts_loss.device)
             inst_parts_loss = diff_predictions.dot(part_scores)
 
             if inst_parts_loss > 0:
