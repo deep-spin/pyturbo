@@ -116,8 +116,8 @@ class DependencyNeuralScorer(object):
 
         losses.update(dep_losses)
 
-        # positional_losses = self.compute_loss_position(gold_heads)
-        # losses.update(positional_losses)
+        positional_losses = self.compute_loss_position(gold_heads)
+        losses.update(positional_losses)
 
         return losses
 
