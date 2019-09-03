@@ -288,10 +288,10 @@ class DependencyNeuralScorer(object):
             if self.normalization == 'global':
                 # in the global normalization case, we have to detach tensors
                 # one by one
-                instance_scores[Target.HEADS] = model_scores[Target.HEADS][i]. \
-                    detach().cpu().numpy()
-                instance_scores[Target.RELATIONS] = \
-                    model_scores[Target.RELATIONS][i].detach().cpu().numpy()
+                for target in dependency_targets:
+                    if target in model_scores:
+                        instance_scores[target] = model_scores[target][i]. \
+                            detach().cpu().numpy()
 
             score_list.append(instance_scores)
 

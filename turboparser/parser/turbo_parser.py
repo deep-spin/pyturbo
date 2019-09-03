@@ -267,18 +267,18 @@ class TurboParser(object):
 
         return new_mask
 
-    def _report_make_parts(self, instances, parts):
+    def _report_make_parts(self, data):
         """
         Log some statistics about the calls to make parts in a dataset.
 
-        :type instances: list[DependencyInstance]
-        :type parts: list[DependencyParts]
+        :type data: InstanceData
         """
         num_arcs = 0
         num_tokens = 0
         num_possible_arcs = 0
+        num_higher_order = defaultdict(int)
 
-        for instance, inst_parts in zip(instances, parts):
+        for instance, inst_parts in zip(data.instances, data.parts):
             inst_len = len(instance)
             num_tokens += inst_len - 1  # exclude root
             num_possible_arcs += (inst_len - 1) ** 2  # exclude root and self
@@ -294,12 +294,22 @@ class TurboParser(object):
 
                     num_arcs += 1
 
+            for part_type in inst_parts.part_lists:
+                num_parts = len(inst_parts.part_lists[part_type])
+                num_higher_order[part_type] += num_parts
+
         msg = '%f heads per token after pruning' % (num_arcs / num_tokens)
         logging.info(msg)
 
         msg = '%d arcs after pruning, out of %d possible (%f)' % \
               (num_arcs, num_possible_arcs, num_arcs / num_possible_arcs)
         logging.info(msg)
+
+        for part_type in num_higher_order:
+            num = num_higher_order[part_type]
+            name = target2string[part_type]
+            msg = '%d %s parts' % (num, name)
+            logging.info(msg)
 
         if self.options.train:
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
@@ -570,8 +580,8 @@ class TurboParser(object):
             all_parts.append(parts)
             all_gold_labels.append(gold_labels)
 
-        self._report_make_parts(instances, all_parts)
         data = InstanceData(formatted_instances, all_parts, all_gold_labels)
+        self._report_make_parts(data)
         return data
 
     def reset_performance_metrics(self):

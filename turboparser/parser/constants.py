@@ -20,12 +20,19 @@ class Target(Enum):
     GRANDSIBLINGS = auto()
 
 
+higher_order_parts = {Target.NEXT_SIBLINGS, Target.GRANDPARENTS,
+                      Target.GRANDSIBLINGS}
 dependency_targets = {Target.HEADS, Target.RELATIONS, Target.DISTANCE,
                       Target.SIGN}
+dependency_targets.update(higher_order_parts)
+
 target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
                  Target.XPOS: 'XPOS', Target.UPOS: 'UPOS',
                  Target.MORPH: 'UFeats', Target.SIGN: 'Linearization',
-                 Target.DISTANCE: 'Head distance'}
+                 Target.DISTANCE: 'Head distance',
+                 Target.GRANDSIBLINGS: 'Grandsiblings',
+                 Target.GRANDPARENTS: 'Grandparent',
+                 Target.NEXT_SIBLINGS: 'Consecutive siblings'}
 
 
 ROOT = '_root_'
