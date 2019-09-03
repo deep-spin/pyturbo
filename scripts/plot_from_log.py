@@ -36,22 +36,24 @@ if __name__ == '__main__':
     parser.add_argument('logs', help='Logs produced by the turbo parser',
                         nargs='+')
     parser.add_argument('output', help='File to print log')
-    parser.add_argument('-y', help='Y limits to show (2 values)',
+    parser.add_argument('-y', help='Vertical axis limits to show (2 values)',
                         nargs=2, default=[0, 1], type=float)
+    parser.add_argument('-m', help='Metric', choices=['UAS', 'LAS'],
+                        default='UAS', dest='metric')
     parser.add_argument('--names', nargs='+',
                         help='Names of the plots. If not given, filenames will '
                              'be used')
     args = parser.parse_args()
 
-    metric = 'UAS'
     names = args.logs if args.names is None else args.names
 
     all_mins = []
     all_maxs = []
     fig, ax = pl.subplots()
+    fig.set_size_inches((9.6, 4.8))
 
     for log, name in zip(args.logs, names):
-        accuracies = extract_accuracies(log, metric)
+        accuracies = extract_accuracies(log, args.metric)
         steps = np.arange(1, len(accuracies) + 1)
         ax.plot(steps, accuracies, label=name)
 
@@ -62,9 +64,9 @@ if __name__ == '__main__':
     y_max = min(args.y[1], 1.04 * max(all_maxs))
 
     ax.set_yticks(all_maxs, minor=True)
-    ax.legend()
+    ax.legend(loc='best')
     pl.xlabel('Evaluation step')
-    pl.ylabel(metric)
+    pl.ylabel(args.metric)
     pl.ylim(y_min, y_max)
     pl.grid(True, 'both', linestyle='--')
-    pl.savefig(args.output, dpi=200)
+    pl.savefig(args.output, dpi=200, bbox_inches='tight')
