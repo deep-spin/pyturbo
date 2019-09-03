@@ -273,13 +273,22 @@ class DependencyNeuralScorer(object):
         # now convert a dictionary of arrays into a list of dictionaries
         score_list = []
         for i in range(len(instance_data)):
-            instance_scores = {target: numpy_scores[target][i]
-                               for target in numpy_scores}
+            length = len(instance_data.instances[i])
 
-            # in the global normalization case, we have to detach tensors one by
-            # one
+            instance_scores = {}
+            for target in numpy_scores:
+                if target not in dependency_targets:
+                    # tagging tasks
+                    instance_scores[target] = numpy_scores[target][i, :length]
+                else:
+                    # head and label scores (local normalization only)
+                    instance_scores[target] = numpy_scores[target]\
+                        [i, :length - 1, :length]
+
             if self.normalization == 'global':
-                instance_scores[Target.HEADS] = model_scores[Target.HEADS][i].\
+                # in the global normalization case, we have to detach tensors
+                # one by one
+                instance_scores[Target.HEADS] = model_scores[Target.HEADS][i]. \
                     detach().cpu().numpy()
                 instance_scores[Target.RELATIONS] = \
                     model_scores[Target.RELATIONS][i].detach().cpu().numpy()
