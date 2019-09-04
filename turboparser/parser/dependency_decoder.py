@@ -153,7 +153,8 @@ class DependencyDecoder(StructuredDecoder):
 
         :param parts: list of dependency parts
         :type parts: DependencyParts
-        :param scores: 1d array with the score for each arc
+        :param scores: dictionary mapping target names to 1d numpy arrays
+            with part scores
         :return: a boolean 2d array masking arcs. It has shape (n - 1, n) where
             n is the instance length including root. Position (m, h) has True
             if the arc is valid, False otherwise.

@@ -231,10 +231,13 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    def compute_scores(self, instance_data):
+    def compute_scores(self, instance_data, argmax_tags=True):
         """
         Compute the scores for all the targets this scorer
 
+        :param instance_data: InstanceData
+        :param argmax_tags: if True, instead of returning scores for all tags
+            and dependency labels, return the argmax.
         :return: a list of dictionaries mapping each target name to its scores
         """
         model_scores = self.model(instance_data.instances, instance_data.parts,
@@ -248,13 +251,20 @@ class DependencyNeuralScorer(object):
                 # local normalization stores tensors (num_words, num_words)
                 if target == Target.RELATIONS:
                     # shape is (batch, modifier, head, label)
-                    value = detached.argmax(3)
+                    if argmax_tags:
+                        value = detached.argmax(3)
+                    else:
+                        value = detached
+
                 elif target == Target.HEADS:
                     # (batch, modifier, head)
                     value = F.log_softmax(detached, 2)
                 elif target not in dependency_targets:
                     # (batch, word, label)
-                    value = detached.argmax(2)
+                    if argmax_tags:
+                        value = detached.argmax(2)
+                    else:
+                        value = detached
                 else:
                     # sign scores, distance scores
                     continue
@@ -267,7 +277,10 @@ class DependencyNeuralScorer(object):
                 # global normalization stores the scores of each part separately
                 # So, only deal with tagging here
                 # (batch, word, label)
-                value = detached.argmax(2)
+                if argmax_tags:
+                    value = detached.argmax(2)
+                else:
+                    value = detached
                 numpy_scores[target] = value.cpu().numpy()
 
         # now convert a dictionary of arrays into a list of dictionaries

@@ -260,7 +260,21 @@ class TurboParser(object):
         """
         instance, parts = self.preprocess_instance(instance)
         instance_data = InstanceData([instance], [parts])
-        scores = self.neural_scorer.compute_scores(instance_data)[0]
+        scores = self.neural_scorer.compute_scores(instance_data,
+                                                   argmax_tags=False)[0]
+
+        if self.options.normalization == 'local':
+            # if this model was trained with local normalization, its output
+            # for arcs is a (n - 1, n) matrix. Convert it to a list of part
+            # scores. First, transpose (modifier, head) to (head, modifier)
+            head_scores = scores[Target.HEADS].T
+            label_scores = scores[Target.RELATIONS].transpose(1, 0, 2)
+
+            # the first column in the mask can be removed
+            mask = parts.arc_mask[:, 1:]
+            scores[Target.HEADS] = head_scores[mask]
+            scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
+
         new_mask = self.decoder.decode_matrix_tree(
             parts, scores, self.options.pruner_max_heads,
             self.options.pruner_posterior_threshold)
