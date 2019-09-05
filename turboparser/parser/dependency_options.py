@@ -65,12 +65,6 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--single_root', action='store_true',
                             help='When running the parser, enforce that there '
                                  'is only one root per sentence.')
-        parser.add_argument('--prune_relations', action='store_true',
-                            help="""Prune the set of possible relations for
-                            each pair of POS tags in the training data.""")
-        parser.add_argument('--prune_tags', action='store_true',
-                            help="""Prune arcs with a combination of POS tags 
-                            unseen in training data.""")
         parser.add_argument('--pruner_path',
                             help="""Path to a pretrained model to be used as
                             pruner. This is independent from the main model; it
