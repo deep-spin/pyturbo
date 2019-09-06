@@ -1,12 +1,16 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.distributions.gumbel import Gumbel
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS
 from ..classifier.lstm import LSTM, CharLSTM, HighwayLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 import numpy as np
 import pickle
+
+
+gumbel = Gumbel(0, 1)
 
 
 def create_padding_mask(lengths):
@@ -459,8 +463,9 @@ class DependencyNeuralModel(nn.Module):
         head_scores.masked_fill_(diag, -np.inf)
 
         if self.training and normalization == 'global':
-            head_scores += torch.randn_like(head_scores)
-            label_scores += torch.randn_like(label_scores)
+            dev = head_scores.device
+            head_scores += gumbel.sample(head_scores.shape).to(dev)
+            label_scores += gumbel.sample(label_scores.shape).to(dev)
 
         # set padding head scores to -inf
         # during training, label loss is computed with respect to the gold
