@@ -46,7 +46,6 @@ class ModelType(object):
         self.head_bigrams = 'hb' in codes
         self.trisiblings = 'ts' in codes
 
-
 class TurboParser(object):
     '''Dependency parser.'''
     def __init__(self, options):
@@ -130,6 +129,18 @@ class TurboParser(object):
         """
         self.model_type = ModelType(self.options.model_type)
         self.has_pruner = bool(self.options.pruner_path)
+
+        if self.options.model_type != 'af':
+            if self.options.normalization == 'local':
+                msg = 'Local normalization not implemented for ' \
+                      'higher order models'
+                logging.error(msg)
+                exit(1)
+
+            if not self.has_pruner:
+                msg = 'Running higher-order model without pruner! ' \
+                      'Parser may be very slow!'
+                logging.warning(msg)
 
         if self.has_pruner:
             self.pruner = load_pruner(self.options.pruner_path)
