@@ -168,7 +168,11 @@ class TurboParser(object):
             options.morph = loaded_options.morph
             options.xpos = loaded_options.xpos
             options.upos = loaded_options.upos
-            options.normalization = loaded_options.normalization
+
+            # backwards compatibility
+            # TODO: change old saved models to include normalization model
+            options.normalization = loaded_options.normalization \
+                if hasattr(loaded_options, 'normalization') else 'local'
 
             # threshold for the basic pruner, if used
             options.pruner_posterior_threshold = \
@@ -868,6 +872,7 @@ def load_pruner(model_path):
         pruner_options = pickle.load(f)
 
     pruner_options.train = False
+    pruner_options.model_path = model_path
     pruner = TurboParser.load(pruner_options)
 
     return pruner
