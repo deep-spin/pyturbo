@@ -46,7 +46,6 @@ class ModelType(object):
         self.head_bigrams = 'hb' in codes
         self.trisiblings = 'ts' in codes
 
-
 class TurboParser(object):
     '''Dependency parser.'''
     def __init__(self, options):
@@ -131,8 +130,24 @@ class TurboParser(object):
         self.model_type = ModelType(self.options.model_type)
         self.has_pruner = bool(self.options.pruner_path)
 
+        if self.options.model_type != 'af':
+            if self.options.normalization == 'local':
+                msg = 'Local normalization not implemented for ' \
+                      'higher order models'
+                logging.error(msg)
+                exit(1)
+
+            if not self.has_pruner:
+                msg = 'Running higher-order model without pruner! ' \
+                      'Parser may be very slow!'
+                logging.warning(msg)
+
         if self.has_pruner:
             self.pruner = load_pruner(self.options.pruner_path)
+            threshold = self.options.pruner_posterior_threshold
+            self.pruner.options.pruner_posterior_threshold = threshold
+            max_heads = self.options.pruner_max_heads
+            self.pruner.options.pruner_max_heads = max_heads
         else:
             self.pruner = None
 
@@ -164,13 +179,11 @@ class TurboParser(object):
             options.morph = loaded_options.morph
             options.xpos = loaded_options.xpos
             options.upos = loaded_options.upos
-            options.normalization = loaded_options.normalization
 
-            # prune arcs with label/head POS/modifier POS unseen in training
-            options.prune_relations = loaded_options.prune_relations
-
-            # prune arcs with a distance unseen with the given POS tags
-            options.prune_tags = loaded_options.prune_tags
+            # backwards compatibility
+            # TODO: change old saved models to include normalization model
+            options.normalization = loaded_options.normalization \
+                if hasattr(loaded_options, 'normalization') else 'local'
 
             # threshold for the basic pruner, if used
             options.pruner_posterior_threshold = \
@@ -260,7 +273,21 @@ class TurboParser(object):
         """
         instance, parts = self.preprocess_instance(instance)
         instance_data = InstanceData([instance], [parts])
-        scores = self.neural_scorer.compute_scores(instance_data)[0]
+        scores = self.neural_scorer.compute_scores(instance_data,
+                                                   argmax_tags=False)[0]
+
+        if self.options.normalization == 'local':
+            # if this model was trained with local normalization, its output
+            # for arcs is a (n - 1, n) matrix. Convert it to a list of part
+            # scores. First, transpose (modifier, head) to (head, modifier)
+            head_scores = scores[Target.HEADS].T
+            label_scores = scores[Target.RELATIONS].transpose(1, 0, 2)
+
+            # the first column in the mask can be removed
+            mask = parts.arc_mask[:, 1:]
+            scores[Target.HEADS] = head_scores[mask]
+            scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
+
         new_mask = self.decoder.decode_matrix_tree(
             parts, scores, self.options.pruner_max_heads,
             self.options.pruner_posterior_threshold)
@@ -280,19 +307,12 @@ class TurboParser(object):
 
         for instance, inst_parts in zip(data.instances, data.parts):
             inst_len = len(instance)
-            num_tokens += inst_len - 1  # exclude root
-            num_possible_arcs += (inst_len - 1) ** 2  # exclude root and self
+            num_inst_tokens = inst_len - 1  # exclude root
+            num_tokens += num_inst_tokens
+            num_possible_arcs += num_inst_tokens ** 2
 
-            # skip the root symbol
-            for h in range(inst_len):
-                for m in range(1, inst_len):
-                    if not inst_parts.arc_mask[h, m]:
-                        # pruned
-                        if self.options.train and instance.heads[m] == h:
-                            self.pruner_mistakes += 1
-                        continue
-
-                    num_arcs += 1
+            mask = inst_parts.arc_mask
+            num_arcs += mask.sum()
 
             for part_type in inst_parts.part_lists:
                 num_parts = len(inst_parts.part_lists[part_type])
@@ -324,8 +344,6 @@ class TurboParser(object):
         :return: a tuple (instance, parts).
             The returned instance will have been formatted.
         """
-        self.pruner_mistakes = 0
-
         if self.has_pruner:
             prune_mask = self.run_pruner(instance)
         else:
@@ -571,6 +589,7 @@ class TurboParser(object):
         all_parts = []
         all_gold_labels = []
         formatted_instances = []
+        self.pruner_mistakes = 0
 
         for instance in instances:
             f_instance, parts = self.preprocess_instance(instance)
@@ -864,6 +883,7 @@ def load_pruner(model_path):
         pruner_options = pickle.load(f)
 
     pruner_options.train = False
+    pruner_options.model_path = model_path
     pruner = TurboParser.load(pruner_options)
 
     return pruner
