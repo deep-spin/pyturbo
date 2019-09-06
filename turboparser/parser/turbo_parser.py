@@ -250,10 +250,15 @@ class TurboParser(object):
         instance_data = pruner.preprocess_instances(instances, report=False)
         instance_data.prepare_batches(pruner.options.batch_size, sort=False)
         masks = []
+        entropies = []
 
         for batch in instance_data.batches:
-            batch_masks = self.prune_batch(batch)
+            batch_masks, batch_entropies = self.prune_batch(batch)
             masks.extend(batch_masks)
+            entropies.extend(batch_entropies)
+
+        entropies = np.array(entropies)
+        logging.info('Pruner mean entropy: %f' % entropies.mean())
 
         return masks
 
@@ -264,14 +269,19 @@ class TurboParser(object):
         This function runs the encapsulated pruner.
 
         :param instance_data: a InstanceData object
-        :return: a list of  boolean 2d array masking arcs. It has shape (n, n)
+        :return: a tuple (masks, entropies)
+            masks: a list of  boolean 2d array masking arcs. It has shape (n, n)
             where n is the instance length including root. Position (h, m) has
             True if the arc is valid, False otherwise.
+
+            entropies: a list of the tree entropies found by the matrix tree
+            theorem
         """
         pruner = self.pruner
         scores = pruner.neural_scorer.compute_scores(instance_data,
                                                      argmax_tags=False)
         masks = []
+        entropies = []
 
         for i in range(len(scores)):
             inst_scores = scores[i]
@@ -291,7 +301,7 @@ class TurboParser(object):
                 inst_scores[Target.HEADS] = head_scores[mask]
                 inst_scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
 
-            new_mask = self.decoder.decode_matrix_tree(
+            new_mask, entropy = self.decoder.decode_matrix_tree(
                 inst_parts, inst_scores, self.options.pruner_max_heads,
                 self.options.pruner_posterior_threshold)
 
@@ -305,8 +315,9 @@ class TurboParser(object):
                         self.pruner_mistakes += 1
 
             masks.append(new_mask)
+            entropies.append(entropy)
 
-        return masks
+        return masks, entropies
 
     def _report_make_parts(self, data):
         """
@@ -632,7 +643,9 @@ class TurboParser(object):
     def train(self):
         '''Train with a general online algorithm.'''
         train_instances, valid_instances = self.read_train_instances()
+        logging.info('Preprocessing training data')
         train_data = self.preprocess_instances(train_instances)
+        logging.info('\nPreprocessing validation data')
         valid_data = self.preprocess_instances(valid_instances)
         train_data.prepare_batches(self.options.batch_size, sort=True)
         valid_data.prepare_batches(self.options.batch_size, sort=True)

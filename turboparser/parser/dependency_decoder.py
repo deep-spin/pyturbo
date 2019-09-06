@@ -183,11 +183,10 @@ class DependencyDecoder(StructuredDecoder):
         # now, we can treat the marginals as scores for each arc and run the
         # naive decoder algorithm. The resulting configurations ensures at
         # least one non-projective tree
-
         new_mask = self.decode_pruner_naive(parts, marginals, arcs,
                                             max_heads, threshold)
 
-        return new_mask
+        return new_mask, entropy
 
     def decode_pruner_naive(self, parts, scores, arcs, max_heads,
                             threshold=0):
