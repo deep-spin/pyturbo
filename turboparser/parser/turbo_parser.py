@@ -236,63 +236,77 @@ class TurboParser(object):
 
         return gold_dict
 
-    def run_pruner(self, instance):
+    def run_pruner(self, instances):
         """
         Prune out some arcs with the pruner model.
 
-        To use the current model as a pruner, use `prune` instead.
-
-        :param instance: a DependencyInstance object, not formatted
-        :return: a boolean 2d array masking arcs. It has shape (n, n) where
-            n is the instance length including root. Position (h, m) has True
-            if the arc is valid, False otherwise.
-            During training, gold arcs always are True.
+        :param instance: a list of DependencyInstance objects, not formatted
+        :return: a list of boolean 2d arrays masking arcs, one for each
+            instance. It has shape (n, n) where n is the instance length
+            including root. Position (h, m) has True if the arc is valid, False
+            otherwise. During training, gold arcs always are True.
         """
-        new_mask = self.pruner.prune(instance)
+        pruner = self.pruner
+        instance_data = pruner.preprocess_instances(instances, report=False)
+        instance_data.prepare_batches(pruner.options.batch_size, sort=False)
+        masks = []
 
-        if self.options.train:
-            for m in range(1, len(instance)):
-                h = instance.heads[m]
-                if not new_mask[h, m]:
-                    new_mask[h, m] = True
-                    self.pruner_mistakes += 1
+        for batch in instance_data.batches:
+            batch_masks = self.prune_batch(batch)
+            masks.extend(batch_masks)
 
-        return new_mask
+        return masks
 
-    def prune(self, instance):
+    def prune_batch(self, instance_data):
         """
-        Prune out some possible arcs in the given instance.
+        Prune out some possible arcs in the given instances.
 
-        This function uses the current model as the pruner; to run an
-        encapsulated pruner, use `run_pruner` instead.
+        This function runs the encapsulated pruner.
 
-        :param instance: a DependencyInstance object, not formatted
-        :return: a boolean 2d array masking arcs. It has shape (n, n) where
-            n is the instance length including root. Position (h, m) has True
-            if the arc is valid, False otherwise.
+        :param instance_data: a InstanceData object
+        :return: a list of  boolean 2d array masking arcs. It has shape (n, n)
+            where n is the instance length including root. Position (h, m) has
+            True if the arc is valid, False otherwise.
         """
-        instance, parts = self.preprocess_instance(instance)
-        instance_data = InstanceData([instance], [parts])
-        scores = self.neural_scorer.compute_scores(instance_data,
-                                                   argmax_tags=False)[0]
+        pruner = self.pruner
+        scores = pruner.neural_scorer.compute_scores(instance_data,
+                                                     argmax_tags=False)
+        masks = []
 
-        if self.options.normalization == 'local':
-            # if this model was trained with local normalization, its output
-            # for arcs is a (n - 1, n) matrix. Convert it to a list of part
-            # scores. First, transpose (modifier, head) to (head, modifier)
-            head_scores = scores[Target.HEADS].T
-            label_scores = scores[Target.RELATIONS].transpose(1, 0, 2)
+        for i in range(len(scores)):
+            inst_scores = scores[i]
+            inst_parts = instance_data.parts[i]
 
-            # the first column in the mask can be removed
-            mask = parts.arc_mask[:, 1:]
-            scores[Target.HEADS] = head_scores[mask]
-            scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
+            if pruner.options.normalization == 'local':
+                # if the pruner was trained with local normalization, its output
+                # for arcs is a (n - 1, n) matrix. Convert it to a list of part
+                # scores. First, transpose (modifier, head) to (head, modifier)
+                head_scores = inst_scores[Target.HEADS].T
+                label_scores = inst_scores[Target.RELATIONS].transpose(1, 0, 2)
 
-        new_mask = self.decoder.decode_matrix_tree(
-            parts, scores, self.options.pruner_max_heads,
-            self.options.pruner_posterior_threshold)
+                # the existing mask only masks out self attachments and root
+                # attachments. It is useful to turn a matrix into a vector.
+                # the first column in the mask can be removed
+                mask = inst_parts.arc_mask[:, 1:]
+                inst_scores[Target.HEADS] = head_scores[mask]
+                inst_scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
 
-        return new_mask
+            new_mask = self.decoder.decode_matrix_tree(
+                inst_parts, inst_scores, self.options.pruner_max_heads,
+                self.options.pruner_posterior_threshold)
+
+            if self.options.train:
+                # if training, put back any gold arc pruned out
+                instance = instance_data.instances[i]
+                for m in range(1, len(instance)):
+                    h = instance.heads[m]
+                    if not new_mask[h, m]:
+                        new_mask[h, m] = True
+                        self.pruner_mistakes += 1
+
+            masks.append(new_mask)
+
+        return masks
 
     def _report_make_parts(self, data):
         """
@@ -335,28 +349,6 @@ class TurboParser(object):
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logging.info(msg)
-
-    def preprocess_instance(self, instance):
-        """
-        Create the parts (arcs) into which the problem is factored.
-
-        :param instance: a DependencyInstance object, not yet formatted.
-        :return: a tuple (instance, parts).
-            The returned instance will have been formatted.
-        """
-        if self.has_pruner:
-            prune_mask = self.run_pruner(instance)
-        else:
-            prune_mask = None
-
-        instance = DependencyInstanceNumeric(instance, self.token_dictionary,
-                                             self.options.case_sensitive)
-        num_relations = self.token_dictionary.get_num_deprels()
-        labeled = not self.options.unlabeled
-        parts = DependencyParts(instance, self.model_type, prune_mask,
-                                labeled, num_relations)
-
-        return instance, parts
 
     def decode_predictions(self, predicted_parts, parts, head_score_matrix=None,
                            label_matrix=None):
@@ -577,11 +569,13 @@ class TurboParser(object):
         logging.info('Time: %f' % (toc - tic))
         return train_instances, valid_instances
 
-    def preprocess_instances(self, instances):
+    def preprocess_instances(self, instances, report=True):
         """
         Create parts for all instances in the batch.
 
         :param instances: list of non-formatted Instance objects
+        :param report: log the number of created parts and pruner errors. It
+            should be False in a pruner model.
         :return: an InstanceData object.
             It contains formatted instances.
             In neural models, features is a list of None.
@@ -590,17 +584,29 @@ class TurboParser(object):
         all_gold_labels = []
         formatted_instances = []
         self.pruner_mistakes = 0
+        num_relations = self.token_dictionary.get_num_deprels()
+        labeled = not self.options.unlabeled
 
-        for instance in instances:
-            f_instance, parts = self.preprocess_instance(instance)
-            gold_labels = self.get_gold_labels(f_instance)
+        if self.has_pruner:
+            prune_masks = self.run_pruner(instances)
+        else:
+            prune_masks = None
 
-            formatted_instances.append(f_instance)
+        for i, instance in enumerate(instances):
+            mask = None if prune_masks is None else prune_masks[i]
+            numeric_instance = DependencyInstanceNumeric(
+                instance, self.token_dictionary, self.options.case_sensitive)
+            parts = DependencyParts(instance, self.model_type, mask,
+                                    labeled, num_relations)
+            gold_labels = self.get_gold_labels(numeric_instance)
+
+            formatted_instances.append(numeric_instance)
             all_parts.append(parts)
             all_gold_labels.append(gold_labels)
 
         data = InstanceData(formatted_instances, all_parts, all_gold_labels)
-        self._report_make_parts(data)
+        if report:
+            self._report_make_parts(data)
         return data
 
     def reset_performance_metrics(self):
@@ -731,7 +737,8 @@ class TurboParser(object):
             prediction vector.
         """
         self.neural_scorer.eval_mode()
-        scores = self.neural_scorer.compute_scores(instance_data)
+        scores = self.neural_scorer.compute_scores(instance_data,
+                                                   argmax_tags=True)
 
         predictions = []
         for i in range(len(instance_data)):
@@ -760,11 +767,6 @@ class TurboParser(object):
                 inst_prediction[target] = inst_scores[target]
 
             predictions.append(inst_prediction)
-
-        # if return_loss:
-        #     losses = self.neural_scorer.compute_loss(instance_data,
-        #                                              None)
-        #     return scores, losses
 
         return predictions
 
