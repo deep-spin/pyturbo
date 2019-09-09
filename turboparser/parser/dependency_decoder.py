@@ -180,6 +180,9 @@ class DependencyDecoder(StructuredDecoder):
         marginals, log_partition, entropy = decode_matrix_tree(
             length, arc_index, arcs, arc_scores)
 
+        marginals = np.array(marginals)
+        marginals[marginals < 0] = 0
+
         # now, we can treat the marginals as scores for each arc and run the
         # naive decoder algorithm. The resulting configurations ensures at
         # least one non-projective tree
