@@ -258,7 +258,10 @@ class DependencyNeuralScorer(object):
 
                 elif target == Target.HEADS:
                     # (batch, modifier, head)
-                    value = F.log_softmax(detached, 2)
+                    if argmax_tags:
+                        value = F.log_softmax(detached, 2)
+                    else:
+                        value = detached
                 elif target not in dependency_targets:
                     # (batch, word, label)
                     if argmax_tags:
