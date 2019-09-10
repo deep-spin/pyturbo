@@ -458,7 +458,7 @@ class DependencyNeuralModel(nn.Module):
         label_scores = self.label_scorer(s1, s2)
 
         # set arc scores from each word to itself as -inf
-        diag = torch.eye(max_sent_size, dtype=torch.uint8, device=states.device)
+        diag = torch.eye(max_sent_size, device=states.device).bool()
         diag = diag.unsqueeze(0)
         head_scores.masked_fill_(diag, -np.inf)
 
@@ -838,7 +838,7 @@ class DependencyNeuralModel(nn.Module):
         for i, instance in enumerate(instances):
             inst_parts = parts[i]
             mask = inst_parts.arc_mask
-            mask = torch.tensor(mask.astype(np.uint8))
+            mask = torch.tensor(mask.astype(np.bool))
             length = len(instance)
 
             # get a matrix [inst_length, inst_length - 1]
