@@ -224,8 +224,9 @@ class DependencyDecoder(StructuredDecoder):
             heads_and_scores.sort(key=lambda x: x[1], reverse=True)
             max_score = heads_and_scores[0][1]
             if max_score == 0:
-                logging.info('Maximum probability for head word '
-                             'was truncated to zero, considering all possibilities')
+                msg = 'Maximum probability for head word was truncated to ' \
+                      'zero, considering all possibilities'
+                logging.info(msg)
             else:
                 heads_and_scores = heads_and_scores[:max_heads]
 

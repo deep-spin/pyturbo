@@ -94,8 +94,8 @@ class TurboParser(object):
                 options.decay, options.beta1, options.beta2)
 
             if self.options.verbose:
-                print('Model summary:', file=sys.stderr)
-                print(model, file=sys.stderr)
+                logging.info('Model summary:')
+                logging.info(str(model))
 
     def _create_random_embeddings(self):
         """
@@ -607,7 +607,7 @@ class TurboParser(object):
             mask = None if prune_masks is None else prune_masks[i]
             numeric_instance = DependencyInstanceNumeric(
                 instance, self.token_dictionary, self.options.case_sensitive)
-            parts = DependencyParts(instance, self.model_type, mask,
+            parts = DependencyParts(numeric_instance, self.model_type, mask,
                                     labeled, num_relations)
             gold_labels = self.get_gold_labels(numeric_instance)
 
