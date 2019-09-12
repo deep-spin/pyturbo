@@ -662,7 +662,7 @@ class TurboParser(object):
             self.train_batch(batch)
 
             if global_step % self.options.log_interval == 0:
-                msg = '%s Step %d' % (datetime.datetime.now(), global_step)
+                msg = 'Step %d' % global_step
                 logging.info(msg)
                 self.train_report(self.num_train_instances)
                 self.reset_performance_metrics()
