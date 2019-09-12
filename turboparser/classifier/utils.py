@@ -1,5 +1,6 @@
 import numpy as np
 import lzma
+import logging
 
 '''Several utility functions.'''
 
@@ -51,8 +52,9 @@ def read_embeddings(path, extra_symbols=None, max_words=1000000):
             try:
                 word = str(fields[0], 'utf-8')
             except UnicodeDecodeError:
-                print('Error reading line %d of embeddings file, skipping' %
-                      line_number)
+                error = 'Error reading line %d of embeddings file, ' \
+                        'skipping' % line_number
+                logging.error(error)
                 continue
 
             words.append(word)

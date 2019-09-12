@@ -47,6 +47,10 @@ class PairwiseBilinear(nn.Module):
 
         return output
 
+    def extra_repr(self):
+        return 'in_features_1={}, in_features_2={}, out_features={}'.format(
+            self.input1_size - 1, self.input2_size - 1, self.output_size)
+
 
 class PairwiseBiaffineScorer(nn.Module):
     def __init__(self, input1_size, input2_size, output_size):
