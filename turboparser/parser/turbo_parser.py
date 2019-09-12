@@ -144,10 +144,8 @@ class TurboParser(object):
 
         if self.has_pruner:
             self.pruner = load_pruner(self.options.pruner_path)
-            threshold = self.options.pruner_posterior_threshold
-            self.pruner.options.pruner_posterior_threshold = threshold
-            max_heads = self.options.pruner_max_heads
-            self.pruner.options.pruner_max_heads = max_heads
+            if self.options.pruner_batch_size > 0:
+                self.pruner.options.batch_size = self.options.pruner_batch_size
         else:
             self.pruner = None
 

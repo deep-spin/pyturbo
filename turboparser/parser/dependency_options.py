@@ -69,6 +69,10 @@ class DependencyOptionParser(OptionParser):
                             help="""Path to a pretrained model to be used as
                             pruner. This is independent from the main model; it
                             should be called at inference time again.""")
+        parser.add_argument('--pruner_batch_size', default=0, type=int,
+                            help="""Batch size to be used in the pruner. If not 
+                            given, the one used in the training of the pruner will
+                            be used.""")
         parser.add_argument('--pruner_posterior_threshold', type=float,
                             default=0.0001,
                             help="""Posterior probability threshold for an arc
