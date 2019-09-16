@@ -36,6 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('logs', help='Logs produced by the turbo parser',
                         nargs='+')
     parser.add_argument('output', help='File to print log')
+    parser.add_argument('--title', help='Title of the plot', default='')
     parser.add_argument('-y', help='Vertical axis limits to show (2 values)',
                         nargs=2, default=[0, 1], type=float)
     parser.add_argument('-m', help='Metric', choices=['UAS', 'LAS'],
@@ -54,17 +55,22 @@ if __name__ == '__main__':
 
     for log, name in zip(args.logs, names):
         accuracies = extract_accuracies(log, args.metric)
-        steps = np.arange(1, len(accuracies) + 1)
+        length = len(accuracies)
+        steps = np.arange(1, length + 1)
         ax.plot(steps, accuracies, label=name)
 
+        # by default, set the lower y margins 2% below 92% of the accuracies
+        # and the upper margin 2% above the highest
+        index = int(0.08 * length)
         all_maxs.append(accuracies.max())
-        all_mins.append(accuracies.min())
+        all_mins.append(accuracies[index:].min())
 
-    y_min = max(args.y[0], 0.96 * min(all_mins))
-    y_max = min(args.y[1], 1.04 * max(all_maxs))
+    y_min = max(args.y[0], 0.98 * min(all_mins))
+    y_max = min(args.y[1], 1.02 * max(all_maxs))
 
     ax.set_yticks(all_maxs, minor=True)
-    ax.legend(loc='best')
+    ax.legend(loc='lower right')
+    pl.title(args.title)
     pl.xlabel('Evaluation step')
     pl.ylabel(args.metric)
     pl.ylim(y_min, y_max)
