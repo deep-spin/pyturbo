@@ -88,7 +88,9 @@ class TurboParser(object):
                 tag_mlp_size=options.tag_mlp_size,
                 predict_upos=options.upos,
                 predict_xpos=options.xpos,
-                predict_morph=options.morph)
+                predict_morph=options.morph,
+                predict_lemma=options.lemma,
+                predict_tree=options.parse)
 
             self.neural_scorer.initialize(
                 model, self.options.normalization, self.options.learning_rate,

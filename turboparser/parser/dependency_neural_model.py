@@ -297,6 +297,8 @@ class DependencyNeuralModel(nn.Module):
                  predict_upos,
                  predict_xpos,
                  predict_morph,
+                 predict_lemma,
+                 predict_tree,
                  tag_mlp_size):
         """
         :param model_type: a ModelType object
@@ -327,7 +329,10 @@ class DependencyNeuralModel(nn.Module):
         self.predict_upos = predict_upos
         self.predict_xpos = predict_xpos
         self.predict_morph = predict_morph
-        self.predict_tags = predict_upos or predict_xpos or predict_morph
+        self.predict_lemma = predict_lemma
+        self.predict_tree = predict_tree
+        self.predict_tags = predict_upos or predict_xpos or \
+            predict_morph or predict_lemma
         self.model_type = model_type
 
         self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
@@ -451,6 +456,10 @@ class DependencyNeuralModel(nn.Module):
             num_tags = token_dictionary.get_num_morph_singletons()
             self.morph_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                     bias=True)
+        if predict_lemma:
+            self.lemmatizer = Lemmatizer(
+                num_chars, char_embedding_size, char_hidden_size, dropout,
+                2 * rnn_size, token_dictionary)
 
         # first order layers
         num_labels = token_dictionary.get_num_deprels()
@@ -615,6 +624,8 @@ class DependencyNeuralModel(nn.Module):
         pickle.dump(self.predict_upos, file)
         pickle.dump(self.predict_xpos, file)
         pickle.dump(self.predict_morph, file)
+        pickle.dump(self.predict_lemma, file)
+        pickle.dump(self.predict_tree, file)
         pickle.dump(self.model_type, file)
         torch.save(self.state_dict(), file)
 
@@ -640,6 +651,8 @@ class DependencyNeuralModel(nn.Module):
         predict_upos = pickle.load(file)
         predict_xpos = pickle.load(file)
         predict_morph = pickle.load(file)
+        predict_lemma = pickle.load(file)
+        predict_tree = pickle.load(file)
         model_type = pickle.load(file)
 
         dummy_embeddings = np.empty([fixed_embedding_vocab_size,
@@ -992,38 +1005,20 @@ class DependencyNeuralModel(nn.Module):
 
         if type_ == 'fixedword':
             embedding_matrix = self.fixed_word_embeddings
-            unknown_symbol = self.unknown_fixed_word
         elif type_ == 'trainableword':
             embedding_matrix = self.trainable_word_embeddings
-            unknown_symbol = self.unknown_trainable_word
         elif type_ == 'lemma':
             embedding_matrix = self.lemma_embeddings
-            unknown_symbol = self.unknown_lemma
         else:
             if type_ == 'upos':
                 embedding_matrix = self.upos_embeddings
-                unknown_symbol = self.unknown_upos
             else:
                 embedding_matrix = self.xpos_embeddings
-                unknown_symbol = self.unknown_xpos
-
-        # if self.training and self.word_dropout_rate and type_ != 'fixedword':
-        #     dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
-        #     inds = dropout_draw < self.word_dropout_rate
-        #     index_matrix[inds] = unknown_symbol
 
         if self.on_gpu:
             index_matrix = index_matrix.cuda()
 
         embeddings = embedding_matrix(index_matrix)
-
-        # if self.training and self.word_dropout_rate and type_ == 'fixedword':
-        #     # since the embedding matrix is fixed, we use a separate
-        #     # trainable dropout tensor
-        #     dropout_draw = torch.rand_like(embeddings[:, :, 0])
-        #     inds = dropout_draw < self.word_dropout_rate
-        #     embeddings[inds] = self.fixed_dropout_replacement
-
         return embeddings
 
     def _run_char_rnn(self, instances, max_sentence_length):
@@ -1131,14 +1126,9 @@ class DependencyNeuralModel(nn.Module):
             The model will store scores as a list of 1d arrays (without padding)
             that can easily be used with AD3 decoding functions.
 
-        :param gold_heads: tensor (batch, max_num_words) with gold heads. Only
-            used if training with global margin loss
-        :param gold_labels: same as above, with gold label for each token.
-        :return: a score matrix with shape (num_instances, longest_length)
+        :return: a dictionary mapping each target to score tensors
         """
-        self.scores = {Target.HEADS: []}
-        if parts[0].labeled:
-            self.scores[Target.RELATIONS] = []
+        self.scores = {}
         for type_ in parts[0].part_lists:
             self.scores[type_] = []
 
@@ -1156,7 +1146,6 @@ class DependencyNeuralModel(nn.Module):
         if self.on_gpu:
             sorted_lengths = sorted_lengths.cuda()
 
-        # instances = [instances[i] for i in inds]
         max_length = sorted_lengths[0].item()
         embeddings = self.get_word_representations(instances, max_length)
         sorted_embeddings = embeddings[inds]
