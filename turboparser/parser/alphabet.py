@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 
-from .constants import NONE, UNKNOWN
+from .constants import EMPTY, UNKNOWN
 
 
 class Alphabet(dict):
@@ -94,7 +94,7 @@ class MultiAlphabet(object):
 
         self.alphabets = new_alphabets
 
-    def lookup(self, feature_dict, special_symbol=NONE):
+    def lookup(self, feature_dict, special_symbol=EMPTY):
         """
         Lookup feature dictionary.
 

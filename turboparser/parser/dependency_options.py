@@ -18,7 +18,7 @@ class DependencyOptionParser(OptionParser):
                             than this.""")
         parser.add_argument('--lemma_cutoff', type=int, default=7,
                             help="""Ignore word lemmas whose frequency is less
-                            than this.""")
+                            than this. This does not affect the lemmatizer.""")
         parser.add_argument('--tag_cutoff', type=int, default=1,
                             help="""Ignore POS tags whose frequency is less
                             than this.""")
@@ -62,6 +62,10 @@ class DependencyOptionParser(OptionParser):
                             help='Predict XPOS tags')
         parser.add_argument('--morph', action='store_true',
                             help='Predict UMorph tags')
+        parser.add_argument('--lemma', action='store_true',
+                            help='Predict lemmas')
+        parser.add_argument('--parse', action='store_true',
+                            help='Predict parse trees')
         parser.add_argument('--single_root', action='store_true',
                             help='When running the parser, enforce that there '
                                  'is only one root per sentence.')

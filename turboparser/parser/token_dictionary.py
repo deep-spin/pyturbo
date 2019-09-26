@@ -1,10 +1,13 @@
-from .alphabet import Alphabet, MultiAlphabet
+from .alphabet import Alphabet
+from ..classifier.utils import get_logger
 from ..classifier.dictionary import Dictionary
 from .dependency_reader import ConllReader
-from .constants import UNKNOWN, SPECIAL_SYMBOLS, NONE
+from .constants import UNKNOWN, SPECIAL_SYMBOLS, EMPTY, EOS, BOS
 import pickle
-import logging
 from collections import Counter, OrderedDict
+
+
+logger = get_logger()
 
 
 class TokenDictionary(Dictionary):
@@ -122,7 +125,7 @@ class TokenDictionary(Dictionary):
             return id_
         return self.lemma_alphabet.lookup(UNKNOWN)
 
-    def get_morph_ids(self, morph_dict, special_symbol=NONE):
+    def get_morph_ids(self, morph_dict, special_symbol=EMPTY):
         ids = [None] * len(self.morph_tag_alphabets)
         for i, feature_name in enumerate(self.morph_tag_alphabets):
             alphabet = self.morph_tag_alphabets[feature_name]
@@ -165,8 +168,8 @@ class TokenDictionary(Dictionary):
         return self.deprel_alphabet.lookup(UNKNOWN)
 
     def initialize(self, input_path, case_sensitive, word_list=None,
-                   char_cutoff=1, form_cutoff=7, lemma_cutoff=7, morph_cutoff=1,
-                   ignore_value='_'):
+                   char_cutoff=1, form_cutoff=7, lemma_cutoff=7,
+                   morph_cutoff=1):
         """
         Initializes the dictionary with indices for word forms and tags.
 
@@ -175,10 +178,8 @@ class TokenDictionary(Dictionary):
 
         :param input_path: path to an input CoNLL file
         :param word_list: optional list with words in pre-trained embeddings
-        :param ignore_value: values to be ignored when in tags. Any occurrences
-            of them will be internally represented by a special "EMPTY" symbol.
         """
-        logging.info('Creating token dictionary...')
+        logger.info('Creating token dictionary...')
 
         char_counts = Counter()
         form_counts = Counter()
@@ -197,9 +198,6 @@ class TokenDictionary(Dictionary):
                          self.deprel_alphabet]:
             for symbol in SPECIAL_SYMBOLS:
                 alphabet.insert(symbol)
-            # alphabet.insert(UNKNOWN)
-            # if alphabet is not self.deprel_alphabet:
-            #     alphabet.insert(ROOT)
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
@@ -224,23 +222,18 @@ class TokenDictionary(Dictionary):
 
                     # Dependency relation
                     deprel = instance.get_relation(i)
-                    # self.deprel_alphabet.insert(deprel)
                     deprel_counts[deprel] += 1
 
                     # POS tags
                     tag = instance.get_upos(i)
-                    if tag != ignore_value:
-                        upos_counts[tag] += 1
-                        # self.upos_alphabet.insert(tag)
+                    upos_counts[tag] += 1
 
                     tag = instance.get_xpos(i)
-                    if tag != ignore_value:
-                        xpos_counts[tag] += 1
-                        # self.xpos_alphabet.insert(tag)
+                    xpos_counts[tag] += 1
 
                     # Morph features
                     morph_singleton = instance.get_morph_singleton(i)
-                    if morph_singleton != ignore_value:
+                    if morph_singleton != EMPTY:
                         self.morph_singleton_alphabet.insert(morph_singleton)
 
                         # Add each key/value UFeats pair
@@ -250,8 +243,6 @@ class TokenDictionary(Dictionary):
                                 morph_counts[feature] = Counter()
                             value = morph_tags[feature]
                             morph_counts[feature][value] += 1
-
-                        # self.morph_tag_alphabet.insert(morph_tags)
 
         # sort morph features to ensure deterministic behavior
         morph_features = sorted(morph_counts)
@@ -275,15 +266,6 @@ class TokenDictionary(Dictionary):
 
             self.morph_tag_alphabets[feature] = feature_alphabet
 
-        # self.morph_tag_alphabet.sort()
-        # for sub_alphabet_name in self.morph_tag_alphabet.alphabets:
-        #     sub_alphabet = self.morph_tag_alphabet.alphabets[sub_alphabet_name]
-        #     for symbol in SPECIAL_SYMBOLS:
-        #         sub_alphabet.insert(symbol)
-        #     # sub_alphabet.insert(UNKNOWN)
-        #     # sub_alphabet.insert(ROOT)
-        #     # sub_alphabet.insert(NONE)
-
         # Now adjust the cutoffs if necessary.
         # (only using cutoffs for words and lemmas)
         for alphabet, counter, cutoff in \
@@ -297,9 +279,11 @@ class TokenDictionary(Dictionary):
             alphabet.clear()
             for symbol in SPECIAL_SYMBOLS:
                 alphabet.insert(symbol)
-            # alphabet.insert(UNKNOWN)
-            # if alphabet != 'char':
-            #     alphabet.insert(ROOT)
+
+            if alphabet == self.character_alphabet:
+                # EOS and BOS for characters only
+                self.character_alphabet.insert(EOS)
+                self.character_alphabet.insert(BOS)
 
             for name, count in counter.most_common():
                 if count >= cutoff:
@@ -323,15 +307,15 @@ class TokenDictionary(Dictionary):
         #     self.embedding_alphabet.insert(new_word)
         self.pretrain_alphabet.stop_growth()
 
-        logging.info('Number of characters: %d' % len(self.character_alphabet))
-        logging.info('Number of pretrained embedding forms: %d' %
+        logger.info('Number of characters: %d' % len(self.character_alphabet))
+        logger.info('Number of pretrained embedding forms: %d' %
                      len(self.pretrain_alphabet))
-        logging.info('Number of forms: %d' % len(self.form_alphabet))
-        logging.info('Number of lemmas: %d' % len(self.lemma_alphabet))
-        logging.info('Number of coarse POS tags: %d' % len(self.upos_alphabet))
-        logging.info('Number of fine POS tags: %d' %
+        logger.info('Number of forms: %d' % len(self.form_alphabet))
+        logger.info('Number of lemmas: %d' % len(self.lemma_alphabet))
+        logger.info('Number of coarse POS tags: %d' % len(self.upos_alphabet))
+        logger.info('Number of fine POS tags: %d' %
                      len(self.xpos_alphabet))
-        logging.info('Number of morph singletons (combination of morph tags '
+        logger.info('Number of morph singletons (combination of morph tags '
                      'seen in data): %d' % len(self.morph_singleton_alphabet))
-        logging.info('Number of dependency relations: %d' %
+        logger.info('Number of dependency relations: %d' %
                      len(self.deprel_alphabet))

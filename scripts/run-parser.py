@@ -4,15 +4,14 @@ import random
 import numpy as np
 
 from turboparser.parser import DependencyOptionParser, TurboParser
+from turboparser.classifier.utils import get_logger
+
+
+logger = get_logger()
 
 
 def main():
     """Main function for the dependency parser."""
-
-    logging.basicConfig(level=logging.DEBUG,
-                        format='[%(asctime)s] %(message)s',
-                        datefmt="%Y-%m-%d %H:%M:%S")
-
     # Parse arguments.
     option_parser = DependencyOptionParser()
     options = option_parser.parse_args()
@@ -33,14 +32,14 @@ def set_seeds(seed):
 
 
 def train_parser(options):
-    logging.info('Training the parser')
+    logger.info('Training the parser')
     dependency_parser = TurboParser(options)
     log_options(dependency_parser)
     dependency_parser.train()
 
 
 def test_parser(options):
-    logging.info('Running the parser')
+    logger.info('Running the parser')
     dependency_parser = TurboParser.load(options)
     log_options(dependency_parser)
     dependency_parser.run()
@@ -49,7 +48,7 @@ def test_parser(options):
 def log_options(parser):
     """Log parser options"""
     msg = 'Parser options: ' + str(parser.options)
-    logging.info(msg)
+    logger.info(msg)
 
 
 if __name__ == '__main__':

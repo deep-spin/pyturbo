@@ -11,6 +11,7 @@ class Target(Enum):
     XPOS = auto()
     UPOS = auto()
     MORPH = auto()
+    LEMMA = auto()
     BEST_RELATION = auto()
     SIGN = auto()
     DISTANCE = auto()
@@ -28,15 +29,21 @@ dependency_targets.update(higher_order_parts)
 
 target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
                  Target.XPOS: 'XPOS', Target.UPOS: 'UPOS',
-                 Target.MORPH: 'UFeats', Target.SIGN: 'Linearization',
+                 Target.MORPH: 'UFeats', Target.LEMMA: 'Lemma',
+                 Target.SIGN: 'Linearization',
                  Target.DISTANCE: 'Head distance',
                  Target.GRANDSIBLINGS: 'Grandsiblings',
                  Target.GRANDPARENTS: 'Grandparent',
-                 Target.NEXT_SIBLINGS: 'Consecutive siblings'}
+                 Target.NEXT_SIBLINGS: 'Consecutive siblings',
+                 Target.RELATIONS: 'LAS',
+                 Target.HEADS: 'UAS'}
 
 
 ROOT = '_root_'
 UNKNOWN = '_unknown_'
 PADDING = '_padding_'
-NONE = '_none_'
-SPECIAL_SYMBOLS = [PADDING, UNKNOWN, NONE, ROOT]
+EMPTY = '_'
+SPECIAL_SYMBOLS = [PADDING, UNKNOWN, EMPTY, ROOT]
+
+BOS = '_bos_'
+EOS = '_eos_'

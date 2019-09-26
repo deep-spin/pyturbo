@@ -5,6 +5,9 @@ import logging
 '''Several utility functions.'''
 
 
+logger = None
+
+
 def nearly_eq_tol(a, b, tol):
     '''Checks if two numbers are equal up to a tolerance.'''
     return (a-b)*(a-b) <= tol
@@ -18,6 +21,27 @@ def nearly_binary_tol(a, tol):
 def nearly_zero_tol(a, tol):
     '''Checks if a number is zero up to a tolerance.'''
     return (a <= tol) and (a >= -tol)
+
+
+def get_logger():
+    '''
+    Return the default logger used by Turbo Parser.
+    '''
+    global logger
+    if logger is not None:
+        return logger
+
+    logger = logging.getLogger('TurboParser')
+    logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('[%(asctime)s] %(message)s',
+                                  datefmt="%Y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.propagate = False
+
+    return logger
 
 
 def read_embeddings(path, extra_symbols=None, max_words=1000000):
@@ -37,6 +61,7 @@ def read_embeddings(path, extra_symbols=None, max_words=1000000):
         words = []
 
     vectors = []
+    logger = get_logger()
 
     open_fn = lzma.open if path.endswith('.xz') else open
 
@@ -54,7 +79,7 @@ def read_embeddings(path, extra_symbols=None, max_words=1000000):
             except UnicodeDecodeError:
                 error = 'Error reading line %d of embeddings file, ' \
                         'skipping' % line_number
-                logging.error(error)
+                logger.error(error)
                 continue
 
             words.append(word)

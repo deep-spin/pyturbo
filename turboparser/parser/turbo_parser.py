@@ -12,15 +12,15 @@ from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer, get_gold_tensors
 from .dependency_instance_numeric import DependencyInstanceNumeric
-from .constants import SPECIAL_SYMBOLS
+from .constants import SPECIAL_SYMBOLS, EOS, EMPTY
 
-import sys
 from collections import defaultdict
 import pickle
 import numpy as np
-import logging
 import time
-import datetime
+
+
+logger = utils.get_logger()
 
 
 class ModelType(object):
@@ -94,8 +94,8 @@ class TurboParser(object):
                 options.decay, options.beta1, options.beta2)
 
             if self.options.verbose:
-                logging.info('Model summary:')
-                logging.info(str(model))
+                logger.info('Model summary:')
+                logger.info(str(model))
 
     def _create_random_embeddings(self):
         """
@@ -113,12 +113,14 @@ class TurboParser(object):
 
         :return: word dictionary, numpy embedings
         """
+        logger.info('Loading embeddings')
         if self.options.embeddings is not None:
             words, embeddings = utils.read_embeddings(self.options.embeddings,
                                                       SPECIAL_SYMBOLS)
         else:
             words = None
             embeddings = None
+        logger.info('Loaded')
 
         return words, embeddings
 
@@ -134,13 +136,13 @@ class TurboParser(object):
             if self.options.normalization == 'local':
                 msg = 'Local normalization not implemented for ' \
                       'higher order models'
-                logging.error(msg)
+                logger.error(msg)
                 exit(1)
 
             if not self.has_pruner:
                 msg = 'Running higher-order model without pruner! ' \
                       'Parser may be very slow!'
-                logging.warning(msg)
+                logger.warning(msg)
 
         if self.has_pruner:
             self.pruner = load_pruner(self.options.pruner_path)
@@ -256,7 +258,7 @@ class TurboParser(object):
             entropies.extend(batch_entropies)
 
         entropies = np.array(entropies)
-        logging.info('Pruner mean entropy: %f' % entropies.mean())
+        logger.info('Pruner mean entropy: %f' % entropies.mean())
 
         return masks
 
@@ -342,22 +344,22 @@ class TurboParser(object):
                 num_higher_order[part_type] += num_parts
 
         msg = '%f heads per token after pruning' % (num_arcs / num_tokens)
-        logging.info(msg)
+        logger.info(msg)
 
         msg = '%d arcs after pruning, out of %d possible (%f)' % \
               (num_arcs, num_possible_arcs, num_arcs / num_possible_arcs)
-        logging.info(msg)
+        logger.info(msg)
 
         for part_type in num_higher_order:
             num = num_higher_order[part_type]
             name = target2string[part_type]
             msg = '%d %s parts' % (num, name)
-            logging.info(msg)
+            logger.info(msg)
 
         if self.options.train:
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
-            logging.info(msg)
+            logger.info(msg)
 
     def decode_predictions(self, predicted_parts, parts, head_score_matrix=None,
                            label_matrix=None):
@@ -524,7 +526,7 @@ class TurboParser(object):
         tic = time.time()
 
         instances = read_instances(self.options.test_path)
-        logging.info('Number of instances: %d' % len(instances))
+        logger.info('Number of instances: %d' % len(instances))
         data = self.preprocess_instances(instances)
         data.prepare_batches(self.options.batch_size, sort=False)
         predictions = []
@@ -535,9 +537,7 @@ class TurboParser(object):
 
         self.write_predictions(instances, data.parts, predictions)
         toc = time.time()
-        logging.info('Time: %f' % (toc - tic))
-
-        self._run_report(len(instances))
+        logger.info('Time: %f' % (toc - tic))
 
     def write_predictions(self, instances, parts, predictions):
         """
@@ -556,26 +556,19 @@ class TurboParser(object):
 
         self.writer.close()
 
-    def _run_report(self, num_instances):
-        if self.options.single_root:
-            ratio = self.reassigned_roots / num_instances
-            msg = '%d reassgined roots (sentence had more than one), %f per ' \
-                  'sentence' % (self.reassigned_roots, ratio)
-            logging.info(msg)
-
     def read_train_instances(self):
         '''Create batch of training and validation instances.'''
         import time
         tic = time.time()
-        logging.info('Creating instances...')
+        logger.info('Creating instances...')
 
         train_instances = read_instances(self.options.training_path)
         valid_instances = read_instances(self.options.valid_path)
-        logging.info('Number of train instances: %d' % len(train_instances))
-        logging.info('Number of validation instances: %d'
+        logger.info('Number of train instances: %d' % len(train_instances))
+        logger.info('Number of validation instances: %d'
                      % len(valid_instances))
         toc = time.time()
-        logging.info('Time: %f' % (toc - tic))
+        logger.info('Time: %f' % (toc - tic))
         return train_instances, valid_instances
 
     def preprocess_instances(self, instances, report=True):
@@ -641,15 +634,15 @@ class TurboParser(object):
     def train(self):
         '''Train with a general online algorithm.'''
         train_instances, valid_instances = self.read_train_instances()
-        logging.info('Preprocessing training data')
+        logger.info('Preprocessing training data')
         train_data = self.preprocess_instances(train_instances)
-        logging.info('\nPreprocessing validation data')
+        logger.info('\nPreprocessing validation data')
         valid_data = self.preprocess_instances(valid_instances)
         train_data.prepare_batches(self.options.batch_size, sort=True)
         valid_data.prepare_batches(self.options.batch_size, sort=True)
-        logging.info('Training data spread across %d batches'
+        logger.info('Training data spread across %d batches'
                      % len(train_data.batches))
-        logging.info('Validation data spread across %d batches\n'
+        logger.info('Validation data spread across %d batches\n'
                      % len(valid_data.batches))
 
         self._reset_best_validation_metric()
@@ -663,7 +656,7 @@ class TurboParser(object):
 
             if global_step % self.options.log_interval == 0:
                 msg = 'Step %d' % global_step
-                logging.info(msg)
+                logger.info(msg)
                 self.train_report(self.num_train_instances)
                 self.reset_performance_metrics()
 
@@ -678,7 +671,7 @@ class TurboParser(object):
 
                 if num_bad_evals == self.options.patience:
                     if not using_amsgrad:
-                        logging.info('Switching to AMSGrad')
+                        logger.info('Switching to AMSGrad')
                         using_amsgrad = True
                         self.neural_scorer.switch_to_amsgrad(
                             self.options.learning_rate, self.options.beta1,
@@ -690,7 +683,7 @@ class TurboParser(object):
         msg = 'Best validation UAS: %f' % self.best_validation_uas
         if not self.options.unlabeled:
             msg += '\tBest validation LAS: %f' % self.best_validation_las
-        logging.info(msg)
+        logger.info(msg)
 
     def run_on_validation(self, valid_data):
         """
@@ -709,7 +702,7 @@ class TurboParser(object):
         valid_end = time.time()
         time_validation = valid_end - valid_start
 
-        logging.info('Time to run on validation: %.2f' % time_validation)
+        logger.info('Time to run on validation: %.2f' % time_validation)
 
         msgs = ['Validation accuracies:\tUAS: %.4f' % self.validation_uas]
         if not self.options.unlabeled:
@@ -718,12 +711,12 @@ class TurboParser(object):
             target_name = target2string[target]
             acc = self.validation_accuracies[target]
             msgs.append('%s: %.4f' % (target_name, acc))
-        logging.info('\t'.join(msgs))
+        logger.info('\t'.join(msgs))
 
         if self._should_save:
-            logging.info('Saved model')
+            logger.info('Saved model')
 
-        logging.info('\n')
+        logger.info('\n')
 
     def train_report(self, num_instances):
         """
@@ -731,11 +724,11 @@ class TurboParser(object):
         """
         msgs = ['Train losses:'] + make_loss_msgs(self.train_losses,
                                                   num_instances)
-        logging.info('\t'.join(msgs))
+        logger.info('\t'.join(msgs))
 
         time_msg = 'Time to score: %.2f\tDecode: %.2f\tGradient step: %.2f'
         time_msg %= (self.time_scores, self.time_decoding, self.time_gradient)
-        logging.info(time_msg)
+        logger.info(time_msg)
 
     def run_batch(self, instance_data):
         """
@@ -891,7 +884,7 @@ def load_pruner(model_path):
     This function takes care of keeping the main parser and the pruner
     configurations separate.
     """
-    logging.info('Loading pruner from %s' % model_path)
+    logger.info('Loading pruner from %s' % model_path)
     with open(model_path, 'rb') as f:
         pruner_options = pickle.load(f)
 

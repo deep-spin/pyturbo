@@ -1,6 +1,6 @@
 from .dependency_instance import DependencyInstance
 from .token_dictionary import TokenDictionary
-from .constants import ROOT, NONE
+from .constants import ROOT, EMPTY
 import numpy as np
 
 
@@ -8,6 +8,9 @@ class DependencyInstanceNumeric(DependencyInstance):
     """An dependency parsing instance with numeric fields."""
     def __init__(self, instance, token_dictionary, case_sensitive):
         """
+        Store numpy array containing the instance's words, lemmas, POS, morph
+        tags and dependencies.
+
         :param instance: DependencyInstance
         :param token_dictionary: TokenDictionary
         :type token_dictionary: TokenDictionary
@@ -64,7 +67,7 @@ class DependencyInstanceNumeric(DependencyInstance):
 
             tag = instance.xpos[i]
             if tag == '_':
-                tag = NONE
+                tag = EMPTY
             id_ = token_dictionary.get_xpos_id(tag)
             self.xpos[i] = id_
 
