@@ -429,7 +429,7 @@ class DependencyNeuralModel(nn.Module):
             torch.randn(rnn_input_size) / np.sqrt(rnn_input_size))
 
         if self.predict_tags:
-            self.tagger_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
+            self.tagger_rnn = HighwayLSTM(2 * rnn_size, rnn_size, dropout=dropout)
         self.tanh = nn.Tanh()
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
@@ -461,63 +461,53 @@ class DependencyNeuralModel(nn.Module):
                 num_chars, char_embedding_size, char_hidden_size, dropout,
                 2 * rnn_size, token_dictionary)
 
-        # first order layers
-        num_labels = token_dictionary.get_num_deprels()
-        self.arc_scorer = DeepBiaffineScorer(
-            2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
-        self.label_scorer = DeepBiaffineScorer(
-            2 * rnn_size, 2 * rnn_size, label_mlp_size, num_labels,
-            dropout=dropout)
-        self.linearization_scorer = DeepBiaffineScorer(
-            2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
-        self.distance_scorer = DeepBiaffineScorer(
-            2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+        if self.predict_tree:
+            # first order layers
+            num_labels = token_dictionary.get_num_deprels()
+            self.arc_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+            self.label_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, label_mlp_size, num_labels,
+                dropout=dropout)
+            self.linearization_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+            self.distance_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
 
-        # self.head_mlp = self._create_mlp()
-        # self.modifier_mlp = self._create_mlp()
-        # self.arc_scorer = self._create_scorer()
+            # Higher order layers
+            if model_type.grandparents:
+                self.gp_grandparent_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gp_head_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gp_modifier_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
 
-        # self.label_head_mlp = self._create_mlp(
-        #     hidden_size=self.label_mlp_size)
-        # self.label_modifier_mlp = self._create_mlp(
-        #     hidden_size=self.label_mlp_size)
-        # self.label_scorer = self._create_scorer(self.label_mlp_size,
-        #                                         num_labels)
+            if model_type.consecutive_siblings:
+                self.sib_head_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.sib_modifier_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.sib_sibling_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
 
-        # Higher order layers
-        if model_type.grandparents:
-            self.gp_grandparent_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gp_head_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gp_modifier_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
+            if model_type.consecutive_siblings or model_type.grandsiblings \
+                    or model_type.trisiblings or model_type.arbitrary_siblings:
+                self.null_sibling_tensor = self._create_parameter_tensor(
+                    2 * rnn_size)
 
-        if model_type.consecutive_siblings:
-            self.sib_head_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.sib_modifier_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.sib_sibling_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
-
-        if model_type.consecutive_siblings or model_type.grandsiblings \
-                or model_type.trisiblings or model_type.arbitrary_siblings:
-            self.null_sibling_tensor = self._create_parameter_tensor(
-                2 * rnn_size)
-
-        if model_type.grandsiblings:
-            self.gsib_head_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gsib_modifier_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gsib_sibling_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gsib_grandparent_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
+            if model_type.grandsiblings:
+                self.gsib_head_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gsib_modifier_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gsib_sibling_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gsib_grandparent_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -675,7 +665,8 @@ class DependencyNeuralModel(nn.Module):
             dropout=dropout,
             word_dropout=word_dropout,
             predict_upos=predict_upos, predict_xpos=predict_xpos,
-            predict_morph=predict_morph)
+            predict_morph=predict_morph, predict_lemma=predict_lemma,
+            predict_tree=predict_tree)
 
         if model.on_gpu:
             state_dict = torch.load(file)
@@ -888,7 +879,8 @@ class DependencyNeuralModel(nn.Module):
 
         self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
 
-    def get_word_representations(self, instances, max_length):
+    def get_word_representations(self, instances, max_length, char_indices,
+                                 token_lengths):
         """
         Get the full embedding representations of words in the batch, including
         word type embeddings, char level and POS tag embeddings.
@@ -926,7 +918,7 @@ class DependencyNeuralModel(nn.Module):
             all_embeddings.append(morph_embeddings)
 
         if self.char_rnn is not None:
-            char_embeddings = self._run_char_rnn(instances, max_length)
+            char_embeddings = self.char_rnn(char_indices, token_lengths)
             projection = self.char_projection(self.dropout(char_embeddings))
             all_embeddings.append(projection)
 
@@ -971,13 +963,6 @@ class DependencyNeuralModel(nn.Module):
             embedding_sum = 0
             for i, matrix in enumerate(self.morph_embeddings):
                 indices = index_tensor[:, :, i]
-                # if self.training and self.word_dropout_rate:
-                #     #TODO: avoid some repeated code
-                #     indices = indices.clone()
-                #     dropout_draw = torch.rand_like(indices,
-                #                                    dtype=torch.float)
-                #     drop_indices = dropout_draw < self.word_dropout_rate
-                #     indices[drop_indices] = self.unknown_morphs[i]
 
                 # embeddings is (batch, max_length, num_units)
                 embeddings = matrix(indices)
@@ -1020,43 +1005,6 @@ class DependencyNeuralModel(nn.Module):
 
         embeddings = embedding_matrix(index_matrix)
         return embeddings
-
-    def _run_char_rnn(self, instances, max_sentence_length):
-        """
-        Run a RNN over characters in all words in the batch instances.
-
-        :param instances:
-        :return: a tensor with shape (batch, sequence, embedding size)
-        """
-        batch_size = len(instances)
-        token_lengths_ = [[len(inst.get_characters(i))
-                           for i in range(len(inst))]
-                          for inst in instances]
-        max_token_length = max(max(inst_lengths)
-                               for inst_lengths in token_lengths_)
-
-        shape = [batch_size, max_sentence_length]
-        token_lengths = torch.zeros(shape, dtype=torch.long)
-
-        shape = [batch_size, max_sentence_length, max_token_length]
-        char_indices = torch.zeros(shape, dtype=torch.long)
-
-        for i, instance in enumerate(instances):
-            token_lengths[i, :len(instance)] = torch.tensor(token_lengths_[i])
-
-            for j in range(len(instance)):
-                # each j is a token
-                chars = instance.get_characters(j)
-                char_indices[i, j, :len(chars)] = torch.tensor(chars)
-
-        char_representation = self.char_rnn(char_indices, token_lengths)
-        # if self.training and self.word_dropout_rate:
-        #     # sample a dropout mask and replace the dropped representations
-        #     shape = [batch_size, max_sentence_length]
-        #     dropout_mask = torch.rand(shape) < self.word_dropout_rate
-        #     char_representation[dropout_mask] = self.char_dropout_replacement
-
-        return char_representation
 
     def convert_arc_scores_to_parts(self, instances, parts):
         """
@@ -1147,7 +1095,18 @@ class DependencyNeuralModel(nn.Module):
             sorted_lengths = sorted_lengths.cuda()
 
         max_length = sorted_lengths[0].item()
-        embeddings = self.get_word_representations(instances, max_length)
+
+        # compute char inds only once
+        if self.char_rnn or self.predict_lemma:
+            char_indices, token_lengths = create_char_indices(
+                instances, max_length)
+            char_indices = char_indices.to(lengths.device)
+            token_lengths = token_lengths.to(lengths.device)
+        else:
+            char_indices, token_lengths = None, None
+
+        embeddings = self.get_word_representations(
+            instances, max_length, char_indices, token_lengths)
         sorted_embeddings = embeddings[inds]
 
         # pack to account for variable lengths
@@ -1155,53 +1114,81 @@ class DependencyNeuralModel(nn.Module):
             sorted_embeddings, sorted_lengths, batch_first=True)
 
         shared_states, _ = self.shared_rnn(packed_embeddings)
-        # shared_states = self._packed_dropout(shared_states)
-        parser_packed_states, _ = self.parser_rnn(shared_states)
 
-        # batch_states is (batch, num_tokens, hidden_size)
-        parser_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
-            parser_packed_states, batch_first=True)
+        if self.predict_tags or self.predict_lemma:
+            if self.predict_tree:
+                # If we don't create a copy, we get an error for variable
+                # rewrite on gradient computation.
+                padded, lens = rnn_utils.pad_packed_sequence(
+                    shared_states, batch_first=True)
+                packed = rnn_utils.pack_padded_sequence(padded, lens, True)
+            else:
+                packed = shared_states
 
-        # return to the original ordering
-        parser_batch_states = parser_batch_states[rev_inds]
-
-        if self.predict_tags:
-            tagger_packed_states, _ = self.tagger_rnn(shared_states)
+            tagger_packed_states, _ = self.tagger_rnn(packed)
             tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
                 tagger_packed_states, batch_first=True)
             tagger_batch_states = tagger_batch_states[rev_inds]
 
+            # ignore root
+            tagger_batch_states = tagger_batch_states[:, 1:]
+
             if self.predict_upos:
-                # ignore root
-                hidden = self.upos_mlp(tagger_batch_states[:, 1:])
+                hidden = self.upos_mlp(tagger_batch_states)
                 self.scores[Target.UPOS] = self.upos_scorer(hidden)
 
             if self.predict_xpos:
-                hidden = self.xpos_mlp(tagger_batch_states[:, 1:])
+                hidden = self.xpos_mlp(tagger_batch_states)
                 self.scores[Target.XPOS] = self.xpos_scorer(hidden)
 
             if self.predict_morph:
-                hidden = self.morph_mlp(tagger_batch_states[:, 1:])
+                hidden = self.morph_mlp(tagger_batch_states)
                 self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
-        self._compute_arc_scores(parser_batch_states, lengths, normalization)
+            if self.predict_lemma:
+                if self.training:
+                    lemmas, lemma_lengths = get_padded_lemma_indices(
+                        instances, max_length)
+                    lemmas = lemmas.to(lengths.device)
+                    lemma_lengths = lemma_lengths.to(lengths.device)
+                else:
+                    lemmas, lemma_lengths = None, None
 
-        # now go through each batch item
-        for i in range(batch_size):
-            length = lengths[i].item()
-            states = parser_batch_states[i, :length]
-            sent_parts = parts[i]
+                # skip root
+                logits = self.lemmatizer(
+                    char_indices[:, 1:], tagger_batch_states,
+                    token_lengths[:, 1:], lemmas, lemma_lengths)
+                self.scores[Target.LEMMA] = logits
 
-            if self.model_type.consecutive_siblings:
-                self._compute_consecutive_sibling_scores(states, sent_parts)
+        if self.predict_tree:
+            parser_packed_states, _ = self.parser_rnn(shared_states)
 
-            if self.model_type.grandparents:
-                self._compute_grandparent_scores(states, sent_parts)
+            # batch_states is (batch, num_tokens, hidden_size)
+            parser_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
+                parser_packed_states, batch_first=True)
 
-            if self.model_type.grandsiblings:
-                self._compute_grandsibling_scores(states, sent_parts)
+            # return to the original ordering
+            parser_batch_states = parser_batch_states[rev_inds]
 
-        if normalization == 'global':
-            self.convert_arc_scores_to_parts(instances, parts)
+            self._compute_arc_scores(
+                parser_batch_states, lengths, normalization)
+
+            # now go through each batch item
+            for i in range(batch_size):
+                length = lengths[i].item()
+                states = parser_batch_states[i, :length]
+                sent_parts = parts[i]
+
+                if self.model_type.consecutive_siblings:
+                    self._compute_consecutive_sibling_scores(states, sent_parts)
+
+                if self.model_type.grandparents:
+                    self._compute_grandparent_scores(states, sent_parts)
+
+                if self.model_type.grandsiblings:
+                    self._compute_grandsibling_scores(states, sent_parts)
+
+            if normalization == 'global':
+                self.convert_arc_scores_to_parts(instances, parts)
 
         return self.scores
