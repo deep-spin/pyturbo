@@ -217,10 +217,9 @@ class TurboParser(object):
 
     def _reset_best_validation_metric(self):
         """
-        Set the best validation UAS score to 0
+        Unset the best validation scores
         """
-        self.best_validation_uas = 0.
-        self.best_validation_las = 0.
+        self.best_metric_value = defaultdict(float)
         self._should_save = False
 
     #TODO: remove this function and access gold data directly in the instance
@@ -480,69 +479,34 @@ class TurboParser(object):
                     hits = target_gold == target_pred
                     accumulated_tag_hits[target] += np.sum(hits)
 
-        self.validation_uas = accumulated_uas / total_tokens
-        self.validation_las = accumulated_las / total_tokens
-        self.validation_accuracies = {}
+        accuracies = {}
+        if self.options.parse:
+            accuracies[Target.HEADS] = accumulated_uas / total_tokens
+            accuracies[Target.RELATIONS] = accumulated_las / total_tokens
         for target in self.additional_targets:
-            self.validation_accuracies[target] = accumulated_tag_hits[
-                                       target] / total_tokens
+            accuracies[target] = accumulated_tag_hits[target] / total_tokens
 
-        # always update UAS; use it as a criterion for saving if no LAS
-        if self.validation_uas >= self.best_validation_uas:
-            self.best_validation_uas = self.validation_uas
-            improved_uas = True
-        else:
-            improved_uas = False
+        # check if the prioritized target improved accuracy
+        for target in self.target_priority:
+            if target not in accuracies:
+                continue
 
-        if self.options.unlabeled:
-            self._should_save = improved_uas
-        else:
-            if self.validation_las >= self.best_validation_las:
-                self.best_validation_las = self.validation_las
+            current_value = accuracies[target]
+            best = self.best_metric_value[target]
+            if current_value == best:
+                # consider the next top priority
+                continue
+
+            if current_value > best:
+                # since we will save now, overwrite all values
+                self.best_metric_value.update(accuracies)
                 self._should_save = True
             else:
                 self._should_save = False
 
-    def enforce_well_formed_graph(self, instance, arcs):
-        if self.options.projective:
-            raise NotImplementedError
-        else:
-            return self.enforce_connected_graph(instance, arcs)
+            break
 
-    def enforce_connected_graph(self, instance, arcs):
-        '''Make sure the graph formed by the unlabeled arc parts is connected,
-        otherwise there is no feasible solution.
-        If necessary, root nodes are added and passed back through the last
-        argument.'''
-        inserted_arcs = []
-        # Create a list of children for each node.
-        children = [[] for i in range(len(instance))]
-        for r in range(len(arcs)):
-            assert type(arcs[r]) == Arc
-            children[arcs[r].head].append(arcs[r].modifier)
-
-        # Check if the root is connected to every node.
-        visited = [False] * len(instance)
-        nodes_to_explore = [0]
-        while nodes_to_explore:
-            h = nodes_to_explore.pop(0)
-            visited[h] = True
-            for m in children[h]:
-                if visited[m]:
-                    continue
-                nodes_to_explore.append(m)
-            # If there are no more nodes to explore, check if all nodes
-            # were visited and, if not, add a new edge from the node to
-            # the first node that was not visited yet.
-            if not nodes_to_explore:
-                for m in range(1, len(instance)):
-                    if not visited[m]:
-                        logging.info('Inserted root node 0 -> %d.' % m)
-                        inserted_arcs.append((0, m))
-                        nodes_to_explore.append(m)
-                        break
-
-        return inserted_arcs
+        self.validation_accuracies = accuracies
 
     def run(self):
         self.reassigned_roots = 0
@@ -650,8 +614,6 @@ class TurboParser(object):
         self.accumulated_uas = 0.
         self.accumulated_las = 0.
         self.total_tokens = 0
-        self.validation_uas = 0.
-        self.validation_las = 0.
         self.reassigned_roots = 0
 
     def train(self):
@@ -703,9 +665,12 @@ class TurboParser(object):
                     else:
                         break
 
-        msg = 'Best validation UAS: %f' % self.best_validation_uas
-        if not self.options.unlabeled:
-            msg += '\tBest validation LAS: %f' % self.best_validation_las
+        msg = 'Saved model with the following validation accuracies:\n'
+        for target in self.best_metric_value:
+            name = target2string[target]
+            value = self.best_metric_value[target]
+            msg += '%s: %f\n' % (name, value)
+
         logger.info(msg)
 
     def run_on_validation(self, valid_data):
@@ -727,10 +692,8 @@ class TurboParser(object):
 
         logger.info('Time to run on validation: %.2f' % time_validation)
 
-        msgs = ['Validation accuracies:\tUAS: %.4f' % self.validation_uas]
-        if not self.options.unlabeled:
-            msgs.append('LAS: %.4f' % self.validation_las)
-        for target in self.additional_targets:
+        msgs = ['Validation accuracies:\t']
+        for target in self.validation_accuracies:
             target_name = target2string[target]
             acc = self.validation_accuracies[target]
             msgs.append('%s: %.4f' % (target_name, acc))
@@ -795,8 +758,14 @@ class TurboParser(object):
 
             for target in self.additional_targets:
                 target_predictions = instance_output[target]
-                # argmax is computed in the scorer
-                inst_prediction[target] = target_predictions
+
+                if target == Target.LEMMA:
+                    lemmas = cut_sequences_at_eos(
+                        target_predictions, eos, empty)
+                    inst_prediction[target] = lemmas
+                else:
+                    # argmax is computed in the scorer
+                    inst_prediction[target] = target_predictions
 
             predictions.append(inst_prediction)
 
@@ -875,14 +844,10 @@ class TurboParser(object):
         :param output: dictionary mapping target names to predictions
         :return:
         """
-        heads = output[Target.HEADS]
-        relations = output[Target.RELATIONS]
-
-        for m, h in enumerate(heads, 1):
-            instance.heads[m] = h
-
-            if parts.labeled:
-                relation = relations[m - 1]
+        for m in range(1, len(instance) - 1):
+            if self.options.parse:
+                instance.heads[m] = output[Target.HEADS][m - 1]
+                relation = output[Target.RELATIONS][m - 1]
                 relation_name = self.token_dictionary.deprel_alphabet.\
                     get_label_name(relation)
                 instance.relations[m] = relation_name
