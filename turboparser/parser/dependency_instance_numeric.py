@@ -22,6 +22,7 @@ class DependencyInstanceNumeric(DependencyInstance):
         self.forms = np.full(length, -1, np.int32)
         self.embedding_ids = self.forms.copy()
         self.lemmas = self.forms.copy()
+        self.lemma_characters = self.characters.copy()
         self.upos = self.forms.copy()
         self.xpos = self.forms.copy()
         self.morph_tags = self.characters.copy()
@@ -44,21 +45,27 @@ class DependencyInstanceNumeric(DependencyInstance):
             id_ = token_dictionary.get_embedding_id(lower_form)
             self.embedding_ids[i] = id_
 
-            # characters and morph tags
-            morph_tags = instance.morph_tags[i]
-            if i == 0:
-                self.characters[0] = [token_dictionary.get_character_id(ROOT)]
-                self.morph_tags[0] = token_dictionary.get_morph_ids(morph_tags,
-                                                                    ROOT)
-            else:
-                self.characters[i] = [token_dictionary.get_character_id(c)
-                                      for c in form]
-                self.morph_tags[i] = token_dictionary.get_morph_ids(morph_tags)
-
             # Lemma.
             lemma = instance.lemmas[i]
             id_ = token_dictionary.get_lemma_id(lemma)
             self.lemmas[i] = id_
+
+            # characters and morph tags
+            morph_tags = instance.morph_tags[i]
+            if i == 0:
+                characters = [token_dictionary.get_character_id(ROOT)]
+                morph_tags = token_dictionary.get_morph_ids(morph_tags, ROOT)
+                lemma_characters = [token_dictionary.get_character_id(ROOT)]
+            else:
+                characters = [token_dictionary.get_character_id(c)
+                              for c in form]
+                morph_tags = token_dictionary.get_morph_ids(morph_tags)
+                lemma_characters = [token_dictionary.get_character_id(c)
+                                    for c in lemma]
+
+            self.characters[i] = np.array(characters)
+            self.morph_tags[i] = np.array(morph_tags)
+            self.lemma_characters[i] = np.array(lemma_characters)
 
             # POS tag.
             tag = instance.upos[i]

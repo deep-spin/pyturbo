@@ -6,11 +6,12 @@ from .token_dictionary import TokenDictionary
 from .constants import Target, target2string
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
-from .dependency_decoder import DependencyDecoder, chu_liu_edmonds_one_root, \
-    make_score_matrix, chu_liu_edmonds
+from . import decoding
+from .decoding import chu_liu_edmonds_one_root, make_score_matrix, \
+    chu_liu_edmonds
 from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
-from .dependency_scorer import DependencyNeuralScorer, get_gold_tensors
+from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
 from .constants import SPECIAL_SYMBOLS, EOS, EMPTY
 
@@ -46,13 +47,13 @@ class ModelType(object):
         self.head_bigrams = 'hb' in codes
         self.trisiblings = 'ts' in codes
 
+
 class TurboParser(object):
     '''Dependency parser.'''
     def __init__(self, options):
         self.options = options
         self.token_dictionary = TokenDictionary()
         self.writer = DependencyWriter()
-        self.decoder = DependencyDecoder()
         self.model = None
         self._set_options()
         self.neural_scorer = DependencyNeuralScorer()
@@ -240,7 +241,7 @@ class TurboParser(object):
         """
         Prune out some arcs with the pruner model.
 
-        :param instance: a list of DependencyInstance objects, not formatted
+        :param instances: a list of DependencyInstance objects, not formatted
         :return: a list of boolean 2d arrays masking arcs, one for each
             instance. It has shape (n, n) where n is the instance length
             including root. Position (h, m) has True if the arc is valid, False
@@ -301,7 +302,7 @@ class TurboParser(object):
                 inst_scores[Target.HEADS] = head_scores[mask]
                 inst_scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
 
-            new_mask, entropy = self.decoder.decode_matrix_tree(
+            new_mask, entropy = decoding.generate_arc_mask(
                 inst_parts, inst_scores, self.options.pruner_max_heads,
                 self.options.pruner_posterior_threshold)
 
@@ -751,7 +752,7 @@ class TurboParser(object):
             inst_scores = scores[i]
 
             if self.options.normalization == 'global':
-                predicted_parts = self.decoder.decode(
+                predicted_parts = decoding.decode(
                     instance, parts, inst_scores)
                 head_scores = None
                 label_scores = None
@@ -833,7 +834,7 @@ class TurboParser(object):
         """
         # Do the decoding.
         start_decoding = time.time()
-        predicted_output = self.decoder.decode(instance, parts, scores)
+        predicted_output = decoding.decode(instance, parts, scores)
 
         end_decoding = time.time()
         self.time_decoding += end_decoding - start_decoding
