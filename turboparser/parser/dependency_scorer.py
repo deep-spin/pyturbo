@@ -1,9 +1,13 @@
-from .constants import Target, dependency_targets
 import torch
 from torch import nn
 from torch.nn import functional as F
 import torch.optim as optim
-import logging
+
+from .constants import Target, dependency_targets
+from ..classifier.utils import get_logger
+
+
+logger = get_logger()
 
 
 def get_gold_tensors(instance_data):
@@ -86,7 +90,7 @@ class DependencyNeuralScorer(object):
                 parts_loss += inst_parts_loss
             else:
                 if inst_parts_loss < -10e-6:
-                    logging.warning(
+                    logger.warning(
                         'Ignoring negative loss: %.6f' % inst_parts_loss.item())
 
         losses[Target.DEPENDENCY_PARTS] = parts_loss / batch_size
@@ -104,20 +108,23 @@ class DependencyNeuralScorer(object):
         :return: dictionary mapping each target to a loss scalar, as a torch
             variable
         """
+        # compute loss for POS tagging, morphology and lemmas
         losses = self.compute_tagging_loss(instance_data)
 
-        gold_heads, gold_relations = get_gold_tensors(instance_data)
+        if self.model.predict_tree:
+            # loss for dependency parsing
+            gold_heads, gold_relations = get_gold_tensors(instance_data)
+            if self.normalization == 'global':
+                dep_losses = self.compute_loss_global_margin(instance_data,
+                                                             predicted_parts)
+            else:
+                dep_losses = self.compute_loss_local(gold_heads, gold_relations)
 
-        if self.normalization == 'global':
-            dep_losses = self.compute_loss_global_margin(instance_data,
-                                                         predicted_parts)
-        else:
-            dep_losses = self.compute_loss_local(gold_heads, gold_relations)
+            losses.update(dep_losses)
 
-        losses.update(dep_losses)
-
-        positional_losses = self.compute_loss_position(gold_heads)
-        losses.update(positional_losses)
+            # loss for the (head, modifier) distances used in parsing
+            positional_losses = self.compute_loss_position(gold_heads)
+            losses.update(positional_losses)
 
         return losses
 
@@ -145,6 +152,16 @@ class DependencyNeuralScorer(object):
             logits = logits.transpose(1, 2)
             losses[target] = F.cross_entropy(logits, padded_gold,
                                              ignore_index=-1)
+
+        if Target.LEMMA in gold_labels[0]:
+            gold = self.model.lemmatizer.cached_gold_chars
+            token_inds = self.model.lemmatizer.cached_real_token_inds
+            logits = self.model.scores[Target.LEMMA]
+            batch_size, num_words, num_chars, vocab_size = logits.shape
+            gold = gold.view(-1)
+            logits = logits.view(batch_size * num_words, num_chars, vocab_size)
+            logits = logits[token_inds].view(-1, vocab_size)
+            losses[Target.LEMMA] = F.cross_entropy(logits, gold, ignore_index=0)
 
         return losses
 
@@ -231,13 +248,14 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    def compute_scores(self, instance_data, argmax_tags=True):
+    def compute_scores(self, instance_data, dependency_logits=False):
         """
         Compute the scores for all the targets this scorer
 
         :param instance_data: InstanceData
-        :param argmax_tags: if True, instead of returning scores for all tags
-            and dependency labels, return the argmax.
+        :param dependency_logits: if True, return the logits for dependency
+            heads and relations. If False, return the argmax of dependency
+            relations and a log softmax of heads.
         :return: a list of dictionaries mapping each target name to its scores
         """
         model_scores = self.model(instance_data.instances, instance_data.parts,
@@ -245,46 +263,44 @@ class DependencyNeuralScorer(object):
 
         numpy_scores = {}
         for target in model_scores:
-            if self.normalization == 'local':
-                detached = model_scores[target].detach()
+            value = model_scores[target]
+            if isinstance(value, torch.Tensor):
+                value = value.detach()
+
+            if target not in dependency_targets:
+                # tagging and lemmatization
+
+                # at training time:
+                # tags: (batch, sentence_size, label_logits)
+                # lemmas: (batch, sentence_size, token_size, char_vocab_logits)
+                # at inference time, lemmas is (batch, sentence, token)
+                # because we use search algorithms over the output space
+                if target != Target.LEMMA or self.model.training:
+                    value = value.argmax(-1)
+
+            elif self.normalization == 'local' and target not in \
+                    [Target.DISTANCE, Target.SIGN]:
+                # dependency targets
 
                 # local normalization stores tensors (num_words, num_words)
                 if target == Target.RELATIONS:
                     # shape is (batch, modifier, head, label)
-                    if argmax_tags:
-                        value = detached.argmax(3)
-                    else:
-                        value = detached
+                    if not dependency_logits:
+                        value = value.argmax(3)
 
                 elif target == Target.HEADS:
                     # (batch, modifier, head)
-                    if argmax_tags:
-                        value = F.log_softmax(detached, 2)
-                    else:
-                        value = detached
-                elif target not in dependency_targets:
-                    # (batch, word, label)
-                    if argmax_tags:
-                        value = detached.argmax(2)
-                    else:
-                        value = detached
-                else:
-                    # sign scores, distance scores
-                    continue
+                    if not dependency_logits:
+                        value = F.log_softmax(value, 2)
+            else:
+                # dependency parts under global normalization are treated
+                # differently
+                # sign scores and distance scores are ignored
+                continue
 
-                numpy_scores[target] = value.cpu().numpy()
-
-            elif target not in dependency_targets:
-                detached = model_scores[target].detach()
-
-                # global normalization stores the scores of each part separately
-                # So, only deal with tagging here
-                # (batch, word, label)
-                if argmax_tags:
-                    value = detached.argmax(2)
-                else:
-                    value = detached
-                numpy_scores[target] = value.cpu().numpy()
+            if isinstance(value, torch.Tensor):
+                value = value.cpu().numpy()
+            numpy_scores[target] = value
 
         # now convert a dictionary of arrays into a list of dictionaries
         score_list = []
@@ -355,7 +371,7 @@ class DependencyNeuralScorer(object):
         """
         for param_group in self.optimizer.param_groups:
             param_group['lr'] *= self.decay
-            logging.info('Setting learning rate to %f' % param_group['lr'])
+            logger.info('Setting learning rate to %f' % param_group['lr'])
 
     def make_gradient_step(self, losses):
         """

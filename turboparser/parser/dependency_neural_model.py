@@ -12,7 +12,7 @@ from joeynmt.search import greedy
 
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS
-from ..classifier.lstm import LSTM, CharLSTM, HighwayLSTM
+from ..classifier.lstm import CharLSTM, HighwayLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 
 

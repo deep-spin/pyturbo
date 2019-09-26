@@ -50,6 +50,9 @@ class ModelType(object):
 
 class TurboParser(object):
     '''Dependency parser.'''
+    target_priority = [Target.RELATIONS, Target.HEADS, Target.LEMMA,
+                       Target.XPOS, Target.UPOS, Target.MORPH]
+
     def __init__(self, options):
         self.options = options
         self.token_dictionary = TokenDictionary()
@@ -281,8 +284,8 @@ class TurboParser(object):
             theorem
         """
         pruner = self.pruner
-        scores = pruner.neural_scorer.compute_scores(instance_data,
-                                                     argmax_tags=False)
+        scores = pruner.neural_scorer.compute_scores(
+            instance_data, dependency_logits=True)
         masks = []
         entropies = []
 
@@ -745,7 +748,7 @@ class TurboParser(object):
         """
         self.neural_scorer.eval_mode()
         scores = self.neural_scorer.compute_scores(instance_data,
-                                                   argmax_tags=True)
+                                                   dependency_logits=False)
 
         predictions = []
         for i in range(len(instance_data)):
