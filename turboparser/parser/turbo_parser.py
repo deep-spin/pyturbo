@@ -164,6 +164,8 @@ class TurboParser(object):
             self.additional_targets.append(Target.UPOS)
         if self.options.xpos:
             self.additional_targets.append(Target.XPOS)
+        if self.options.lemma:
+            self.additional_targets.append(Target.LEMMA)
 
     def save(self, model_path=None):
         """Save the full configuration and model."""
@@ -185,6 +187,8 @@ class TurboParser(object):
             options.morph = loaded_options.morph
             options.xpos = loaded_options.xpos
             options.upos = loaded_options.upos
+            options.lemma = loaded_options.lemma
+            options.parse = loaded_options.parse
 
             # backwards compatibility
             # TODO: change old saved models to include normalization model
@@ -219,6 +223,7 @@ class TurboParser(object):
         self.best_validation_las = 0.
         self._should_save = False
 
+    #TODO: remove this function and access gold data directly in the instance
     def get_gold_labels(self, instance):
         """
         Return a list of dictionary mapping the name of each target to a numpy
@@ -236,9 +241,12 @@ class TurboParser(object):
             gold_dict[Target.XPOS] = instance.get_all_xpos()[1:]
         if self.options.morph:
             gold_dict[Target.MORPH] = instance.get_all_morph_singletons()[1:]
+        if self.options.lemma:
+            gold_dict[Target.LEMMA] = instance.lemma_characters[1:]
 
-        gold_dict[Target.HEADS] = instance.get_all_heads()[1:]
-        gold_dict[Target.RELATIONS] = instance.get_all_relations()[1:]
+        if self.options.parse:
+            gold_dict[Target.HEADS] = instance.get_all_heads()[1:]
+            gold_dict[Target.RELATIONS] = instance.get_all_relations()[1:]
 
         return gold_dict
 
@@ -442,15 +450,15 @@ class TurboParser(object):
             inst_pred = valid_pred[i]
 
             real_length = len(instance) - 1
-            gold_heads = gold_output[Target.HEADS]
-            pred_heads = inst_pred[Target.HEADS][:real_length]
-
-            # scale UAS by sentence length; it is normalized later
-            head_hits = gold_heads == pred_heads
-            accumulated_uas += np.sum(head_hits)
             total_tokens += real_length
+            if self.options.parse:
+                gold_heads = gold_output[Target.HEADS]
+                pred_heads = inst_pred[Target.HEADS][:real_length]
 
-            if not self.options.unlabeled:
+                # scale UAS by sentence length; it is normalized later
+                head_hits = gold_heads == pred_heads
+                accumulated_uas += np.sum(head_hits)
+
                 pred_labels = inst_pred[Target.RELATIONS][:real_length]
                 deprel_gold = gold_output[Target.RELATIONS]
                 label_hits = deprel_gold == pred_labels
@@ -458,10 +466,19 @@ class TurboParser(object):
                 accumulated_las += np.sum(label_head_hits)
 
             for target in self.additional_targets:
-                target_gold = gold_output[target]
-                target_pred = inst_pred[target][:real_length]
-                hits = target_gold == target_pred
-                accumulated_tag_hits[target] += np.sum(hits)
+                if target == Target.LEMMA:
+                    # lemma has to match the whole sequence
+                    # inst_pred[LEMMA] has a nested list of arrays
+                    gold_lemmas = gold_output[Target.LEMMA]
+                    pred_lemmas = inst_pred[Target.LEMMA]
+                    for gold, pred in zip(gold_lemmas, pred_lemmas):
+                        if len(gold) == len(pred) and np.all(gold == pred):
+                            accumulated_tag_hits[Target.LEMMA] += 1
+                else:
+                    target_gold = gold_output[target]
+                    target_pred = inst_pred[target][:real_length]
+                    hits = target_gold == target_pred
+                    accumulated_tag_hits[target] += np.sum(hits)
 
         self.validation_uas = accumulated_uas / total_tokens
         self.validation_las = accumulated_las / total_tokens
@@ -595,7 +612,7 @@ class TurboParser(object):
         num_relations = self.token_dictionary.get_num_deprels()
         labeled = not self.options.unlabeled
 
-        if self.has_pruner:
+        if self.options.parse and self.has_pruner:
             prune_masks = self.run_pruner(instances)
         else:
             prune_masks = None
@@ -751,30 +768,35 @@ class TurboParser(object):
                                                    dependency_logits=False)
 
         predictions = []
+        eos = self.token_dictionary.get_character_id(EOS)
+        empty = self.token_dictionary.get_character_id(EMPTY)
         for i in range(len(instance_data)):
             instance = instance_data.instances[i]
             parts = instance_data.parts[i]
-            inst_scores = scores[i]
+            instance_output = scores[i]
+            inst_prediction = {}
 
-            if self.options.normalization == 'global':
-                predicted_parts = decoding.decode(
-                    instance, parts, inst_scores)
-                head_scores = None
-                label_scores = None
-            else:
-                predicted_parts = None
-                head_scores = inst_scores[Target.HEADS]
-                label_scores = inst_scores[Target.RELATIONS]
+            if self.options.parse:
+                if self.options.normalization == 'global':
+                    predicted_parts = decoding.decode(
+                        instance, parts, instance_output)
+                    head_scores = None
+                    label_scores = None
+                else:
+                    predicted_parts = None
+                    head_scores = instance_output[Target.HEADS]
+                    label_scores = instance_output[Target.RELATIONS]
 
-            pred_heads, pred_labels = self.decode_predictions(
-                predicted_parts, parts, head_scores, label_scores)
+                pred_heads, pred_labels = self.decode_predictions(
+                    predicted_parts, parts, head_scores, label_scores)
 
-            inst_prediction = {Target.HEADS: pred_heads,
-                               Target.RELATIONS: pred_labels}
+                inst_prediction[Target.HEADS] = pred_heads,
+                inst_prediction[Target.RELATIONS] = pred_labels
 
             for target in self.additional_targets:
+                target_predictions = instance_output[target]
                 # argmax is computed in the scorer
-                inst_prediction[target] = inst_scores[target]
+                inst_prediction[target] = target_predictions
 
             predictions.append(inst_prediction)
 
@@ -798,7 +820,7 @@ class TurboParser(object):
         self.time_scores += end_time - start_time
 
         all_predicted_parts = []
-        if self.options.normalization == 'global':
+        if self.options.parse and self.options.normalization == 'global':
             # need to decode sentences in order to compute global loss
             for i in range(len(instance_data)):
                 instance = instance_data.instances[i]
@@ -881,6 +903,12 @@ class TurboParser(object):
                 tag_name = self.token_dictionary. \
                     morph_singleton_alphabet.get_label_name(tag)
                 instance.morph_singletons[m] = tag_name
+            if self.options.lemma:
+                predictions = output[Target.LEMMA][m - 1]
+                lemma = ''.join(self.token_dictionary.
+                                character_alphabet.get_label_name(c)
+                                for c in predictions)
+                instance.lemmas[m] = lemma
 
 
 def load_pruner(model_path):
@@ -918,3 +946,33 @@ def make_loss_msgs(losses, dataset_size):
         msg = '%s: %.4f' % (target_name, normalized_loss)
         msgs.append(msg)
     return msgs
+
+
+def cut_sequences_at_eos(predictions, eos_index, empty_index):
+    """
+    Convert a tensor of lemmas to lists ending when EOS character is used.
+
+    :param predictions: an array (num_tokens, max_num_chars)
+    :return: a list with num_tokens arrays. Each array contains the char ids.
+    """
+    lemmas = []
+
+    # store positions for faster access
+    eos_mask = predictions == eos_index
+    # mask is a boolean vector; argmax returns the first occurence of True
+    eos_positions = eos_mask.argmax(-1)
+
+    for i, token_prediction in enumerate(predictions):
+        eos_position = eos_positions[i]
+        if eos_position == 0:
+            # either no EOS (and we use the whole row) or EOS at the very
+            # first position
+            if token_prediction[0] == eos_index:
+                lemma = [empty_index]
+            else:
+                lemma = token_prediction
+        else:
+            lemma = token_prediction[:eos_position]
+        lemmas.append(lemma)
+
+    return lemmas
