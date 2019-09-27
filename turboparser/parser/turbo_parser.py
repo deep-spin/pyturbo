@@ -100,8 +100,8 @@ class TurboParser(object):
                 options.decay, options.beta1, options.beta2)
 
             if self.options.verbose:
-                logger.info('Model summary:')
-                logger.info(str(model))
+                logger.debug('Model summary:')
+                logger.debug(str(model))
 
     def _create_random_embeddings(self):
         """
@@ -149,6 +149,11 @@ class TurboParser(object):
                 msg = 'Running higher-order model without pruner! ' \
                       'Parser may be very slow!'
                 logger.warning(msg)
+        elif self.options.num_jobs > 1:
+            msg = 'Number of parallel jobs > 1 only worth it with higher ' \
+                  'order models; setting it to 1'
+            logger.warning(msg)
+            self.options.num_jobs = 1
 
         if self.has_pruner:
             self.pruner = load_pruner(self.options.pruner_path)
@@ -417,7 +422,12 @@ class TurboParser(object):
 
                 pred_labels = np.array(pred_labels)
             else:
-                pred_labels = parts.get_labels(pred_heads)
+                offset_labels = parts.get_type_offset(Target.RELATIONS)
+                num_labeled = parts.num_labeled_arcs
+                labeled_parts = predicted_parts[offset_labels:
+                                                offset_labels+num_labeled]
+                labeled_parts2d = labeled_parts.reshape([parts.num_arcs, -1])
+                pred_labels = labeled_parts2d.argmax(1)
         else:
             pred_labels = None
 
@@ -730,31 +740,35 @@ class TurboParser(object):
         scores = self.neural_scorer.compute_scores(instance_data,
                                                    dependency_logits=False)
 
+        if self.options.parse:
+            if self.options.normalization == 'global':
+                predicted_parts = decoding.batch_decode(
+                    instance_data, scores, self.options.num_jobs)
+                head_scores = None
+                label_scores = None
+            else:
+                instance_predicted_parts = None
+
         predictions = []
         eos = self.token_dictionary.get_character_id(EOS)
         empty = self.token_dictionary.get_character_id(EMPTY)
         for i in range(len(instance_data)):
-            instance = instance_data.instances[i]
             parts = instance_data.parts[i]
             instance_output = scores[i]
-            inst_prediction = {}
+            instance_prediction = {}
 
             if self.options.parse:
                 if self.options.normalization == 'global':
-                    predicted_parts = decoding.decode(
-                        instance, parts, instance_output)
-                    head_scores = None
-                    label_scores = None
+                    instance_predicted_parts = predicted_parts[i]
                 else:
-                    predicted_parts = None
                     head_scores = instance_output[Target.HEADS]
                     label_scores = instance_output[Target.RELATIONS]
 
                 pred_heads, pred_labels = self.decode_predictions(
-                    predicted_parts, parts, head_scores, label_scores)
+                    instance_predicted_parts, parts, head_scores, label_scores)
 
-                inst_prediction[Target.HEADS] = pred_heads,
-                inst_prediction[Target.RELATIONS] = pred_labels
+                instance_prediction[Target.HEADS] = pred_heads,
+                instance_prediction[Target.RELATIONS] = pred_labels
 
             for target in self.additional_targets:
                 target_predictions = instance_output[target]
@@ -762,12 +776,12 @@ class TurboParser(object):
                 if target == Target.LEMMA:
                     lemmas = cut_sequences_at_eos(
                         target_predictions, eos, empty)
-                    inst_prediction[target] = lemmas
+                    instance_prediction[target] = lemmas
                 else:
                     # argmax is computed in the scorer
-                    inst_prediction[target] = target_predictions
+                    instance_prediction[target] = target_predictions
 
-            predictions.append(inst_prediction)
+            predictions.append(instance_prediction)
 
         return predictions
 
@@ -791,17 +805,12 @@ class TurboParser(object):
         all_predicted_parts = []
         if self.options.parse and self.options.normalization == 'global':
             # need to decode sentences in order to compute global loss
-            for i in range(len(instance_data)):
-                instance = instance_data.instances[i]
-                parts = instance_data.parts[i]
-                inst_scores = scores[i]
+            start_decoding = time.time()
+            all_predicted_parts = decoding.batch_decode(
+                instance_data, scores, self.options.num_jobs)
 
-                start_decoding = time.time()
-                predicted_output = decoding.decode(instance, parts, inst_scores)
-
-                end_decoding = time.time()
-                self.time_decoding += end_decoding - start_decoding
-                all_predicted_parts.append(predicted_output)
+            end_decoding = time.time()
+            self.time_decoding += end_decoding - start_decoding
 
         # run the gradient step for the whole batch
         start_time = time.time()
@@ -817,10 +826,9 @@ class TurboParser(object):
         end_time = time.time()
         self.time_gradient += end_time - start_time
 
-    def label_instance(self, instance, parts, output):
+    def label_instance(self, instance, output):
         """
         :type instance: DependencyInstance
-        :type parts: DependencyParts
         :param output: dictionary mapping target names to predictions
         :return:
         """

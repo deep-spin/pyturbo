@@ -3,16 +3,19 @@ import ad3.factor_graph as fg
 from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
     decode_matrix_tree, PFactorGrandparentHeadAutomaton
 import numpy as np
+import os
+from joblib import Parallel, delayed
+from itertools import zip_longest
 
-from ..classifier.structured_decoder import StructuredDecoder
 from ..classifier.utils import get_logger
 from .dependency_instance import DependencyInstance
-from .dependency_parts import NextSibling, DependencyParts, \
-    Grandparent, GrandSibling
+from ..classifier.instance import InstanceData
+from .dependency_parts import NextSibling, DependencyParts, GrandSibling
 from .constants import Target
 
 
 logger = get_logger()
+os.environ['LOKY_PICKLER'] = 'pickle'
 
 
 class PartStructure(object):
@@ -65,6 +68,27 @@ def decode_labels(parts, scores):
     best_label_scores = np.take_along_axis(relation_scores, inds, 1)
 
     return best_labels, best_label_scores.squeeze(1)
+
+
+def batch_decode(instance_data: InstanceData, scores: list, n_jobs=2):
+    """
+    Decode the scores of dependency parts in parallel.
+
+    This function uses multiprocessing instead of multithreading.
+
+    :param instance_data: InstanceData object
+    :param scores: list of dictionaries mapping target names to scores
+    :param n_jobs: number of jobs to run in parallel. 1 avoids parallelization
+    :return: list of arrays with the prediction probability of each part
+    """
+    num_sentences = len(instance_data)
+    p = Parallel(n_jobs=n_jobs)
+    decoded = p(delayed(decode)(instance_data.instances[i],
+                                instance_data.parts[i],
+                                scores[i])
+                for i in range(num_sentences))
+
+    return decoded
 
 
 def decode(instance, parts, scores):
