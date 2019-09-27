@@ -796,9 +796,12 @@ class TurboParser(object):
                 parts = instance_data.parts[i]
                 inst_scores = scores[i]
 
-                predicted_parts = self.decode_train(
-                    instance, parts, inst_scores)
-                all_predicted_parts.append(predicted_parts)
+                start_decoding = time.time()
+                predicted_output = decoding.decode(instance, parts, inst_scores)
+
+                end_decoding = time.time()
+                self.time_decoding += end_decoding - start_decoding
+                all_predicted_parts.append(predicted_output)
 
         # run the gradient step for the whole batch
         start_time = time.time()
@@ -813,29 +816,6 @@ class TurboParser(object):
 
         end_time = time.time()
         self.time_gradient += end_time - start_time
-
-    def decode_train(self, instance, parts, scores):
-        """
-        Decode the scores for parsing at training time.
-
-        Return the predicted output (for each part)
-
-        :param instance: a DependencyInstanceNumeric
-        :param parts: DependencyParts
-        :type parts: DependencyParts
-        :param scores: a dictionary mapping target names to scores produced by
-            the network. The scores must be 1-d arrays (matrixes should be
-            converted)
-        :return: prediction array
-        """
-        # Do the decoding.
-        start_decoding = time.time()
-        predicted_output = decoding.decode(instance, parts, scores)
-
-        end_decoding = time.time()
-        self.time_decoding += end_decoding - start_decoding
-
-        return predicted_output
 
     def label_instance(self, instance, parts, output):
         """
