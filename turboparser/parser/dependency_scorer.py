@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import torch.optim as optim
+import entmax
+from entmax import sparsemax, entmax15, entmax_bisect
 
 from .constants import Target, dependency_targets
 from ..classifier.utils import get_logger
@@ -50,10 +52,21 @@ class DependencyNeuralScorer(object):
     """
     Neural scorer for mediating the training of a Parser/Tagger neural model.
     """
-    def __init__(self):
+    def __init__(self, loss='softmax'):
         self.part_scores = None
         self.model = None
-        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
+        if loss == 'softmax':
+            fn = nn.CrossEntropyLoss
+        elif loss == 'sparsemax':
+            fn = entmax.SparsemaxLoss
+        elif loss == 'entmax15':
+            fn = entmax.Entmax15Loss
+        elif loss == 'adaptive-entmax':
+            fn = entmax.EntmaxBisectLoss
+        else:
+            raise ValueError('Unknown loss function: %s' % loss)
+        
+        self.loss_fn = fn(ignore_index=-1, reduction='elementwise_mean')
 
     def compute_loss_global_margin(self, instance_data, all_predicted_parts):
         """

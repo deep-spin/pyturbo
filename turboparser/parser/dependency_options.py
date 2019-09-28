@@ -56,6 +56,11 @@ class DependencyOptionParser(OptionParser):
                             word as an independent softmax, while global applies
                             a margin loss over the complete structure. global 
                             is slower but tends to give better results.""")
+        parser.add_argument('--loss_function', default='softmax',
+                            choices=['softmax', 'sparsemax', 'entmax15',
+                                     'adaptive-entmax'], help="""Activation function
+                            used to compute losses in parsing and tagging. 
+                            Not used in global parsing normalization.""")
         parser.add_argument('--upos', action='store_true',
                             help='Predict UPOS tags')
         parser.add_argument('--xpos', action='store_true',

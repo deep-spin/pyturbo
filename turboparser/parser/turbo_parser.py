@@ -59,7 +59,7 @@ class TurboParser(object):
         self.writer = DependencyWriter()
         self.model = None
         self._set_options()
-        self.neural_scorer = DependencyNeuralScorer()
+        self.neural_scorer = DependencyNeuralScorer(loss=self.options.loss_function)
 
         if self.options.train:
             pretrain_words, pretrain_embeddings = self._load_embeddings()
@@ -194,6 +194,10 @@ class TurboParser(object):
             options.upos = loaded_options.upos
             options.lemma = loaded_options.lemma
             options.parse = loaded_options.parse
+            if options.loss_function != loaded_options.loss_function:
+                msg = 'Loaded model has loss %s, but CLI arguments specified %s!'
+                msg %= (loaded_options.loss_function, options.loss_function)
+                logger.warning(msg)
 
             # backwards compatibility
             # TODO: change old saved models to include normalization model
