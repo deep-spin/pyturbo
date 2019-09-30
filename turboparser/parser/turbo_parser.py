@@ -536,23 +536,21 @@ class TurboParser(object):
             batch_predictions = self.run_batch(batch)
             predictions.extend(batch_predictions)
 
-        self.write_predictions(instances, data.parts, predictions)
+        self.write_predictions(instances, predictions)
         toc = time.time()
         logger.info('Time: %f' % (toc - tic))
 
-    def write_predictions(self, instances, parts, predictions):
+    def write_predictions(self, instances, predictions):
         """
         Write predictions to a file.
 
         :param instances: the instances in the original format (i.e., not the
             "formatted" one, but retaining the original contents)
-        :param parts: list with the parts per instance
         :param predictions: list with predictions per instance
         """
         self.writer.open(self.options.output_path)
-        for instance, inst_parts, inst_prediction in zip(instances,
-                                                         parts, predictions):
-            self.label_instance(instance, inst_parts, inst_prediction)
+        for instance, inst_prediction in zip(instances, predictions):
+            self.label_instance(instance, inst_prediction)
             self.writer.write(instance)
 
         self.writer.close()
@@ -771,7 +769,7 @@ class TurboParser(object):
                 pred_heads, pred_labels = self.decode_predictions(
                     instance_predicted_parts, parts, head_scores, label_scores)
 
-                instance_prediction[Target.HEADS] = pred_heads,
+                instance_prediction[Target.HEADS] = pred_heads
                 instance_prediction[Target.RELATIONS] = pred_labels
 
             for target in self.additional_targets:
