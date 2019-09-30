@@ -4,20 +4,18 @@ import random
 import numpy as np
 
 from turboparser.parser import DependencyOptionParser, TurboParser
+from turboparser.classifier.utils import get_logger
+
+
+logger = get_logger()
 
 
 def main():
     """Main function for the dependency parser."""
-
-    random.seed(6)
-    torch.manual_seed(6)
-    torch.cuda.manual_seed(6)
-    np.random.seed(6)
-    torch.backends.cudnn.deterministic = True
-
     # Parse arguments.
-    parser = DependencyOptionParser()
-    options = parser.parse_args()
+    option_parser = DependencyOptionParser()
+    options = option_parser.parse_args()
+    set_seeds(options.seed)
 
     if options.train:
         train_parser(options)
@@ -25,16 +23,32 @@ def main():
         test_parser(options)
 
 
+def set_seeds(seed):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
 def train_parser(options):
-    logging.info('Training the parser...')
+    logger.info('Training the parser')
     dependency_parser = TurboParser(options)
+    log_options(dependency_parser)
     dependency_parser.train()
 
 
 def test_parser(options):
-    logging.info('Running the parser...')
+    logger.info('Running the parser')
     dependency_parser = TurboParser.load(options)
+    log_options(dependency_parser)
     dependency_parser.run()
+
+
+def log_options(parser):
+    """Log parser options"""
+    msg = 'Parser options: ' + str(parser.options)
+    logger.info(msg)
 
 
 if __name__ == '__main__':

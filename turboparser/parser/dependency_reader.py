@@ -56,7 +56,8 @@ class AuxiliaryConllReader(AuxiliaryReader):
         lemmas = [root_string] * length
         upos = [root_string] * length
         xpos = [root_string] * length
-        morph_tags = [[]] * length
+        # list comprehension creates different dicts
+        morph_tags = [{} for _ in range(length)]
         morph_singletons = [root_string] * length
         heads = [-1] * length
         relations = [root_string] * length
@@ -68,10 +69,11 @@ class AuxiliaryConllReader(AuxiliaryReader):
             xpos[i] = info[4]
             morph = info[5]
             morph_singletons[i] = morph
-            if morph == '_':
-                morph_tags[i] = []
-            else:
-                morph_tags[i] = morph.split('|')
+            if morph != '_':
+                pairs = morph.split('|')
+                for pair in pairs:
+                    key, value = pair.split('=')
+                    morph_tags[i][key] = value
 
             head = info[6]
             if head != '_':

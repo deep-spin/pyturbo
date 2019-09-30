@@ -1,10 +1,22 @@
 import torch
 import torch.nn as nn
-from .token_dictionary import TokenDictionary, UNKNOWN
-from .constants import Target
-from ..classifier.lstm import LSTM
+from torch.nn import functional as F
+from torch.nn.utils import rnn as rnn_utils
+from torch.distributions.gumbel import Gumbel
 import numpy as np
 import pickle
+from joeynmt.embeddings import Embeddings as Seq2seqEmbeddings
+from joeynmt.encoders import RecurrentEncoder
+from joeynmt.decoders import RecurrentDecoder
+from joeynmt.search import greedy
+
+from .token_dictionary import TokenDictionary, UNKNOWN
+from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS
+from ..classifier.lstm import CharLSTM, HighwayLSTM
+from ..classifier.biaffine import DeepBiaffineScorer
+
+
+gumbel = Gumbel(0, 1)
 
 
 def create_padding_mask(lengths):
@@ -23,6 +35,246 @@ def create_padding_mask(lengths):
     return mask
 
 
+def get_padded_lemma_indices(instances, max_instance_length):
+    """
+    Create a tensor with lemma char indices.
+
+    :param instances: list of instances
+    :param max_instance_length: int, maximum number of tokens including root
+    :return: tuple padded_lemmas, padded_lengths. Roots are not counted.
+        padded_lemmas is a tensor shape (batch, num_words, num_chars)
+        padded_lengths is (batch, num_words)
+    """
+    instances_lemmas = []
+    lengths = []
+    max_instance_length -= 1
+
+    for instance in instances:
+        # each item in lemma_characters is a numpy array with lemma chars
+        # [1:] to skip root
+        lemma_list = [torch.tensor(lemma)
+                      for lemma in instance.lemma_characters[1:]]
+        instance_lengths = torch.tensor([len(lemma) for lemma in lemma_list])
+
+        # create empty tensors to match max instance length
+        diff = max_instance_length - len(lemma_list)
+        if diff:
+            padding = diff * [torch.tensor([], dtype=torch.long)]
+            lemma_list += padding
+
+        instance_lemmas = rnn_utils.pad_sequence(lemma_list, batch_first=True)
+
+        # we transpose num_tokens with token_length because it is easier to add
+        # padding tokens than padding chars
+        instances_lemmas.append(instance_lemmas.transpose(0, 1))
+        lengths.append(instance_lengths)
+
+    padded_transposed = rnn_utils.pad_sequence(instances_lemmas, True)
+    padded_lemmas = padded_transposed.transpose(1, 2)
+    padded_lengths = rnn_utils.pad_sequence(lengths, batch_first=True)
+
+    return padded_lemmas, padded_lengths
+
+
+def create_char_indices(instances, max_sentence_length):
+    """
+    Create a tensor with the character indices for all words in the instances.
+
+    :param instances: a list of DependencyInstance objects
+    :param max_sentence_length: int
+    :return: a tuple (char_indices, token_lengths). Sentence length includes
+        root.
+        - char_indices is (batch, max_sentence_length, max_token_length).
+        - token_lengths is (batch_size, max_sentence_length)
+    """
+    batch_size = len(instances)
+    token_lengths_ = [[len(inst.get_characters(i))
+                       for i in range(len(inst))]
+                      for inst in instances]
+    max_token_length = max(max(inst_lengths)
+                           for inst_lengths in token_lengths_)
+
+    shape = [batch_size, max_sentence_length]
+    token_lengths = torch.zeros(shape, dtype=torch.long)
+
+    shape = [batch_size, max_sentence_length, max_token_length]
+    char_indices = torch.zeros(shape, dtype=torch.long)
+
+    for i, instance in enumerate(instances):
+        token_lengths[i, :len(instance)] = torch.tensor(token_lengths_[i])
+
+        for j in range(len(instance)):
+            # each j is a token
+            chars = instance.get_characters(j)
+            char_indices[i, j, :len(chars)] = torch.tensor(chars)
+
+    return char_indices, token_lengths
+
+
+class Lemmatizer(nn.Module):
+    """
+    Lemmatizer that uses a recurrent encoder-decoder framework.
+    """
+    def __init__(self, vocab_size, embedding_size, hidden_size, dropout_rate,
+                 context_size, token_dictionary):
+        """
+        :param vocab_size: size of the char vocabulary
+        :param embedding_size: size of the char embeddings
+        :param hidden_size: hidden state of the encoder. Decoder is twice that.
+        :param dropout_rate: dropout
+        :param context_size: size of the context vector given as additional
+            input
+        :type token_dictionary: TokenDictionary
+        """
+        super(Lemmatizer, self).__init__()
+        self.padding_idx = token_dictionary.get_character_id(PADDING)
+        self.eos_idx = token_dictionary.get_character_id(EOS)
+        self.bos_idx = token_dictionary.get_character_id(BOS)
+
+        self.dropout = nn.Dropout(dropout_rate)
+        self.embeddings = Seq2seqEmbeddings(
+            embedding_size, vocab_size=vocab_size, padding_idx=self.padding_idx)
+        self.encoder = RecurrentEncoder(
+            hidden_size=hidden_size, emb_size=embedding_size,
+            num_layers=2, dropout=dropout_rate, bidirectional=True)
+        self.decoder = RecurrentDecoder(
+            emb_size=embedding_size, hidden_size=2 * hidden_size,
+            encoder=self.encoder, attention='luong', num_layers=2,
+            vocab_size=vocab_size, dropout=dropout_rate, input_feeding=True)
+        self.context_transform = nn.Linear(
+            context_size, embedding_size, bias=False)
+
+    def append_eos(self, chars, lengths):
+        """
+        Append an EOS token at the appropriate position after each sequence.
+
+        The returned tensor will have the max length increased by one.
+
+        :param chars: tensor (batch, max_length)
+        :param lengths: tensor (batch)
+        :return: tensor (batch, max_length + 1)
+        """
+        batch_size, max_length = chars.shape
+        padding_column = self.padding_idx * torch.ones_like(chars[:, 0])
+        extended = torch.cat([chars, padding_column.unsqueeze(1)], dim=1)
+
+        # trick to get the last non-padding position
+        extended[torch.arange(batch_size), lengths] = self.eos_idx
+
+        return extended
+
+    def prepend_bos(self, chars):
+        """
+        Prepend a BOS token at the beginning of the character sequences.
+
+        The returned tensor will have the max length increased by one.
+
+        :param chars: tensor (batch, max_length)
+        :return: tensor (batch, max_length + 1)
+        """
+        bos_column = self.bos_idx * torch.ones_like(chars[:, 0])
+        extended = torch.cat([bos_column.unsqueeze(1), chars], dim=1)
+
+        return extended
+
+    def forward(self, chars, context, token_lengths, gold_chars=None,
+                gold_lengths=None):
+        """
+        :param chars: tensor (batch, max_sentence_length, max_token_length)
+            with char ids
+        :param context: tensor (batch, max_sentence_length, max_token_length.
+            num_units) with contextual representation of each word
+        :param token_lengths: tensor (batch, max_sentence_length) with length
+            of each word
+        :param gold_chars: only used in training. tensor
+            (batch, max_sentence_length, max_lemma_length)
+        :param gold_lengths: only used in training; length of each gold lemma.
+            tensor (batch, max_sentence_length)
+        :return:
+            If training: tensor (batch, max_sentence_length, max_token_length,
+            vocab_size) with logits for each character.
+            At inference time: tensor (batch, max_sentence_length,
+            unroll_steps + 1) with character indices and possibly EOS.
+        """
+        batch_size, max_sentence_length, max_token_length = chars.shape
+        new_shape = [batch_size * max_sentence_length, max_token_length]
+        chars = chars.reshape(new_shape)
+        token_lengths1d = token_lengths.reshape(-1)
+
+        # run only on non-padding tokens
+        real_tokens = token_lengths1d > 0
+        num_real_tokens = real_tokens.sum().item()
+        token_lengths1d = token_lengths1d[real_tokens]
+
+        # project contexts into (num_real_tokens, 1, num_units)
+        projected_context = self.context_transform(self.dropout(context))
+        projected_context = projected_context.view(
+            batch_size * max_sentence_length, 1, -1)
+        projected_context = projected_context[real_tokens]
+
+        # (num_real_tokens, max_token_length, num_units)
+        chars = chars[real_tokens]
+
+        embedded_chars = self.embeddings(chars)
+
+        # create a binary mask
+        counts = torch.arange(max_token_length).view(1, 1, -1).to(chars.device)
+        stacked_counts = counts.repeat(num_real_tokens, 1, 1)
+        lengths3d = token_lengths1d.view(-1, 1, 1)
+        mask = stacked_counts < lengths3d
+
+        encoder_input = torch.cat([projected_context, embedded_chars], 1)
+        encoder_output, encoder_state = self.encoder(
+            encoder_input, token_lengths1d, mask)
+
+        if gold_chars is None:
+            # allow for short words with longer lemmas
+            unroll_steps = max(5, int(1.5 * max_token_length))
+            predictions, _ = greedy(
+                mask, self.embeddings, self.bos_idx, unroll_steps,
+                self.decoder, encoder_output, encoder_state)
+
+            # predictions is a numpy array
+            output = predictions.reshape([num_real_tokens, -1])
+
+            real_tokens_np = real_tokens.cpu().numpy()
+            shape = [batch_size * max_sentence_length, unroll_steps]
+            padded_output = np.zeros(shape, np.int)
+            padded_output[real_tokens_np] = output
+            padded_output = padded_output.reshape(
+                [batch_size, max_sentence_length, unroll_steps])
+        else:
+            gold_chars2d = gold_chars.reshape(
+                batch_size * max_sentence_length, -1)
+            gold_chars2d = gold_chars2d[real_tokens]
+            gold_lengths1d = gold_lengths.view(-1)[real_tokens]
+            gold_chars2d_eos = self.append_eos(gold_chars2d, gold_lengths1d)
+            self.cached_gold_chars = gold_chars2d_eos
+            self.cached_real_token_inds = real_tokens
+            gold_chars2d = self.prepend_bos(gold_chars2d)
+            embedded_target = self.embeddings(gold_chars2d)
+
+            # unroll for the number of gold steps.
+            unroll_steps = gold_chars2d.shape[-1]
+
+            outputs = self.decoder(
+                embedded_target, encoder_output, encoder_state,
+                mask, unroll_steps)
+
+            # outputs is a tuple (logits, state, att_distribution, att_sum)
+            logits = outputs[0]
+
+            # (batch, max_sentence_length, max_predicted_length, vocab_size)
+            padded_output = torch.zeros(
+                batch_size * max_sentence_length, unroll_steps,
+                logits.shape[-1], device=chars.device)
+            padded_output[real_tokens] = logits
+            padded_output = padded_output.reshape(
+                [batch_size, max_sentence_length, unroll_steps, -1])
+
+        return padded_output
+
+
 class DependencyNeuralModel(nn.Module):
     def __init__(self,
                  model_type,
@@ -30,6 +282,8 @@ class DependencyNeuralModel(nn.Module):
                  fixed_word_embeddings,
                  trainable_word_embedding_size,
                  char_embedding_size,
+                 char_hidden_size,
+                 transform_size,
                  tag_embedding_size,
                  distance_embedding_size,
                  rnn_size,
@@ -40,10 +294,11 @@ class DependencyNeuralModel(nn.Module):
                  mlp_layers,
                  dropout,
                  word_dropout,
-                 tag_dropout,
                  predict_upos,
                  predict_xpos,
                  predict_morph,
+                 predict_lemma,
+                 predict_tree,
                  tag_mlp_size):
         """
         :param model_type: a ModelType object
@@ -54,13 +309,13 @@ class DependencyNeuralModel(nn.Module):
         :param trainable_word_embedding_size: size for trainable word embeddings
         :param word_dropout: probability of replacing a word with the unknown
             token
-        :param tag_dropout: probability of replacing a POS tag with the unknown
-            tag
         """
         super(DependencyNeuralModel, self).__init__()
         self.char_embedding_size = char_embedding_size
+        self.char_hidden_size = char_hidden_size
         self.tag_embedding_size = tag_embedding_size
         self.distance_embedding_size = distance_embedding_size
+        self.transform_size = transform_size
         self.rnn_size = rnn_size
         self.arc_mlp_size = arc_mlp_size
         self.tag_mlp_size = tag_mlp_size
@@ -70,57 +325,47 @@ class DependencyNeuralModel(nn.Module):
         self.mlp_layers = mlp_layers
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
-        self.tag_dropout_rate = tag_dropout
-        self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
-        self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
-        self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
-        self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
         self.on_gpu = torch.cuda.is_available()
         self.predict_upos = predict_upos
         self.predict_xpos = predict_xpos
         self.predict_morph = predict_morph
-        self.predict_tags = predict_upos or predict_xpos or predict_morph
+        self.predict_lemma = predict_lemma
+        self.predict_tree = predict_tree
+        self.predict_tags = predict_upos or predict_xpos or \
+            predict_morph or predict_lemma
         self.model_type = model_type
 
-        fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
-                                             dtype=torch.float32)
-        self.fixed_word_embeddings = nn.Embedding.from_pretrained(
-            fixed_word_embeddings, freeze=True)
-        self.fixed_dropout_replacement = self._create_parameter_tensor(
-            fixed_word_embeddings.shape[1])
+        self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
+        self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
+        self.unknown_upos = token_dictionary.get_upos_id(UNKNOWN)
+        self.unknown_xpos = token_dictionary.get_xpos_id(UNKNOWN)
+        self.unknown_lemma = token_dictionary.get_lemma_id(UNKNOWN)
+        morph_alphabets = token_dictionary.morph_tag_alphabets
+        self.unknown_morphs = [0] * len(morph_alphabets)
+        for i, feature_name in enumerate(morph_alphabets):
+            alphabet = morph_alphabets[feature_name]
+            self.unknown_morphs[i] = alphabet.lookup(UNKNOWN)
 
-        if self.char_embedding_size:
-            char_vocab = token_dictionary.get_num_characters()
-            self.char_embeddings = nn.Embedding(char_vocab, char_embedding_size)
-
-            self.char_rnn = LSTM(
-                input_size=char_embedding_size, hidden_size=char_embedding_size)
-            char_based_embedding_size = 2 * char_embedding_size
-
-            # tensor to replace char representation with word dropout
-            self.char_dropout_replacement = self._create_parameter_tensor(
-                char_based_embedding_size)
-        else:
-            self.char_embeddings = None
-            self.char_rnn = None
-            char_based_embedding_size = 0
+        rnn_input_size = 0
 
         if trainable_word_embedding_size:
             num_words = token_dictionary.get_num_forms()
             self.trainable_word_embeddings = nn.Embedding(
                 num_words, trainable_word_embedding_size)
+            num_lemmas = token_dictionary.get_num_lemmas()
+            self.lemma_embeddings = nn.Embedding(
+                num_lemmas, trainable_word_embedding_size)
+            rnn_input_size += 2 * trainable_word_embedding_size
         else:
             self.trainable_word_embeddings = None
 
-        total_tag_embedding_size = 0
         if tag_embedding_size:
-            # only use tag embeddings if there are actual tags
-            # 3 means root, unk and the placeholder "_" when there are no tags
+            # only use tag embeddings if there are actual tags, not only special
+            # symbols for root, unknown, etc
             num_upos = token_dictionary.get_num_upos_tags()
-            if num_upos > 3:
+            if num_upos > len(SPECIAL_SYMBOLS):
                 self.upos_embeddings = nn.Embedding(num_upos,
                                                     tag_embedding_size)
-                total_tag_embedding_size += tag_embedding_size
             else:
                 self.upos_embeddings = None
 
@@ -128,35 +373,63 @@ class DependencyNeuralModel(nn.Module):
             num_xpos = token_dictionary.get_num_xpos_tags()
             xpos_tags = token_dictionary.get_xpos_tags()
             upos_tags = token_dictionary.get_upos_tags()
-            if num_xpos > 3 and \
+            if num_xpos > len(SPECIAL_SYMBOLS) and \
                     upos_tags != xpos_tags:
                 self.xpos_embeddings = nn.Embedding(num_xpos,
                                                     tag_embedding_size)
-                total_tag_embedding_size += tag_embedding_size
             else:
                 self.xpos_embeddings = None
+
+            if self.upos_embeddings is not None or \
+                    self.xpos_embeddings is not None:
+                # both types of POS embeddings are summed
+                rnn_input_size += tag_embedding_size
+            self.morph_embeddings = nn.ModuleList()
+            for feature_name in morph_alphabets:
+                alphabet = morph_alphabets[feature_name]
+                embeddings = nn.Embedding(len(alphabet), tag_embedding_size)
+                self.morph_embeddings.append(embeddings)
+            rnn_input_size += tag_embedding_size
         else:
             self.upos_embeddings = None
             self.xpos_embeddings = None
+            self.morph_embeddings = None
 
-        if self.distance_embedding_size:
-            bins = np.array(list(range(1, 10)) + list(range(10, 31, 5)))
-            self.distance_bins = np.concatenate([-bins[::-1], bins])
-            self.distance_embeddings = nn.Embedding(len(self.distance_bins) * 2,
-                                                    distance_embedding_size)
+        num_chars = token_dictionary.get_num_characters()
+        if self.char_embedding_size:
+            self.char_rnn = CharLSTM(
+                num_chars, char_embedding_size, char_hidden_size,
+                dropout=dropout, bidirectional=False)
+
+            num_directions = 1
+            self.char_projection = nn.Linear(
+                num_directions * char_hidden_size, transform_size, bias=False)
+            rnn_input_size += transform_size
+
+            # # tensor to replace char representation with word dropout
+            # self.char_dropout_replacement = self._create_parameter_tensor(
+            #     num_directions * char_hidden_size)
         else:
-            self.distance_bins = None
-            self.distance_embeddings = None
+            self.char_rnn = None
 
-        input_size = self.fixed_word_embeddings.weight.shape[1] + \
-                     total_tag_embedding_size + \
-                     trainable_word_embedding_size + \
-                     char_based_embedding_size
-        self.shared_rnn = LSTM(input_size, rnn_size, rnn_layers, dropout)
-        self.parser_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
+        fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
+                                             dtype=torch.float)
+        self.fixed_word_embeddings = nn.Embedding.from_pretrained(
+            fixed_word_embeddings, freeze=True)
+        self.fixed_embedding_projection = nn.Linear(
+            fixed_word_embeddings.shape[1], transform_size, bias=False)
+        rnn_input_size += transform_size
+
+        self.shared_rnn = HighwayLSTM(rnn_input_size, rnn_size, rnn_layers,
+                                      dropout=self.dropout_rate)
+        self.parser_rnn = HighwayLSTM(2 * rnn_size, rnn_size,
+                                      dropout=self.dropout_rate)
+
+        self.dropout_replacement = nn.Parameter(
+            torch.randn(rnn_input_size) / np.sqrt(rnn_input_size))
+
         if self.predict_tags:
-            self.tagger_rnn = LSTM(2 * rnn_size, rnn_size, dropout=dropout)
-        self.rnn_hidden_size = 2 * rnn_size
+            self.tagger_rnn = HighwayLSTM(2 * rnn_size, rnn_size, dropout=dropout)
         self.tanh = nn.Tanh()
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
@@ -183,66 +456,58 @@ class DependencyNeuralModel(nn.Module):
             num_tags = token_dictionary.get_num_morph_singletons()
             self.morph_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                     bias=True)
+        if predict_lemma:
+            self.lemmatizer = Lemmatizer(
+                num_chars, char_embedding_size, char_hidden_size, dropout,
+                2 * rnn_size, token_dictionary)
 
-        # first order layers
-        self.head_mlp = self._create_mlp()
-        self.modifier_mlp = self._create_mlp()
-        self.arc_scorer = self._create_scorer()
+        if self.predict_tree:
+            # first order layers
+            num_labels = token_dictionary.get_num_deprels()
+            self.arc_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+            self.label_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, label_mlp_size, num_labels,
+                dropout=dropout)
+            self.linearization_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+            self.distance_scorer = DeepBiaffineScorer(
+                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
 
-        self.label_head_mlp = self._create_mlp(
-            hidden_size=self.label_mlp_size)
-        self.label_modifier_mlp = self._create_mlp(
-            hidden_size=self.label_mlp_size)
-        num_labels = token_dictionary.get_num_deprels()
-        self.label_scorer = self._create_scorer(self.label_mlp_size,
-                                                num_labels)
+            # Higher order layers
+            if model_type.grandparents:
+                self.gp_grandparent_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gp_head_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gp_modifier_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
 
-        # Higher order layers
-        if model_type.grandparents:
-            self.gp_grandparent_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gp_head_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gp_modifier_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
+            if model_type.consecutive_siblings:
+                self.sib_head_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.sib_modifier_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.sib_sibling_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
 
-        if model_type.consecutive_siblings:
-            self.sib_head_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.sib_modifier_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.sib_sibling_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
+            if model_type.consecutive_siblings or model_type.grandsiblings \
+                    or model_type.trisiblings or model_type.arbitrary_siblings:
+                self.null_sibling_tensor = self._create_parameter_tensor(
+                    2 * rnn_size)
 
-        if model_type.consecutive_siblings or model_type.grandsiblings \
-                or model_type.trisiblings or model_type.arbitrary_siblings:
-            self.null_sibling_tensor = self._create_parameter_tensor()
-
-        if model_type.grandsiblings:
-            self.gsib_head_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gsib_modifier_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gsib_sibling_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.gsib_grandparent_mlp = self._create_mlp(
-                hidden_size=self.ho_mlp_size)
-            self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
-
-        if self.distance_embedding_size:
-            self.distance_projector = nn.Linear(
-                distance_embedding_size,
-                arc_mlp_size,
-                bias=True)
-            self.label_distance_projector = nn.Linear(
-                distance_embedding_size,
-                label_mlp_size,
-                bias=True
-            )
-        else:
-            self.distance_mlp = None
+            if model_type.grandsiblings:
+                self.gsib_head_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gsib_modifier_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gsib_sibling_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.gsib_grandparent_mlp = self._create_mlp(
+                    hidden_size=self.ho_mlp_size)
+                self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
 
         # Clear out the gradients before the next batch.
         self.zero_grad()
@@ -250,21 +515,17 @@ class DependencyNeuralModel(nn.Module):
     def _packed_dropout(self, states):
         """Apply dropout to packed states"""
         # shared_states is a packed tuple; (data, lengths)
-        states_data, states_lengths = states
+        states_data = states.data
+        states_lengths = states.batch_sizes
         states_data = self.dropout(states_data)
         states = nn.utils.rnn.PackedSequence(states_data, states_lengths)
         return states
 
-    def _create_parameter_tensor(self, shape=None):
+    def _create_parameter_tensor(self, shape):
         """
         Create a tensor for representing some special token. It is included in
         the model parameters.
-
-        If shape is None, it will have shape equal to rnn_hidden_size.
         """
-        if shape is None:
-            shape = self.rnn_hidden_size
-
         tensor = torch.randn(shape) / np.sqrt(shape)
         if self.on_gpu:
             tensor = tensor.cuda()
@@ -339,6 +600,8 @@ class DependencyNeuralModel(nn.Module):
         pickle.dump(self.char_embedding_size, file)
         pickle.dump(self.tag_embedding_size, file)
         pickle.dump(self.distance_embedding_size, file)
+        pickle.dump(self.char_hidden_size, file)
+        pickle.dump(self.transform_size, file)
         pickle.dump(self.rnn_size, file)
         pickle.dump(self.arc_mlp_size, file)
         pickle.dump(self.tag_mlp_size, file)
@@ -348,10 +611,11 @@ class DependencyNeuralModel(nn.Module):
         pickle.dump(self.mlp_layers, file)
         pickle.dump(self.dropout_rate, file)
         pickle.dump(self.word_dropout_rate, file)
-        pickle.dump(self.tag_dropout_rate, file)
         pickle.dump(self.predict_upos, file)
         pickle.dump(self.predict_xpos, file)
         pickle.dump(self.predict_morph, file)
+        pickle.dump(self.predict_lemma, file)
+        pickle.dump(self.predict_tree, file)
         pickle.dump(self.model_type, file)
         torch.save(self.state_dict(), file)
 
@@ -363,8 +627,10 @@ class DependencyNeuralModel(nn.Module):
         char_embedding_size = pickle.load(file)
         tag_embedding_size = pickle.load(file)
         distance_embedding_size = pickle.load(file)
+        char_hidden_size = pickle.load(file)
+        transform_size = pickle.load(file)
         rnn_size = pickle.load(file)
-        mlp_size = pickle.load(file)
+        arc_mlp_size = pickle.load(file)
         tag_mlp_size = pickle.load(file)
         label_mlp_size = pickle.load(file)
         ho_mlp_size = pickle.load(file)
@@ -372,10 +638,11 @@ class DependencyNeuralModel(nn.Module):
         mlp_layers = pickle.load(file)
         dropout = pickle.load(file)
         word_dropout = pickle.load(file)
-        tag_dropout = pickle.load(file)
         predict_upos = pickle.load(file)
         predict_xpos = pickle.load(file)
         predict_morph = pickle.load(file)
+        predict_lemma = pickle.load(file)
+        predict_tree = pickle.load(file)
         model_type = pickle.load(file)
 
         dummy_embeddings = np.empty([fixed_embedding_vocab_size,
@@ -386,17 +653,20 @@ class DependencyNeuralModel(nn.Module):
             char_embedding_size,
             tag_embedding_size=tag_embedding_size,
             distance_embedding_size=distance_embedding_size,
+            char_hidden_size=char_hidden_size,
+            transform_size=transform_size,
             rnn_size=rnn_size,
-            arc_mlp_size=mlp_size,
+            arc_mlp_size=arc_mlp_size,
             tag_mlp_size=tag_mlp_size,
             label_mlp_size=label_mlp_size,
             ho_mlp_size=ho_mlp_size,
             rnn_layers=rnn_layers,
             mlp_layers=mlp_layers,
             dropout=dropout,
-            word_dropout=word_dropout, tag_dropout=tag_dropout,
+            word_dropout=word_dropout,
             predict_upos=predict_upos, predict_xpos=predict_xpos,
-            predict_morph=predict_morph)
+            predict_morph=predict_morph, predict_lemma=predict_lemma,
+            predict_tree=predict_tree)
 
         if model.on_gpu:
             state_dict = torch.load(file)
@@ -412,56 +682,81 @@ class DependencyNeuralModel(nn.Module):
 
         return model
 
-    def _compute_arc_scores(self, states, parts):
+    def _compute_arc_scores(self, states, lengths, normalization):
         """
         Compute the first order scores and store them in the appropriate
         position in the `scores` tensor.
 
+        The score matrices have shape (modifer, head), and do not have the row
+        corresponding to the root as a modifier. Thus they have shape
+        (num_words - 1, num_words).
+
         :param states: hidden states returned by the RNN; one for each word
-        :param parts: a DependencyParts object
-        :type parts: DependencyParts
+        :param lengths: length of each sentence in the batch (including root)
+        :param normalization: 'global' or 'local'
         """
-        head_tensors = self.head_mlp(states)
-        modifier_tensors = self.modifier_mlp(states)
-        head_indices, modifier_indices = parts.get_arc_indices()
+        batch_size, max_sent_size, _ = states.size()
 
-        if self.distance_embedding_size:
-            distance_diff = head_indices - modifier_indices
-            distance_indices = np.digitize(distance_diff, self.distance_bins)
-            distance_indices = torch.tensor(distance_indices, dtype=torch.long)
-            if self.on_gpu:
-                distance_indices = distance_indices.cuda()
+        # apply dropout separately to get different masks
+        # head_scores is interpreted as (batch, modifier, head)
+        head_scores = self.arc_scorer(self.dropout(states),
+                                      self.dropout(states)).squeeze(3)
+        s1 = self.dropout(states)
+        s2 = self.dropout(states)
+        label_scores = self.label_scorer(s1, s2)
 
-            distances = self.distance_embeddings(distance_indices)
-            distance_projections = self.distance_projector(distances)
-            distance_projections = distance_projections.view(
-                -1, self.arc_mlp_size)
-        else:
-            distance_projections = 0
+        # set arc scores from each word to itself as -inf
+        diag = torch.eye(max_sent_size, device=states.device).bool()
+        diag = diag.unsqueeze(0)
+        head_scores.masked_fill_(diag, -np.inf)
 
-        # now index all of them to process at once
-        heads = head_tensors[head_indices]
-        modifiers = modifier_tensors[modifier_indices]
+        if self.training and normalization == 'global':
+            dev = head_scores.device
+            head_scores += gumbel.sample(head_scores.shape).to(dev)
+            label_scores += gumbel.sample(label_scores.shape).to(dev)
 
-        arc_states = self.tanh(heads + modifiers + distance_projections)
-        arc_scores = self.arc_scorer(arc_states)
-        self.scores[Target.HEADS].append(arc_scores.view(-1))
+        # set padding head scores to -inf
+        # during training, label loss is computed with respect to the gold
+        # arcs, so there's no need to set -inf scores to invalid positions
+        # in label scores.
+        padding_mask = create_padding_mask(lengths)
+        head_scores = head_scores.masked_fill(padding_mask.unsqueeze(1),
+                                              -np.inf)
 
-        if not parts.labeled:
-            return
+        # linearization (scoring heads after/before modifier)
+        arange = torch.arange(max_sent_size, device=states.device)
+        position1 = arange.view(1, 1, -1).expand(batch_size, -1, -1)
+        position2 = arange.view(1, -1, 1).expand(batch_size, -1, -1)
+        head_offset = position1 - position2
+        sign_scores = self.linearization_scorer(self.dropout(states),
+                                                self.dropout(states)).squeeze(3)
+        sign_sigmoid = F.logsigmoid(
+            sign_scores * torch.sign(head_offset).float()).detach()
+        head_scores += sign_sigmoid
 
-        head_tensors = self.label_head_mlp(states)
-        modifier_tensors = self.label_modifier_mlp(states)
+        # score distances between head and modifier
+        dist_scores = self.distance_scorer(self.dropout(states),
+                                           self.dropout(states)).squeeze(3)
+        dist_pred = 1 + F.softplus(dist_scores)
+        dist_target = torch.abs(head_offset)
 
-        # we can reuse indices -- every LabeledArc must also appear as Arc
-        heads = head_tensors[head_indices]
-        modifiers = modifier_tensors[modifier_indices]
-        label_states = self.tanh(heads + modifiers)
-        label_scores = self.label_scorer(label_states)
-        self.scores[Target.RELATIONS].append(label_scores.view(-1))
+        # KL divergence between predicted distances and actual ones
+        dist_kld = -torch.log((dist_target.float() - dist_pred) ** 2 / 2 + 1)
+        head_scores += dist_kld.detach()
+
+        # exclude attachment for the root symbol
+        head_scores = head_scores[:, 1:]
+        label_scores = label_scores[:, 1:]
+        sign_scores = sign_scores[:, 1:]
+        dist_kld = dist_kld[:, 1:]
+
+        self.scores[Target.HEADS] = head_scores
+        self.scores[Target.RELATIONS] = label_scores
+        self.scores[Target.SIGN] = sign_scores
+        self.scores[Target.DISTANCE] = dist_kld
 
     def _compute_grandparent_scores(self, states, parts):
-        """
+        """`
         Compute the grandparent scores and store them in the
         appropriate position in the `scores` tensor.
 
@@ -584,7 +879,8 @@ class DependencyNeuralModel(nn.Module):
 
         self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
 
-    def get_word_representations(self, instances, max_length):
+    def get_word_representations(self, instances, max_length, char_indices,
+                                 token_lengths):
         """
         Get the full embedding representations of words in the batch, including
         word type embeddings, char level and POS tag embeddings.
@@ -596,172 +892,191 @@ class DependencyNeuralModel(nn.Module):
         all_embeddings = []
         word_embeddings = self._get_embeddings(
             instances, max_length, 'fixedword')
-        all_embeddings.append(word_embeddings)
+        projection = self.fixed_embedding_projection(word_embeddings)
+        all_embeddings.append(projection)
 
         if self.trainable_word_embeddings is not None:
             trainable_embeddings = self._get_embeddings(instances, max_length,
                                                         'trainableword')
             all_embeddings.append(trainable_embeddings)
+        if self.lemma_embeddings is not None:
+            lemma_embeddings = self._get_embeddings(instances, max_length,
+                                                    'lemma')
+            all_embeddings.append(lemma_embeddings)
 
-        if self.upos_embeddings is not None:
-            upos_embeddings = self._get_embeddings(instances,
-                                                   max_length, 'upos')
-            all_embeddings.append(upos_embeddings)
+        upos = 0 if self.upos_embeddings is None \
+            else self._get_embeddings(instances, max_length, 'upos')
+        xpos = 0 if self.xpos_embeddings is None \
+            else self._get_embeddings(instances, max_length, 'xpos')
+        pos_embeddings = upos + xpos
+        if pos_embeddings is not 0:
+            all_embeddings.append(pos_embeddings)
 
-        if self.xpos_embeddings is not None:
-            xpos_embeddings = self._get_embeddings(instances,
-                                                   max_length, 'xpos')
-            all_embeddings.append(xpos_embeddings)
+        if self.morph_embeddings is not None:
+            morph_embeddings = self._get_embeddings(instances, max_length,
+                                                    'morph')
+            all_embeddings.append(morph_embeddings)
 
         if self.char_rnn is not None:
-            char_embeddings = self._run_char_rnn(instances, max_length)
-            all_embeddings.append(char_embeddings)
+            char_embeddings = self.char_rnn(char_indices, token_lengths)
+            projection = self.char_projection(self.dropout(char_embeddings))
+            all_embeddings.append(projection)
 
         # each embedding tensor is (batch, num_tokens, embedding_size)
         embeddings = torch.cat(all_embeddings, dim=2)
-        embeddings = self.dropout(embeddings)
+
+        if self.word_dropout_rate:
+            if self.training:
+                # apply word dropout -- replace by a random tensor
+                dropout_draw = torch.rand_like(embeddings[:, :, 0])
+                inds = dropout_draw < self.word_dropout_rate
+                embeddings[inds] = self.dropout_replacement
+            else:
+                # weight embeddings by the training dropout rate
+                embeddings *= (1 - self.word_dropout_rate)
+                embeddings += self.word_dropout_rate * self.dropout_replacement
 
         return embeddings
 
-    def _get_embeddings(self, instances, max_length, word_or_tag):
+    def _get_embeddings(self, instances, max_length, type_):
         """
         Get the word or tag embeddings for all tokens in the instances.
 
         This function takes care of padding.
 
-        :param word_or_tag: 'fixedword', 'trainableword', 'upos' or 'xpos'
+        :param type_: 'fixedword', 'trainableword', 'upos' or 'xpos'
         :param max_length: length of the longest instance
         :return: a tensor with shape (batch, sequence, embedding size)
         """
-        # padding is not supposed to be used in the end results
-        index_matrix = torch.full((len(instances), max_length), 0,
-                                  dtype=torch.long)
+        if type_ == 'morph':
+            # morph features have multiple embeddings (one for each feature)
+            num_features = len(self.morph_embeddings)
+            shape = (len(instances), max_length, num_features)
+            index_tensor = torch.zeros(
+                shape, dtype=torch.long,
+                device=self.morph_embeddings[0].weight.device)
+
+            for i, instance in enumerate(instances):
+                indices = instance.get_all_morph_tags()
+                index_tensor[i, :len(instance)] = torch.tensor(indices)
+
+            embedding_sum = 0
+            for i, matrix in enumerate(self.morph_embeddings):
+                indices = index_tensor[:, :, i]
+
+                # embeddings is (batch, max_length, num_units)
+                embeddings = matrix(indices)
+                embedding_sum = embedding_sum + embeddings
+
+            return embedding_sum
+
+        shape = (len(instances), max_length)
+        index_matrix = torch.zeros(shape, dtype=torch.long)
         for i, instance in enumerate(instances):
-            if word_or_tag == 'fixedword':
+            if type_ == 'fixedword':
                 indices = instance.get_all_embedding_ids()
-            elif word_or_tag == 'trainableword':
+            elif type_ == 'trainableword':
                 indices = instance.get_all_forms()
-            elif word_or_tag == 'upos':
+            elif type_ == 'lemma':
+                indices = instance.get_all_lemmas()
+            elif type_ == 'upos':
                 indices = instance.get_all_upos()
-            elif word_or_tag == 'xpos':
+            elif type_ == 'xpos':
                 indices = instance.get_all_xpos()
             else:
-                raise ValueError('Invalid embedding type: %s' % word_or_tag)
+                raise ValueError('Invalid embedding type: %s' % type_)
 
             index_matrix[i, :len(instance)] = torch.tensor(indices)
 
-        if word_or_tag == 'fixedword':
+        if type_ == 'fixedword':
             embedding_matrix = self.fixed_word_embeddings
-            dropout_rate = self.word_dropout_rate
-            unknown_symbol = self.unknown_fixed_word
-        elif word_or_tag == 'trainableword':
+        elif type_ == 'trainableword':
             embedding_matrix = self.trainable_word_embeddings
-            dropout_rate = self.word_dropout_rate
-            unknown_symbol = self.unknown_trainable_word
+        elif type_ == 'lemma':
+            embedding_matrix = self.lemma_embeddings
         else:
-            dropout_rate = self.tag_dropout_rate
-            if word_or_tag == 'upos':
+            if type_ == 'upos':
                 embedding_matrix = self.upos_embeddings
-                unknown_symbol = self.unknown_upos
             else:
                 embedding_matrix = self.xpos_embeddings
-                unknown_symbol = self.unknown_xpos
-
-        if self.training and dropout_rate and word_or_tag != 'fixedword':
-            dropout_draw = torch.rand_like(index_matrix, dtype=torch.float)
-            inds = dropout_draw < dropout_rate
-            index_matrix[inds] = unknown_symbol
 
         if self.on_gpu:
             index_matrix = index_matrix.cuda()
 
         embeddings = embedding_matrix(index_matrix)
-        if self.training and dropout_rate and word_or_tag == 'fixedword':
-            # since the embedding matrix is fixed, we use a separate
-            # trainable dropout tensor
-            dropout_draw = torch.rand_like(embeddings[:, :, 0])
-            inds = dropout_draw < dropout_rate
-            embeddings[inds] = self.fixed_dropout_replacement
-
         return embeddings
 
-    def _run_char_rnn(self, instances, max_sentence_length):
+    def convert_arc_scores_to_parts(self, instances, parts):
         """
-        Run a RNN over characters in all words in the batch instances.
+        Convert the stored matrices with arc scores and label scores to 1d
+        arrays, in the same order as in parts. Masks are also applied.
 
-        :param instances:
-        :return: a tensor with shape (batch, sequence, embedding size)
+        :param instances: list of DependencyInstanceNumeric
+        :param parts: a DependencyParts object
         """
-        batch_size = len(instances)
-        token_lengths_ = [[len(inst.get_characters(i))
-                           for i in range(len(inst))]
-                          for inst in instances]
-        max_token_length = max(max(inst_lengths)
-                               for inst_lengths in token_lengths_)
+        new_head_scores = []
+        new_label_scores = []
 
-        shape = [batch_size, max_sentence_length]
-        token_lengths = torch.zeros(shape, dtype=torch.long)
-
-        shape = [batch_size, max_sentence_length, max_token_length]
-        char_indices = torch.full(shape, 0, dtype=torch.long)
+        # arc_mask has shape (head, modifier) but scores are
+        # (modifier, head); so we transpose
+        all_head_scores = torch.transpose(self.scores[Target.HEADS], 1, 2)
+        all_label_scores = torch.transpose(self.scores[Target.RELATIONS], 1, 2)
 
         for i, instance in enumerate(instances):
-            token_lengths[i, :len(instance)] = torch.tensor(token_lengths_[i])
+            inst_parts = parts[i]
+            mask = inst_parts.arc_mask
+            mask = torch.tensor(mask.astype(np.bool))
+            length = len(instance)
 
-            for j in range(len(instance)):
-                # each j is a token
-                chars = instance.get_characters(j)
-                char_indices[i, j, :len(chars)] = torch.tensor(chars)
+            # get a matrix [inst_length, inst_length - 1]
+            # (root has already been discarded as a modifier)
+            head_scores = all_head_scores[i, :length, :length - 1]
 
-        # now we have a 3d matrix with char indices. let's reshape it to 2d,
-        # stacking all tokens with no sentence separation
-        new_shape = [batch_size * max_sentence_length, max_token_length]
-        char_indices = char_indices.view(new_shape)
-        lengths1d = token_lengths.view(-1)
+            # get a tensor [inst_length, inst_length - 1, num_labels]
+            label_scores = all_label_scores[i, :length, :length - 1]
 
-        # now order by descending length and keep track of the originals
-        sorted_lengths, sorted_inds = lengths1d.sort(descending=True)
+            mask = mask[:, 1:]
+            head_scores1d = head_scores[mask]
+            label_scores1d = label_scores[mask].view(-1)
 
-        # we can't pass 0-length tensors to the LSTM (they're the padding)
-        nonzero = sorted_lengths > 0
-        sorted_lengths = sorted_lengths[nonzero]
-        sorted_inds = sorted_inds[nonzero]
+            if self.training:
+                # apply the margin on the scores of gold parts
+                gold_arc_parts = torch.tensor(
+                    inst_parts.gold_parts[:inst_parts.num_arcs],
+                    device=head_scores.device)
 
-        sorted_token_inds = char_indices[sorted_inds]
-        if self.on_gpu:
-            sorted_token_inds = sorted_token_inds.cuda()
+                offset = inst_parts.offsets[Target.RELATIONS]
+                num_labeled = inst_parts.num_labeled_arcs
+                gold_label_parts = torch.tensor(
+                    inst_parts.gold_parts[offset:offset + num_labeled],
+                    device=head_scores.device)
+                head_scores1d = head_scores1d - gold_arc_parts
+                label_scores1d = label_scores1d - gold_label_parts
 
-        # embedded is [batch * max_sentence_len, max_token_len, char_embedding]
-        embedded = self.char_embeddings(sorted_token_inds)
-        packed = nn.utils.rnn.pack_padded_sequence(embedded, sorted_lengths,
-                                                   batch_first=True)
-        outputs, (last_output, cell) = self.char_rnn(packed)
+            new_head_scores.append(head_scores1d)
+            new_label_scores.append(label_scores1d)
 
-        # concatenate the last outputs of both directions
-        last_output_bi = torch.cat([last_output[0], last_output[1]], dim=-1)
-        num_words = batch_size * max_sentence_length
-        shape = [num_words, 2 * self.char_rnn.hidden_size]
-        char_representation = torch.zeros(shape)
-        if self.on_gpu:
-            char_representation = char_representation.cuda()
-        char_representation[sorted_inds] = last_output_bi
+        self.scores[Target.HEADS] = new_head_scores
+        self.scores[Target.RELATIONS] = new_label_scores
 
-        if self.training and self.word_dropout_rate:
-            # sample a dropout mask and replace the dropped representations
-            dropout_mask = torch.rand(num_words) < self.word_dropout_rate
-            char_representation[dropout_mask] = self.char_dropout_replacement
-
-        return char_representation.view([batch_size, max_sentence_length, -1])
-
-    def forward(self, instances, parts):
+    def forward(self, instances, parts, normalization='local'):
         """
         :param instances: a list of DependencyInstance objects
         :param parts: a list of DependencyParts objects
-        :return: a score matrix with shape (num_instances, longest_length)
+        :param normalization: either "local" or "global". It only affects
+            first order parts (arcs and labeled arcs).
+
+            If "local", the losses for each word (as a modifier) is computed
+            independently. The model will store a tensor with all arc scores
+            (including padding) for efficient loss computation.
+
+            If "global", the loss is a hinge margin over the global structure.
+            The model will store scores as a list of 1d arrays (without padding)
+            that can easily be used with AD3 decoding functions.
+
+        :return: a dictionary mapping each target to score tensors
         """
-        self.scores = {Target.HEADS: []}
-        if parts[0].labeled:
-            self.scores[Target.RELATIONS] = []
+        self.scores = {}
         for type_ in parts[0].part_lists:
             self.scores[type_] = []
 
@@ -773,63 +1088,107 @@ class DependencyNeuralModel(nn.Module):
 
         # packed sequences must be sorted by decreasing length
         sorted_lengths, inds = lengths.sort(descending=True)
+
+        # rev_inds are used to unsort the sorted sentences back
         _, rev_inds = inds.sort()
         if self.on_gpu:
             sorted_lengths = sorted_lengths.cuda()
 
-        # instances = [instances[i] for i in inds]
         max_length = sorted_lengths[0].item()
-        embeddings = self.get_word_representations(instances, max_length)
+
+        # compute char inds only once
+        if self.char_rnn or self.predict_lemma:
+            char_indices, token_lengths = create_char_indices(
+                instances, max_length)
+            char_indices = char_indices.to(lengths.device)
+            token_lengths = token_lengths.to(lengths.device)
+        else:
+            char_indices, token_lengths = None, None
+
+        embeddings = self.get_word_representations(
+            instances, max_length, char_indices, token_lengths)
         sorted_embeddings = embeddings[inds]
 
         # pack to account for variable lengths
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
             sorted_embeddings, sorted_lengths, batch_first=True)
+
         shared_states, _ = self.shared_rnn(packed_embeddings)
-        shared_states = self._packed_dropout(shared_states)
 
-        parser_packed_states, _ = self.parser_rnn(shared_states)
+        if self.predict_tags or self.predict_lemma:
+            if self.predict_tree:
+                # If we don't create a copy, we get an error for variable
+                # rewrite on gradient computation.
+                padded, lens = rnn_utils.pad_packed_sequence(
+                    shared_states, batch_first=True)
+                packed = rnn_utils.pack_padded_sequence(padded, lens, True)
+            else:
+                packed = shared_states
 
-        # batch_states is (batch, num_tokens, hidden_size)
-        parser_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
-            parser_packed_states, batch_first=True)
-
-        # return to the original ordering
-        parser_batch_states = parser_batch_states[rev_inds]
-
-        if self.predict_tags:
-            tagger_packed_states, _ = self.tagger_rnn(shared_states)
+            tagger_packed_states, _ = self.tagger_rnn(packed)
             tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
                 tagger_packed_states, batch_first=True)
             tagger_batch_states = tagger_batch_states[rev_inds]
 
+            # ignore root
+            tagger_batch_states = tagger_batch_states[:, 1:]
+
             if self.predict_upos:
-                # ignore root
-                hidden = self.upos_mlp(tagger_batch_states[:, 1:])
+                hidden = self.upos_mlp(tagger_batch_states)
                 self.scores[Target.UPOS] = self.upos_scorer(hidden)
 
             if self.predict_xpos:
-                hidden = self.xpos_mlp(tagger_batch_states[:, 1:])
+                hidden = self.xpos_mlp(tagger_batch_states)
                 self.scores[Target.XPOS] = self.xpos_scorer(hidden)
 
             if self.predict_morph:
-                hidden = self.morph_mlp(tagger_batch_states[:, 1:])
+                hidden = self.morph_mlp(tagger_batch_states)
                 self.scores[Target.MORPH] = self.morph_scorer(hidden)
 
-        # now go through each batch item
-        for i in range(batch_size):
-            length = lengths[i].item()
-            states = parser_batch_states[i, :length]
-            sent_parts = parts[i]
+            if self.predict_lemma:
+                if self.training:
+                    lemmas, lemma_lengths = get_padded_lemma_indices(
+                        instances, max_length)
+                    lemmas = lemmas.to(lengths.device)
+                    lemma_lengths = lemma_lengths.to(lengths.device)
+                else:
+                    lemmas, lemma_lengths = None, None
 
-            self._compute_arc_scores(states, sent_parts)
-            if self.model_type.consecutive_siblings:
-                self._compute_consecutive_sibling_scores(states, sent_parts)
+                # skip root
+                logits = self.lemmatizer(
+                    char_indices[:, 1:], tagger_batch_states,
+                    token_lengths[:, 1:], lemmas, lemma_lengths)
+                self.scores[Target.LEMMA] = logits
 
-            if self.model_type.grandparents:
-                self._compute_grandparent_scores(states, sent_parts)
+        if self.predict_tree:
+            parser_packed_states, _ = self.parser_rnn(shared_states)
 
-            if self.model_type.grandsiblings:
-                self._compute_grandsibling_scores(states, sent_parts)
+            # batch_states is (batch, num_tokens, hidden_size)
+            parser_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
+                parser_packed_states, batch_first=True)
+
+            # return to the original ordering
+            parser_batch_states = parser_batch_states[rev_inds]
+
+            self._compute_arc_scores(
+                parser_batch_states, lengths, normalization)
+
+            # now go through each batch item
+            for i in range(batch_size):
+                length = lengths[i].item()
+                states = parser_batch_states[i, :length]
+                sent_parts = parts[i]
+
+                if self.model_type.consecutive_siblings:
+                    self._compute_consecutive_sibling_scores(states, sent_parts)
+
+                if self.model_type.grandparents:
+                    self._compute_grandparent_scores(states, sent_parts)
+
+                if self.model_type.grandsiblings:
+                    self._compute_grandsibling_scores(states, sent_parts)
+
+            if normalization == 'global':
+                self.convert_arc_scores_to_parts(instances, parts)
 
         return self.scores

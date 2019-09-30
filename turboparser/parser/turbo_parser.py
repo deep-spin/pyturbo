@@ -6,23 +6,22 @@ from .token_dictionary import TokenDictionary
 from .constants import Target, target2string
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
-from .dependency_decoder import DependencyDecoder, chu_liu_edmonds, \
-    make_score_matrix
+from . import decoding
+from .decoding import chu_liu_edmonds_one_root, make_score_matrix, \
+    chu_liu_edmonds
 from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
-from .constants import SPECIAL_SYMBOLS
+from .constants import SPECIAL_SYMBOLS, EOS, EMPTY
 
-import sys
 from collections import defaultdict
 import pickle
 import numpy as np
-import logging
 import time
 
 
-logging.basicConfig(level=logging.DEBUG)
+logger = utils.get_logger()
 
 
 class ModelType(object):
@@ -51,30 +50,31 @@ class ModelType(object):
 
 class TurboParser(object):
     '''Dependency parser.'''
+    target_priority = [Target.RELATIONS, Target.HEADS, Target.LEMMA,
+                       Target.XPOS, Target.UPOS, Target.MORPH]
+
     def __init__(self, options):
         self.options = options
         self.token_dictionary = TokenDictionary()
         self.writer = DependencyWriter()
-        self.decoder = DependencyDecoder()
         self.model = None
         self._set_options()
-        self.neural_scorer = DependencyNeuralScorer()
+        self.neural_scorer = DependencyNeuralScorer(loss=self.options.loss_function)
 
         if self.options.train:
-            word_indices, fixed_embeddings = self._load_embeddings()
+            pretrain_words, pretrain_embeddings = self._load_embeddings()
             self.token_dictionary.initialize(
-                self.options.training_path, self.options.form_case_sensitive,
-                word_indices, char_cutoff=options.char_cutoff,
+                self.options.training_path, self.options.case_sensitive,
+                pretrain_words, char_cutoff=options.char_cutoff,
+                morph_cutoff=options.morph_tag_cutoff,
                 form_cutoff=options.form_cutoff,
                 lemma_cutoff=options.lemma_cutoff)
 
-            # embeddings = self._update_embeddings(embeddings)
-            # if embeddings is None:
-            #     embeddings = self._create_random_embeddings()
-
             model = DependencyNeuralModel(
                 self.model_type,
-                self.token_dictionary, fixed_embeddings,
+                self.token_dictionary, pretrain_embeddings,
+                char_hidden_size=self.options.char_hidden_size,
+                transform_size=self.options.transform_size,
                 trainable_word_embedding_size=self.options.embedding_size,
                 char_embedding_size=self.options.char_embedding_size,
                 tag_embedding_size=self.options.tag_embedding_size,
@@ -88,19 +88,20 @@ class TurboParser(object):
                 mlp_layers=self.options.mlp_layers,
                 dropout=self.options.dropout,
                 word_dropout=options.word_dropout,
-                tag_dropout=options.tag_dropout,
                 tag_mlp_size=options.tag_mlp_size,
-                predict_upos=options.predict_upos,
-                predict_xpos=options.predict_xpos,
-                predict_morph=options.predict_morph)
+                predict_upos=options.upos,
+                predict_xpos=options.xpos,
+                predict_morph=options.morph,
+                predict_lemma=options.lemma,
+                predict_tree=options.parse)
 
             self.neural_scorer.initialize(
-                model, self.options.learning_rate, options.decay,
-                options.beta1, options.beta2)
+                model, self.options.normalization, self.options.learning_rate,
+                options.decay, options.beta1, options.beta2)
 
             if self.options.verbose:
-                print('Model summary:', file=sys.stderr)
-                print(model, file=sys.stderr)
+                logger.debug('Model summary:')
+                logger.debug(str(model))
 
     def _create_random_embeddings(self):
         """
@@ -118,29 +119,16 @@ class TurboParser(object):
 
         :return: word dictionary, numpy embedings
         """
+        logger.info('Loading embeddings')
         if self.options.embeddings is not None:
             words, embeddings = utils.read_embeddings(self.options.embeddings,
                                                       SPECIAL_SYMBOLS)
         else:
             words = None
             embeddings = None
+        logger.info('Loaded')
 
         return words, embeddings
-
-    def _update_embeddings(self, embeddings):
-        """
-        Update the embedding matrix creating new ones if needed by the token
-        dictionary.
-        """
-        if embeddings is not None:
-            num_new_words = self.token_dictionary.get_num_embeddings() - \
-                            len(embeddings)
-            dim = embeddings.shape[1]
-            new_vectors = np.random.normal(embeddings.mean(), embeddings.std(),
-                                           [num_new_words, dim])
-            embeddings = np.concatenate([embeddings, new_vectors])
-
-        return embeddings
 
     def _set_options(self):
         """
@@ -150,18 +138,39 @@ class TurboParser(object):
         self.model_type = ModelType(self.options.model_type)
         self.has_pruner = bool(self.options.pruner_path)
 
+        if self.options.model_type != 'af':
+            if self.options.normalization == 'local':
+                msg = 'Local normalization not implemented for ' \
+                      'higher order models'
+                logger.error(msg)
+                exit(1)
+
+            if not self.has_pruner:
+                msg = 'Running higher-order model without pruner! ' \
+                      'Parser may be very slow!'
+                logger.warning(msg)
+        elif self.options.num_jobs > 1:
+            msg = 'Number of parallel jobs > 1 only worth it with higher ' \
+                  'order models; setting it to 1'
+            logger.warning(msg)
+            self.options.num_jobs = 1
+
         if self.has_pruner:
             self.pruner = load_pruner(self.options.pruner_path)
+            if self.options.pruner_batch_size > 0:
+                self.pruner.options.batch_size = self.options.pruner_batch_size
         else:
             self.pruner = None
 
         self.additional_targets = []
-        if self.options.predict_morph:
+        if self.options.morph:
             self.additional_targets.append(Target.MORPH)
-        if self.options.predict_upos:
+        if self.options.upos:
             self.additional_targets.append(Target.UPOS)
-        if self.options.predict_xpos:
+        if self.options.xpos:
             self.additional_targets.append(Target.XPOS)
+        if self.options.lemma:
+            self.additional_targets.append(Target.LEMMA)
 
     def save(self, model_path=None):
         """Save the full configuration and model."""
@@ -180,15 +189,20 @@ class TurboParser(object):
 
             options.model_type = loaded_options.model_type
             options.unlabeled = loaded_options.unlabeled
-            options.predict_morph = loaded_options.predict_morph
-            options.predict_xpos = loaded_options.predict_xpos
-            options.predict_upos = loaded_options.predict_upos
+            options.morph = loaded_options.morph
+            options.xpos = loaded_options.xpos
+            options.upos = loaded_options.upos
+            options.lemma = loaded_options.lemma
+            options.parse = loaded_options.parse
+            if options.loss_function != loaded_options.loss_function:
+                msg = 'Loaded model has loss %s, but CLI arguments specified %s!'
+                msg %= (loaded_options.loss_function, options.loss_function)
+                logger.warning(msg)
 
-            # prune arcs with label/head POS/modifier POS unseen in training
-            options.prune_relations = loaded_options.prune_relations
-
-            # prune arcs with a distance unseen with the given POS tags
-            options.prune_tags = loaded_options.prune_tags
+            # backwards compatibility
+            # TODO: change old saved models to include normalization model
+            options.normalization = loaded_options.normalization \
+                if hasattr(loaded_options, 'normalization') else 'local'
 
             # threshold for the basic pruner, if used
             options.pruner_posterior_threshold = \
@@ -203,6 +217,7 @@ class TurboParser(object):
             model = DependencyNeuralModel.load(f, parser.token_dictionary)
 
         parser.neural_scorer.set_model(model)
+        parser.neural_scorer.normalization = options.normalization
 
         # most of the time, we load a model to run its predictions
         parser.neural_scorer.eval_mode()
@@ -211,37 +226,12 @@ class TurboParser(object):
 
     def _reset_best_validation_metric(self):
         """
-        Set the best validation UAS score to 0
+        Unset the best validation scores
         """
-        self.best_validation_uas = 0.
-        self.best_validation_las = 0.
+        self.best_metric_value = defaultdict(float)
         self._should_save = False
 
-    def _reset_task_metrics(self):
-        """
-        Reset the accumulated UAS counter
-        """
-        self.accumulated_hits = {}
-        for target in self.additional_targets:
-            self.accumulated_hits[target] = 0
-
-        self.accumulated_uas = 0.
-        self.accumulated_las = 0.
-        self.total_tokens = 0
-        self.validation_uas = 0.
-        self.validation_las = 0.
-        self.reassigned_roots = 0
-
-    def _get_post_train_report(self):
-        """
-        Return the best parsing accuracy.
-        """
-        msg = 'Best validation UAS: %f' % self.best_validation_uas
-        if not self.options.unlabeled:
-            msg += '\tBest validation LAS: %f' % self.best_validation_las
-
-        return msg
-
+    #TODO: remove this function and access gold data directly in the instance
     def get_gold_labels(self, instance):
         """
         Return a list of dictionary mapping the name of each target to a numpy
@@ -253,208 +243,158 @@ class TurboParser(object):
         gold_dict = {}
 
         # [1:] to skip root symbol
-        if self.options.predict_upos:
+        if self.options.upos:
             gold_dict[Target.UPOS] = instance.get_all_upos()[1:]
-        if self.options.predict_xpos:
+        if self.options.xpos:
             gold_dict[Target.XPOS] = instance.get_all_xpos()[1:]
-        if self.options.predict_morph:
+        if self.options.morph:
             gold_dict[Target.MORPH] = instance.get_all_morph_singletons()[1:]
+        if self.options.lemma:
+            gold_dict[Target.LEMMA] = instance.lemma_characters[1:]
 
-        gold_dict[Target.HEADS] = instance.get_all_heads()[1:]
-        gold_dict[Target.RELATIONS] = instance.get_all_relations()[1:]
+        if self.options.parse:
+            gold_dict[Target.HEADS] = instance.get_all_heads()[1:]
+            gold_dict[Target.RELATIONS] = instance.get_all_relations()[1:]
 
         return gold_dict
 
-    def _update_task_metrics(self, predicted_parts, instance, scores, parts,
-                             gold_labels):
-        """
-        Update the accumulated UAS, LAS and other targets count for one
-        sentence.
-
-        It sums the metrics for one
-        sentence scaled by its number of tokens; when reporting performance,
-        this value is divided by the total number of tokens seen in all
-        sentences combined.
-
-        :param predicted_parts: predicted parts of one sentence.
-        :param scores: dictionary mapping target names to scores
-        :type predicted_parts: list
-        :type scores: dict
-        :param gold_labels: dictionary mapping targets to the gold output
-        """
-        # UAS doesn't consider the root
-        length = len(instance) - 1
-        pred_heads, pred_labels = self.decode_predictions(
-            predicted_parts, parts)
-
-        gold_heads = gold_labels[Target.HEADS]
-        gold_deprel = gold_labels[Target.RELATIONS]
-
-        head_hits = pred_heads == gold_heads
-        uas = np.mean(head_hits)
-
-        if self.options.unlabeled:
-            las = 0
-        else:
-            label_hits = pred_labels == gold_deprel
-            las = np.logical_and(head_hits, label_hits).mean()
-
-        for target in self.additional_targets:
-            gold = gold_labels[target]
-            predicted = scores[target].argmax(-1)
-
-            # remove padding
-            predicted = predicted[:len(gold)]
-            hits = np.sum(gold == predicted)
-            self.accumulated_hits[target] += hits
-
-        self.accumulated_uas += length * uas
-        self.accumulated_las += length * las
-        self.total_tokens += length
-
-    def format_instance(self, instance):
-        return DependencyInstanceNumeric(instance, self.token_dictionary,
-                                         self.options.form_case_sensitive)
-
-    def run_pruner(self, instance):
+    def run_pruner(self, instances):
         """
         Prune out some arcs with the pruner model.
 
-        To use the current model as a pruner, use `prune` instead.
-
-        :param instance: a DependencyInstance object, not formatted
-        :return: a boolean 2d array masking arcs. It has shape (n, n) where
-            n is the instance length including root. Position (h, m) has True
-            if the arc is valid, False otherwise.
-            During training, gold arcs always are True.
+        :param instances: a list of DependencyInstance objects, not formatted
+        :return: a list of boolean 2d arrays masking arcs, one for each
+            instance. It has shape (n, n) where n is the instance length
+            including root. Position (h, m) has True if the arc is valid, False
+            otherwise. During training, gold arcs always are True.
         """
-        new_mask = self.pruner.prune(instance)
+        pruner = self.pruner
+        instance_data = pruner.preprocess_instances(instances, report=False)
+        instance_data.prepare_batches(pruner.options.batch_size, sort=False)
+        masks = []
+        entropies = []
 
-        if self.options.train:
-            for m in range(1, len(instance)):
-                h = instance.heads[m]
-                if not new_mask[h, m]:
-                    new_mask[h, m] = True
-                    self.pruner_mistakes += 1
+        for batch in instance_data.batches:
+            batch_masks, batch_entropies = self.prune_batch(batch)
+            masks.extend(batch_masks)
+            entropies.extend(batch_entropies)
 
-        return new_mask
+        entropies = np.array(entropies)
+        logger.info('Pruner mean entropy: %f' % entropies.mean())
 
-    def prune(self, instance):
+        return masks
+
+    def prune_batch(self, instance_data):
         """
-        Prune out some possible arcs in the given instance.
+        Prune out some possible arcs in the given instances.
 
-        This function uses the current model as the pruner; to run an
-        encapsulated pruner, use `run_pruner` instead.
+        This function runs the encapsulated pruner.
 
-        :param instance: a DependencyInstance object, not formatted
-        :return: a boolean 2d array masking arcs. It has shape (n, n) where
-            n is the instance length including root. Position (h, m) has True
-            if the arc is valid, False otherwise.
+        :param instance_data: a InstanceData object
+        :return: a tuple (masks, entropies)
+            masks: a list of  boolean 2d array masking arcs. It has shape (n, n)
+            where n is the instance length including root. Position (h, m) has
+            True if the arc is valid, False otherwise.
+
+            entropies: a list of the tree entropies found by the matrix tree
+            theorem
         """
-        instance, parts = self.make_parts(instance)
-        scores = self.neural_scorer.compute_scores(instance, parts)[0]
-        new_mask = self.decoder.decode_matrix_tree(
-            parts, scores, self.options.pruner_max_heads,
-            self.options.pruner_posterior_threshold)
+        pruner = self.pruner
+        scores = pruner.neural_scorer.compute_scores(
+            instance_data, dependency_logits=True)
+        masks = []
+        entropies = []
 
-        return new_mask
+        for i in range(len(scores)):
+            inst_scores = scores[i]
+            inst_parts = instance_data.parts[i]
 
-    def _report_make_parts(self, instances, parts):
+            if pruner.options.normalization == 'local':
+                # if the pruner was trained with local normalization, its output
+                # for arcs is a (n - 1, n) matrix. Convert it to a list of part
+                # scores. First, transpose (modifier, head) to (head, modifier)
+                head_scores = inst_scores[Target.HEADS].T
+                label_scores = inst_scores[Target.RELATIONS].transpose(1, 0, 2)
+
+                # the existing mask only masks out self attachments and root
+                # attachments. It is useful to turn a matrix into a vector.
+                # the first column in the mask can be removed
+                mask = inst_parts.arc_mask[:, 1:]
+                inst_scores[Target.HEADS] = head_scores[mask]
+                inst_scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
+
+            new_mask, entropy = decoding.generate_arc_mask(
+                inst_parts, inst_scores, self.options.pruner_max_heads,
+                self.options.pruner_posterior_threshold)
+
+            if self.options.train:
+                # if training, put back any gold arc pruned out
+                instance = instance_data.instances[i]
+                for m in range(1, len(instance)):
+                    h = instance.heads[m]
+                    if not new_mask[h, m]:
+                        new_mask[h, m] = True
+                        self.pruner_mistakes += 1
+
+            masks.append(new_mask)
+            entropies.append(entropy)
+
+        return masks, entropies
+
+    def _report_make_parts(self, data):
         """
         Log some statistics about the calls to make parts in a dataset.
 
-        :type instances: list[DependencyInstance]
-        :type parts: list[DependencyParts]
+        :type data: InstanceData
         """
         num_arcs = 0
         num_tokens = 0
         num_possible_arcs = 0
+        num_higher_order = defaultdict(int)
 
-        for instance, inst_parts in zip(instances, parts):
+        for instance, inst_parts in zip(data.instances, data.parts):
             inst_len = len(instance)
-            num_tokens += inst_len - 1  # exclude root
-            num_possible_arcs += (inst_len - 1) ** 2  # exclude root and self
+            num_inst_tokens = inst_len - 1  # exclude root
+            num_tokens += num_inst_tokens
+            num_possible_arcs += num_inst_tokens ** 2
 
-            # skip the root symbol
-            for h in range(inst_len):
-                for m in range(1, inst_len):
-                    if not inst_parts.arc_mask[h, m]:
-                        # pruned
-                        if self.options.train and instance.heads[m] == h:
-                            self.pruner_mistakes += 1
-                        continue
+            mask = inst_parts.arc_mask
+            num_arcs += mask.sum()
 
-                    num_arcs += 1
+            for part_type in inst_parts.part_lists:
+                num_parts = len(inst_parts.part_lists[part_type])
+                num_higher_order[part_type] += num_parts
 
         msg = '%f heads per token after pruning' % (num_arcs / num_tokens)
-        logging.info(msg)
+        logger.info(msg)
 
         msg = '%d arcs after pruning, out of %d possible (%f)' % \
               (num_arcs, num_possible_arcs, num_arcs / num_possible_arcs)
-        logging.info(msg)
+        logger.info(msg)
+
+        for part_type in num_higher_order:
+            num = num_higher_order[part_type]
+            name = target2string[part_type]
+            msg = '%d %s parts' % (num, name)
+            logger.info(msg)
 
         if self.options.train:
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
-            logging.info(msg)
+            logger.info(msg)
 
-    def create_gold_targets(self, instance):
+    def decode_predictions(self, predicted_parts, parts, head_score_matrix=None,
+                           label_matrix=None):
         """
-        Create the gold targets of an instance that do not depend on parts.
-
-        This will create targets for POS tagging and morphological tags, if
-        used.
-
-        :param instance: a formated instance
-        :type instance: DependencyInstanceNumeric
-        :return: numpy array
-        """
-        targets = {}
-        if self.options.predict_upos:
-            targets[Target.UPOS] = np.array([instance.get_all_upos()])
-        if self.options.predict_xpos:
-            targets[Target.XPOS] = np.array([instance.get_all_xpos()])
-        if self.options.predict_morph:
-            # TODO: combine singleton morph tags (containing all morph
-            # information) with separate tags
-            targets[Target.MORPH] = np.array(
-                [instance.get_all_morph_singletons()])
-
-        return targets
-
-    def make_parts(self, instance):
-        """
-        Create the parts (arcs) into which the problem is factored.
-
-        :param instance: a DependencyInstance object, not yet formatted.
-        :return: a tuple (instance, parts).
-            The returned instance will have been formatted.
-        """
-        self.pruner_mistakes = 0
-
-        if self.has_pruner:
-            prune_mask = self.run_pruner(instance)
-        else:
-            prune_mask = None
-
-        instance = self.format_instance(instance)
-        num_relations = self.token_dictionary.get_num_deprels()
-        labeled = not self.options.unlabeled
-        parts = DependencyParts(instance, self.model_type, prune_mask,
-                                labeled, num_relations)
-
-        return instance, parts
-
-    def decode_predictions(self, predictions, parts):
-        """
-        Decode the predicted heads and labels after having running the decoder.
+        Decode the predicted heads and labels over the output of the AD3 decoder
+        or just score matrices.
 
         This function takes care of the cases when the variable assignments by
         the decoder does not produce a valid tree running the Chu-Liu-Edmonds
         algorithm.
 
-        :param predictions: indicator array of predicted dependency parts (with
-            values between 0 and 1)
+        :param predicted_parts: indicator array of predicted dependency parts
+            (with values between 0 and 1)
         :param parts: the dependency parts
         :type parts: DependencyParts
         :return: a tuple (pred_heads, pred_labels)
@@ -463,56 +403,47 @@ class TurboParser(object):
             If the model is not trained for predicting labels, the second item
             is None.
         """
-        length = len(parts.arc_mask)
-        arc_scores = predictions[:parts.num_arcs]
-        score_matrix = make_score_matrix(length, parts.arc_mask, arc_scores)
-        pred_heads = chu_liu_edmonds(score_matrix)
+        if head_score_matrix is None:
+            length = len(parts.arc_mask)
+            arc_scores = predicted_parts[:parts.num_arcs]
+            score_matrix = make_score_matrix(length, parts.arc_mask, arc_scores)
+        else:
+            # TODO: provide the matrix already (n x n)
+            zeros = np.zeros_like(head_score_matrix[0]).reshape([1, -1])
+            score_matrix = np.concatenate([zeros, head_score_matrix], 0)
 
         if self.options.single_root:
-            root = -1
-            root_score = -1
-
-            for m, h in enumerate(pred_heads[1:], 1):
-                if h == 0:
-                    # score_matrix is (m, h), starting from 0
-                    score = score_matrix[m - 1, h]
-
-                    if root != -1:
-                        # we have already found another root before
-
-                        if score > root_score:
-                            # this token is better scored for root
-                            # attach the previous root candidate to it
-                            pred_heads[root] = m
-                            parts.add_dummy_relation(m, root)
-                            root = m
-                            root_score = score
-
-                        else:
-                            # attach it to the other root
-                            pred_heads[m] = root
-                            parts.add_dummy_relation(root, m)
-
-                        self.reassigned_roots += 1
-                    else:
-                        root = m
-                        root_score = score
+            pred_heads = chu_liu_edmonds_one_root(score_matrix)
+        else:
+            pred_heads = chu_liu_edmonds(score_matrix)
 
         pred_heads = pred_heads[1:]
         if parts.labeled:
-            pred_labels = parts.get_labels(pred_heads)
+            if label_matrix is not None:
+                pred_labels = []
+                for m, h in enumerate(pred_heads):
+                    pred_labels.append(label_matrix[m, h])
+
+                pred_labels = np.array(pred_labels)
+            else:
+                offset_labels = parts.get_type_offset(Target.RELATIONS)
+                num_labeled = parts.num_labeled_arcs
+                labeled_parts = predicted_parts[offset_labels:
+                                                offset_labels+num_labeled]
+                labeled_parts2d = labeled_parts.reshape([parts.num_arcs, -1])
+                pred_labels = labeled_parts2d.argmax(1)
         else:
             pred_labels = None
 
         return pred_heads, pred_labels
 
-    def _get_validation_metrics(self, valid_data, valid_pred):
+    def compute_validation_metrics(self, valid_data, valid_pred):
         """
         Compute and store internally validation metrics. Also call the neural
         scorer to update learning rate.
 
         At least the UAS is computed. Depending on the options, also LAS and
-        POS accuracy.
+        tagging accuracy.
 
         :param valid_data: InstanceData
         :type valid_data: InstanceData
@@ -528,186 +459,124 @@ class TurboParser(object):
 
         for i in range(len(valid_data)):
             instance = valid_data.instances[i]
-            parts = valid_data.parts[i]
             gold_output = valid_data.gold_labels[i]
             inst_pred = valid_pred[i]
 
             real_length = len(instance) - 1
-            dep_prediction = inst_pred[Target.DEPENDENCY_PARTS]
-            gold_heads = gold_output[Target.HEADS]
-
-            pred_heads, pred_labels = self.decode_predictions(
-                dep_prediction, parts)
-
-            # scale UAS by sentence length; it is normalized later
-            head_hits = gold_heads == pred_heads
-            accumulated_uas += np.sum(head_hits)
             total_tokens += real_length
+            if self.options.parse:
+                gold_heads = gold_output[Target.HEADS]
+                pred_heads = inst_pred[Target.HEADS][:real_length]
 
-            if not self.options.unlabeled:
+                # scale UAS by sentence length; it is normalized later
+                head_hits = gold_heads == pred_heads
+                accumulated_uas += np.sum(head_hits)
+
+                pred_labels = inst_pred[Target.RELATIONS][:real_length]
                 deprel_gold = gold_output[Target.RELATIONS]
                 label_hits = deprel_gold == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
             for target in self.additional_targets:
-                target_gold = gold_output[target]
-                target_pred = inst_pred[target][:len(target_gold)]
-                hits = target_gold == target_pred
-                accumulated_tag_hits[target] += np.sum(hits)
+                if target == Target.LEMMA:
+                    # lemma has to match the whole sequence
+                    # inst_pred[LEMMA] has a nested list of arrays
+                    gold_lemmas = gold_output[Target.LEMMA]
+                    pred_lemmas = inst_pred[Target.LEMMA]
+                    for gold, pred in zip(gold_lemmas, pred_lemmas):
+                        if len(gold) == len(pred) and np.all(gold == pred):
+                            accumulated_tag_hits[Target.LEMMA] += 1
+                else:
+                    target_gold = gold_output[target]
+                    target_pred = inst_pred[target][:real_length]
+                    hits = target_gold == target_pred
+                    accumulated_tag_hits[target] += np.sum(hits)
 
-        self.validation_uas = accumulated_uas / total_tokens
-        self.validation_las = accumulated_las / total_tokens
-        self.validation_accuracies = {}
+        accuracies = {}
+        if self.options.parse:
+            accuracies[Target.HEADS] = accumulated_uas / total_tokens
+            accuracies[Target.RELATIONS] = accumulated_las / total_tokens
         for target in self.additional_targets:
-            self.validation_accuracies[target] = accumulated_tag_hits[
-                                       target] / total_tokens
+            accuracies[target] = accumulated_tag_hits[target] / total_tokens
 
-        # always update UAS; use it as a criterion for saving if no LAS
-        if self.validation_uas > self.best_validation_uas:
-            self.best_validation_uas = self.validation_uas
-            improved_uas = True
-        else:
-            improved_uas = False
+        # check if the prioritized target improved accuracy
+        for target in self.target_priority:
+            if target not in accuracies:
+                continue
 
-        if self.options.unlabeled:
-            self._should_save = improved_uas
-            acc = self.validation_uas
-        else:
-            if self.validation_las > self.best_validation_las:
-                self.best_validation_las = self.validation_las
+            current_value = accuracies[target]
+            best = self.best_metric_value[target]
+            if current_value == best:
+                # consider the next top priority
+                continue
+
+            if current_value > best:
+                # since we will save now, overwrite all values
+                self.best_metric_value.update(accuracies)
                 self._should_save = True
             else:
                 self._should_save = False
-            acc = self.validation_las
 
-        self.neural_scorer.lr_scheduler_step(acc)
+            break
 
-    def _check_gold_arc(self, instance, head, modifier):
-        """
-        Auxiliar function to check whether there is an arc from head to
-        modifier in the gold output in instance.
-
-        If instance has no gold output, return False.
-
-        :param instance: a DependencyInstance
-        :param head: integer, index of the head
-        :param modifier: integer
-        :return: boolean
-        """
-        if not self.options.train:
-            return False
-        if instance.get_head(modifier) == head:
-            return True
-        return False
-
-    def enforce_well_formed_graph(self, instance, arcs):
-        if self.options.projective:
-            raise NotImplementedError
-        else:
-            return self.enforce_connected_graph(instance, arcs)
-
-    def enforce_connected_graph(self, instance, arcs):
-        '''Make sure the graph formed by the unlabeled arc parts is connected,
-        otherwise there is no feasible solution.
-        If necessary, root nodes are added and passed back through the last
-        argument.'''
-        inserted_arcs = []
-        # Create a list of children for each node.
-        children = [[] for i in range(len(instance))]
-        for r in range(len(arcs)):
-            assert type(arcs[r]) == Arc
-            children[arcs[r].head].append(arcs[r].modifier)
-
-        # Check if the root is connected to every node.
-        visited = [False] * len(instance)
-        nodes_to_explore = [0]
-        while nodes_to_explore:
-            h = nodes_to_explore.pop(0)
-            visited[h] = True
-            for m in children[h]:
-                if visited[m]:
-                    continue
-                nodes_to_explore.append(m)
-            # If there are no more nodes to explore, check if all nodes
-            # were visited and, if not, add a new edge from the node to
-            # the first node that was not visited yet.
-            if not nodes_to_explore:
-                for m in range(1, len(instance)):
-                    if not visited[m]:
-                        logging.info('Inserted root node 0 -> %d.' % m)
-                        inserted_arcs.append((0, m))
-                        nodes_to_explore.append(m)
-                        break
-
-        return inserted_arcs
+        self.validation_accuracies = accuracies
 
     def run(self):
         self.reassigned_roots = 0
         tic = time.time()
 
         instances = read_instances(self.options.test_path)
-        logging.info('Number of instances: %d' % len(instances))
-        data = self.make_parts_batch(instances)
+        logger.info('Number of instances: %d' % len(instances))
+        data = self.preprocess_instances(instances)
+        data.prepare_batches(self.options.batch_size, sort=False)
         predictions = []
-        batch_index = 0
-        while batch_index < len(instances):
-            next_index = batch_index + self.options.batch_size
-            batch_data = data[batch_index:next_index]
-            batch_predictions = self.run_batch(batch_data)
+
+        for batch in data.batches:
+            batch_predictions = self.run_batch(batch)
             predictions.extend(batch_predictions)
-            batch_index = next_index
 
-        self.write_predictions(instances, data.parts, predictions)
+        self.write_predictions(instances, predictions)
         toc = time.time()
-        logging.info('Time: %f' % (toc - tic))
+        logger.info('Time: %f' % (toc - tic))
 
-        self._run_report(len(instances))
-
-    def write_predictions(self, instances, parts, predictions):
+    def write_predictions(self, instances, predictions):
         """
         Write predictions to a file.
 
         :param instances: the instances in the original format (i.e., not the
             "formatted" one, but retaining the original contents)
-        :param parts: list with the parts per instance
         :param predictions: list with predictions per instance
         """
         self.writer.open(self.options.output_path)
-        for instance, inst_parts, inst_prediction in zip(instances,
-                                                         parts, predictions):
-            self.label_instance(instance, inst_parts, inst_prediction)
+        for instance, inst_prediction in zip(instances, predictions):
+            self.label_instance(instance, inst_prediction)
             self.writer.write(instance)
 
         self.writer.close()
-
-    def _run_report(self, num_instances):
-        if self.options.single_root:
-            ratio = self.reassigned_roots / num_instances
-            msg = '%d reassgined roots (sentence had more than one), %f per ' \
-                  'sentence' % (self.reassigned_roots, ratio)
-            logging.info(msg)
 
     def read_train_instances(self):
         '''Create batch of training and validation instances.'''
         import time
         tic = time.time()
-        logging.info('Creating instances...')
+        logger.info('Creating instances...')
 
         train_instances = read_instances(self.options.training_path)
         valid_instances = read_instances(self.options.valid_path)
-        logging.info('Number of train instances: %d' % len(train_instances))
-        logging.info('Number of validation instances: %d'
+        logger.info('Number of train instances: %d' % len(train_instances))
+        logger.info('Number of validation instances: %d'
                      % len(valid_instances))
         toc = time.time()
-        logging.info('Time: %f' % (toc - tic))
+        logger.info('Time: %f' % (toc - tic))
         return train_instances, valid_instances
 
-    def make_parts_batch(self, instances):
+    def preprocess_instances(self, instances, report=True):
         """
         Create parts for all instances in the batch.
 
         :param instances: list of non-formatted Instance objects
+        :param report: log the number of created parts and pruner errors. It
+            should be False in a pruner model.
         :return: an InstanceData object.
             It contains formatted instances.
             In neural models, features is a list of None.
@@ -715,227 +584,206 @@ class TurboParser(object):
         all_parts = []
         all_gold_labels = []
         formatted_instances = []
+        self.pruner_mistakes = 0
+        num_relations = self.token_dictionary.get_num_deprels()
+        labeled = not self.options.unlabeled
 
-        for instance in instances:
-            f_instance, parts = self.make_parts(instance)
-            gold_labels = self.get_gold_labels(f_instance)
+        if self.options.parse and self.has_pruner:
+            prune_masks = self.run_pruner(instances)
+        else:
+            prune_masks = None
 
-            formatted_instances.append(f_instance)
+        for i, instance in enumerate(instances):
+            mask = None if prune_masks is None else prune_masks[i]
+            numeric_instance = DependencyInstanceNumeric(
+                instance, self.token_dictionary, self.options.case_sensitive)
+            parts = DependencyParts(numeric_instance, self.model_type, mask,
+                                    labeled, num_relations)
+            gold_labels = self.get_gold_labels(numeric_instance)
+
+            formatted_instances.append(numeric_instance)
             all_parts.append(parts)
             all_gold_labels.append(gold_labels)
 
-        self._report_make_parts(instances, all_parts)
         data = InstanceData(formatted_instances, all_parts, all_gold_labels)
+        if report:
+            self._report_make_parts(data)
         return data
+
+    def reset_performance_metrics(self):
+        """
+        Reset some variables used to keep track of training performance.
+        """
+        self.num_train_instances = 0
+        self.time_scores = 0
+        self.time_decoding = 0
+        self.time_gradient = 0
+        self.train_losses = defaultdict(float)
+        self.accumulated_hits = {}
+        for target in self.additional_targets:
+            self.accumulated_hits[target] = 0
+
+        self.accumulated_uas = 0.
+        self.accumulated_las = 0.
+        self.total_tokens = 0
+        self.reassigned_roots = 0
 
     def train(self):
         '''Train with a general online algorithm.'''
         train_instances, valid_instances = self.read_train_instances()
-        train_data = self.make_parts_batch(train_instances)
-        valid_data = self.make_parts_batch(valid_instances)
-        train_data.sort_by_size()
+        logger.info('Preprocessing training data')
+        train_data = self.preprocess_instances(train_instances)
+        logger.info('\nPreprocessing validation data')
+        valid_data = self.preprocess_instances(valid_instances)
+        train_data.prepare_batches(self.options.batch_size, sort=True)
+        valid_data.prepare_batches(self.options.batch_size, sort=True)
+        logger.info('Training data spread across %d batches'
+                     % len(train_data.batches))
+        logger.info('Validation data spread across %d batches\n'
+                     % len(valid_data.batches))
+
         self._reset_best_validation_metric()
-        self.lambda_coeff = 1.0 / (self.options.regularization_constant *
-                                   float(len(train_instances)))
-        self.num_bad_epochs = 0
-        for epoch in range(self.options.training_epochs):
-            self.train_epoch(epoch, train_data, valid_data)
+        self.reset_performance_metrics()
+        using_amsgrad = False
+        num_bad_evals = 0
 
-            if self.num_bad_epochs == self.options.patience:
-                break
-
-        logging.info(self._get_post_train_report())
-
-    def train_epoch(self, epoch, train_data, valid_data):
-        '''Run one epoch of an online algorithm.
-
-        :param epoch: the number of the epoch, starting from 0
-        :param train_data: InstanceData
-        :param valid_data: InstanceData
-        '''
-        self.time_decoding = 0
-        self.time_scores = 0
-        self.time_gradient = 0
-        start = time.time()
-
-        self.total_losses = {target: 0. for target in self.additional_targets}
-        self.total_losses[Target.DEPENDENCY_PARTS] = 0.
-
-        self._reset_task_metrics()
-
-        if epoch == 0:
-            logging.info('\t'.join(
-                ['Lambda: %f' % self.lambda_coeff,
-                 'Regularization constant: %f' %
-                 self.options.regularization_constant,
-                 'Number of instances: %d' % len(train_data)]))
-        logging.info(' Iteration #%d' % (epoch + 1))
-
-        batch_index = 0
-        batch_size = self.options.batch_size
-        while batch_index < len(train_data):
-            next_batch_index = batch_index + batch_size
-            batch = train_data[batch_index:next_batch_index]
+        for global_step in range(1, self.options.max_steps + 1):
+            batch = train_data.get_next_batch()
             self.train_batch(batch)
-            batch_index = next_batch_index
 
-        end = time.time()
-        time_train = end - start
+            if global_step % self.options.log_interval == 0:
+                msg = 'Step %d' % global_step
+                logger.info(msg)
+                self.train_report(self.num_train_instances)
+                self.reset_performance_metrics()
 
+            if global_step % self.options.eval_interval == 0:
+                self.run_on_validation(valid_data)
+                if self._should_save:
+                    self.save()
+                    num_bad_evals = 0
+                else:
+                    num_bad_evals += 1
+                    self.neural_scorer.decrease_learning_rate()
+
+                if num_bad_evals == self.options.patience:
+                    if not using_amsgrad:
+                        logger.info('Switching to AMSGrad')
+                        using_amsgrad = True
+                        self.neural_scorer.switch_to_amsgrad(
+                            self.options.learning_rate, self.options.beta1,
+                            self.options.beta2)
+                        num_bad_evals = 0
+                    else:
+                        break
+
+        msg = 'Saved model with the following validation accuracies:\n'
+        for target in self.best_metric_value:
+            name = target2string[target]
+            value = self.best_metric_value[target]
+            msg += '%s: %f\n' % (name, value)
+
+        logger.info(msg)
+
+    def run_on_validation(self, valid_data):
+        """
+        Run the model on validation data
+        """
         valid_start = time.time()
         self.neural_scorer.eval_mode()
-        valid_pred, valid_losses = self._run_batches(valid_data, 32,
-                                                     return_loss=True)
 
-        # adjust learning rate based on validation parsing loss
-        dep_loss = valid_losses[Target.DEPENDENCY_PARTS]
-        self._get_validation_metrics(valid_data, valid_pred)
+        predictions = []
+        for batch in valid_data.batches:
+            batch_predictions = self.run_batch(batch)
+            predictions.extend(batch_predictions)
+
+        self.compute_validation_metrics(valid_data, predictions)
+
         valid_end = time.time()
         time_validation = valid_end - valid_start
 
-        self._epoch_report(time_train, time_validation, self.total_losses,
-                           valid_losses, len(train_data), len(valid_data))
+        logger.info('Time to run on validation: %.2f' % time_validation)
 
-        if self._should_save:
-            self.save()
-            self.num_bad_epochs = 0
-        else:
-            self.num_bad_epochs += 1
-
-    def _epoch_report(self, train_time, validation_time, train_losses,
-                      valid_losses, train_size, valid_size):
-        """
-        Log a report of the training for an epoch.
-
-        :param train_losses: dictionary mapping targets to loss scalar values,
-            not normalized by number of instances
-        :param valid_losses: same as train_losses
-        """
-        logging.info('Training time: %f' % train_time)
-        logging.info('Time to score: %f' % self.time_scores)
-        logging.info('Time to decode: %f' % self.time_decoding)
-        logging.info('Time to do gradient step: %f' % self.time_gradient)
-        logging.info('Time to run on validation: %f' % validation_time)
-
-        def make_loss_msgs(losses, dataset_size):
-            msgs = []
-            for target in losses:
-                target_name = target2string[target]
-                normalized_loss = losses[target] / dataset_size
-                msg = '%s: %.4f' % (target_name, normalized_loss)
-                msgs.append(msg)
-            return msgs
-
-        msgs = ['Train losses:'] + make_loss_msgs(train_losses, train_size)
-        logging.info('\t'.join(msgs))
-
-        uas = self.accumulated_uas / self.total_tokens
-        msgs = ['Train accuracies:\tUAS: %.6f' % uas]
-        if not self.options.unlabeled:
-            las = self.accumulated_las / self.total_tokens
-            msgs.append('LAS: %.6f' % las)
-
-        for target in self.additional_targets:
-            target_name = target2string[target]
-            acc = self.accumulated_hits[target] / self.total_tokens
-            msgs.append('%s: %.6f' % (target_name, acc))
-        logging.info('\t'.join(msgs))
-
-        msgs = ['Validation losses:'] + make_loss_msgs(valid_losses,
-                                                       valid_size)
-        logging.info('\t'.join(msgs))
-
-        msgs = ['Validation accuracies:\tUAS: %.6f' % self.validation_uas]
-        if not self.options.unlabeled:
-            msgs.append('LAS: %.6f' % self.validation_las)
-        for target in self.additional_targets:
+        msgs = ['Validation accuracies:\t']
+        for target in self.validation_accuracies:
             target_name = target2string[target]
             acc = self.validation_accuracies[target]
-            msgs.append('%s: %.6f' % (target_name, acc))
-        logging.info('\t'.join(msgs))
+            msgs.append('%s: %.4f' % (target_name, acc))
+        logger.info('\t'.join(msgs))
 
         if self._should_save:
-            logging.info('Saved model')
+            logger.info('Saved model')
 
-        logging.info('\n')
+        logger.info('\n')
 
-    def _run_batches(self, instance_data, batch_size, return_loss=False):
+    def train_report(self, num_instances):
         """
-        Run the model for the given instances, one batch at a time. This is
-        useful when running on validation or test data.
-
-        :param instance_data: InstanceData
-        :param batch_size: the batch size at inference time; it doesn't need
-            to be the same as the one in self.options.batch_size (as a rule of
-            thumb, it can be the largest that fits in memory)
-        :param return_loss: if True, include the losses in the return. This
-            can only be True for data which have known gold output.
-        :return: a list of predictions. If return_loss is True, a tuple with
-            the list of predictions and the dictionary of losses.
+        Log a short report of the training loss.
         """
-        batch_index = 0
-        predictions = []
-        losses = defaultdict(float)
+        msgs = ['Train losses:'] + make_loss_msgs(self.train_losses,
+                                                  num_instances)
+        logger.info('\t'.join(msgs))
 
-        while batch_index < len(instance_data):
-            next_index = batch_index + batch_size
-            batch_data = instance_data[batch_index:next_index]
-            result = self.run_batch(batch_data, return_loss)
-            if return_loss:
-                batch_predictions = result[0]
-                batch_losses = result[1]
-                batch_size = len(batch_data)
-                for target in batch_losses:
-                    # store non-normalized losses
-                    losses[target] += batch_size * batch_losses[target].item()
-            else:
-                batch_predictions = result
+        time_msg = 'Time to score: %.2f\tDecode: %.2f\tGradient step: %.2f'
+        time_msg %= (self.time_scores, self.time_decoding, self.time_gradient)
+        logger.info(time_msg)
 
-            predictions.extend(batch_predictions)
-            batch_index = next_index
-
-        if return_loss:
-            return predictions, losses
-
-        return predictions
-
-    def run_batch(self, instance_data, return_loss=False):
+    def run_batch(self, instance_data):
         """
         Predict the output for the given instances.
 
         :type instance_data: InstanceData
-        :param return_loss: if True, also return the loss (only use if
-            instance_data has the gold outputs) as a list of values
         :return: a list of arrays with the predicted outputs if return_loss is
             False. If it's True, a tuple with predictions and losses.
             Each prediction is a dictionary mapping a target name to the
             prediction vector.
         """
         self.neural_scorer.eval_mode()
-        scores = self.neural_scorer.compute_scores(instance_data.instances,
-                                                   instance_data.parts)
+        scores = self.neural_scorer.compute_scores(instance_data,
+                                                   dependency_logits=False)
+
+        if self.options.parse:
+            if self.options.normalization == 'global':
+                predicted_parts = decoding.batch_decode(
+                    instance_data, scores, self.options.num_jobs)
+                head_scores = None
+                label_scores = None
+            else:
+                instance_predicted_parts = None
 
         predictions = []
-        all_predicted_parts = []
+        eos = self.token_dictionary.get_character_id(EOS)
+        empty = self.token_dictionary.get_character_id(EMPTY)
         for i in range(len(instance_data)):
-            instance = instance_data.instances[i]
             parts = instance_data.parts[i]
-            inst_scores = scores[i]
+            instance_output = scores[i]
+            instance_prediction = {}
 
-            predicted_parts = self.decoder.decode(instance, parts, inst_scores)
-            inst_prediction = {Target.DEPENDENCY_PARTS: predicted_parts}
-            if return_loss:
-                all_predicted_parts.append(predicted_parts)
+            if self.options.parse:
+                if self.options.normalization == 'global':
+                    instance_predicted_parts = predicted_parts[i]
+                else:
+                    head_scores = instance_output[Target.HEADS]
+                    label_scores = instance_output[Target.RELATIONS]
+
+                pred_heads, pred_labels = self.decode_predictions(
+                    instance_predicted_parts, parts, head_scores, label_scores)
+
+                instance_prediction[Target.HEADS] = pred_heads
+                instance_prediction[Target.RELATIONS] = pred_labels
+
             for target in self.additional_targets:
-                model_answer = inst_scores[target].argmax(-1)
-                inst_prediction[target] = model_answer
+                target_predictions = instance_output[target]
 
-            predictions.append(inst_prediction)
+                if target == Target.LEMMA:
+                    lemmas = cut_sequences_at_eos(
+                        target_predictions, eos, empty)
+                    instance_prediction[target] = lemmas
+                else:
+                    # argmax is computed in the scorer
+                    instance_prediction[target] = target_predictions
 
-        if return_loss:
-            losses = self.neural_scorer.compute_loss(instance_data,
-                                                     all_predicted_parts)
-            return predictions, losses
+            predictions.append(instance_prediction)
 
         return predictions
 
@@ -950,24 +798,21 @@ class TurboParser(object):
         self.neural_scorer.train_mode()
 
         start_time = time.time()
+
         # scores is a list of dictionaries [target] -> score array
-        scores = self.neural_scorer.compute_scores(instance_data.instances,
-                                                   instance_data.parts)
+        scores = self.neural_scorer.compute_scores(instance_data)
         end_time = time.time()
         self.time_scores += end_time - start_time
 
         all_predicted_parts = []
-        for i in range(len(instance_data)):
-            instance = instance_data.instances[i]
-            parts = instance_data.parts[i]
-            gold_labels = instance_data.gold_labels[i]
-            inst_scores = scores[i]
+        if self.options.parse and self.options.normalization == 'global':
+            # need to decode sentences in order to compute global loss
+            start_decoding = time.time()
+            all_predicted_parts = decoding.batch_decode(
+                instance_data, scores, self.options.num_jobs)
 
-            predicted_parts = self.decode_train(instance, parts, inst_scores)
-            all_predicted_parts.append(predicted_parts)
-
-            self._update_task_metrics(
-                predicted_parts, instance, inst_scores, parts, gold_labels)
+            end_decoding = time.time()
+            self.time_decoding += end_decoding - start_decoding
 
         # run the gradient step for the whole batch
         start_time = time.time()
@@ -975,71 +820,50 @@ class TurboParser(object):
                                                  all_predicted_parts)
         self.neural_scorer.make_gradient_step(losses)
         batch_size = len(instance_data)
+        self.num_train_instances += batch_size
         for target in losses:
             # store non-normalized losses
-            self.total_losses[target] += batch_size * losses[target].item()
+            self.train_losses[target] += batch_size * losses[target].item()
 
         end_time = time.time()
         self.time_gradient += end_time - start_time
 
-    def decode_train(self, instance, parts, scores):
-        """
-        Decode the scores for parsing at training time.
-
-        Return the predicted output (for each part)
-
-        :param instance: a DependencyInstanceNumeric
-        :param parts: DependencyParts
-        :type parts: DependencyParts
-        :param scores: a dictionary mapping target names to scores produced by
-            the network
-        :return: prediction array
-        """
-        # Do the decoding.
-        start_decoding = time.time()
-        predicted_output = self.decoder.decode_cost_augmented(
-            instance, parts, scores)
-
-        end_decoding = time.time()
-        self.time_decoding += end_decoding - start_decoding
-
-        return predicted_output
-
-    def label_instance(self, instance, parts, output):
+    def label_instance(self, instance, output):
         """
         :type instance: DependencyInstance
-        :type parts: DependencyParts
         :param output: dictionary mapping target names to predictions
         :return:
         """
-        dep_output = output[Target.DEPENDENCY_PARTS]
-        heads, relations = self.decode_predictions(dep_output, parts)
-
-        for m, h in enumerate(heads, 1):
-            instance.heads[m] = h
-
-            if parts.labeled:
-                relation = relations[m - 1]
+        for m in range(1, len(instance) - 1):
+            if self.options.parse:
+                instance.heads[m] = output[Target.HEADS][m - 1]
+                relation = output[Target.RELATIONS][m - 1]
                 relation_name = self.token_dictionary.deprel_alphabet.\
                     get_label_name(relation)
                 instance.relations[m] = relation_name
 
-            if self.options.predict_upos:
+            if self.options.upos:
                 # -1 because there's no tag for the root
                 tag = output[Target.UPOS][m - 1]
                 tag_name = self.token_dictionary. \
                     upos_alphabet.get_label_name(tag)
                 instance.upos[m] = tag_name
-            if self.options.predict_xpos:
+            if self.options.xpos:
                 tag = output[Target.XPOS][m - 1]
                 tag_name = self.token_dictionary. \
                     xpos_alphabet.get_label_name(tag)
                 instance.xpos[m] = tag_name
-            if self.options.predict_morph:
+            if self.options.morph:
                 tag = output[Target.MORPH][m - 1]
                 tag_name = self.token_dictionary. \
                     morph_singleton_alphabet.get_label_name(tag)
                 instance.morph_singletons[m] = tag_name
+            if self.options.lemma:
+                predictions = output[Target.LEMMA][m - 1]
+                lemma = ''.join(self.token_dictionary.
+                                character_alphabet.get_label_name(c)
+                                for c in predictions)
+                instance.lemmas[m] = lemma
 
 
 def load_pruner(model_path):
@@ -1049,11 +873,61 @@ def load_pruner(model_path):
     This function takes care of keeping the main parser and the pruner
     configurations separate.
     """
-    logging.info('Loading pruner from %s' % model_path)
+    logger.info('Loading pruner from %s' % model_path)
     with open(model_path, 'rb') as f:
         pruner_options = pickle.load(f)
 
     pruner_options.train = False
+    pruner_options.model_path = model_path
     pruner = TurboParser.load(pruner_options)
 
     return pruner
+
+
+def make_loss_msgs(losses, dataset_size):
+    """
+    Return a list of strings in the shape
+
+    NAME: LOSS_VALUE
+
+    :param losses: dictionary mapping targets to loss values
+    :param dataset_size: value used to normalize (divide) each loss value
+    :return: list of strings
+    """
+    msgs = []
+    for target in losses:
+        target_name = target2string[target]
+        normalized_loss = losses[target] / dataset_size
+        msg = '%s: %.4f' % (target_name, normalized_loss)
+        msgs.append(msg)
+    return msgs
+
+
+def cut_sequences_at_eos(predictions, eos_index, empty_index):
+    """
+    Convert a tensor of lemmas to lists ending when EOS character is used.
+
+    :param predictions: an array (num_tokens, max_num_chars)
+    :return: a list with num_tokens arrays. Each array contains the char ids.
+    """
+    lemmas = []
+
+    # store positions for faster access
+    eos_mask = predictions == eos_index
+    # mask is a boolean vector; argmax returns the first occurence of True
+    eos_positions = eos_mask.argmax(-1)
+
+    for i, token_prediction in enumerate(predictions):
+        eos_position = eos_positions[i]
+        if eos_position == 0:
+            # either no EOS (and we use the whole row) or EOS at the very
+            # first position
+            if token_prediction[0] == eos_index:
+                lemma = [empty_index]
+            else:
+                lemma = token_prediction
+        else:
+            lemma = token_prediction[:eos_position]
+        lemmas.append(lemma)
+
+    return lemmas

@@ -98,9 +98,15 @@ class DependencyParts(object):
         self.index = None
         self.index_labeled = None
         self.num_parts = 0
+
+        # the mask is to be interpreted as (head, modifier)
         self.arc_mask = mask
         self.labeled = labeled
         self.num_relations = num_relations
+
+        # offsets indicate the position in which the scores of a given target
+        # should start in the array with all part scores
+        self.offsets = {}
 
         # store the order in which part types are used
         self.type_order = []
@@ -119,9 +125,7 @@ class DependencyParts(object):
         :param best_labels: array with the best label for each arc
         :param arcs: list of tuples (h, m)
         """
-        self.best_labels = {}
-        for arc, label in zip(arcs, best_labels):
-            self.best_labels[arc] = label
+        self.best_labels = dict(zip(arcs, best_labels))
 
     def concatenate_part_scores(self, scores):
         """
@@ -178,25 +182,35 @@ class DependencyParts(object):
         # if there are gold labels, store them
         self.gold_parts = self._make_gold_arcs(instance)
         self.type_order.append(Target.HEADS)
+        self.offsets[Target.HEADS] = 0
 
         # all non-masked arcs count as a part
-        possible_arcs = self.arc_mask.size
-        num_masked = np.sum(self.arc_mask == 0)
-        self.num_arcs = possible_arcs - num_masked
+        self.num_arcs = self.arc_mask.sum()
         if self.labeled:
+            # labeled arcs are represented in the same order as arcs,
+            # with each arc (i, j) repeated k times, for each of k labels
             self.num_labeled_arcs = self.num_arcs * self.num_relations
             self.type_order.append(Target.RELATIONS)
+            self.offsets[Target.RELATIONS] = self.num_arcs
         else:
             self.num_labeled_arcs = 0
 
+        offset = self.num_arcs + self.num_labeled_arcs
+
         if model_type.consecutive_siblings:
             self.make_consecutive_siblings(instance)
+            self.offsets[Target.NEXT_SIBLINGS] = offset
+            offset += len(self.part_lists[Target.NEXT_SIBLINGS])
 
         if model_type.grandparents:
             self.make_grandparents(instance)
+            self.offsets[Target.GRANDPARENTS] = offset
+            offset += len(self.part_lists[Target.GRANDPARENTS])
 
         if model_type.grandsiblings:
             self.make_grandsiblings(instance)
+            self.offsets[Target.GRANDSIBLINGS] = offset
+            offset += len(self.part_lists[Target.GRANDSIBLINGS])
 
         self.num_parts = self.num_arcs + self.num_labeled_arcs + \
             sum(len(parts) for parts in self.part_lists.values())
@@ -216,8 +230,8 @@ class DependencyParts(object):
         :return: a list of 0s and 1s
         """
         heads = instance.get_all_heads()
-        # [1] to skip root
         if heads[1] == -1:
+            # check if the first non-root token has a head
             self.make_gold = False
             return
 
@@ -246,7 +260,6 @@ class DependencyParts(object):
                         gold_relations.append(1)
                     else:
                         gold_relations.append(0)
-
         gold_parts.extend(gold_relations)
         return gold_parts
 
@@ -451,21 +464,20 @@ class DependencyParts(object):
 
         It only affects Arcs or LabeledArcs (in case the latter are used).
 
-        :param parts: DependencyParts object
-        :type parts: DependencyParts
         :return: a margin array to be added to the model scores and a
             normalization constant. The vector is as long as the number of
             parts.
         """
+        # TODO: avoid repeated code with dependency_decoder
         p = np.zeros(len(self), dtype=np.float)
         if self.labeled:
             # place the margin on LabeledArcs scores
             # their offset in the gold vector is immediately after Arcs
-            offset = self.num_arcs
+            offset = self.offsets[Target.RELATIONS]
             num_parts = self.num_labeled_arcs
         else:
             # place the margin on Arc scores
-            offset = 0
+            offset = self.offsets[Target.HEADS]
             num_parts = self.num_arcs
 
         gold_values = self.gold_parts[offset:offset + num_parts]

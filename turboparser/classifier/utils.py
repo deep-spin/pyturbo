@@ -1,7 +1,11 @@
 import numpy as np
 import lzma
+import logging
 
 '''Several utility functions.'''
+
+
+logger = None
 
 
 def nearly_eq_tol(a, b, tol):
@@ -19,20 +23,45 @@ def nearly_zero_tol(a, tol):
     return (a <= tol) and (a >= -tol)
 
 
+def get_logger():
+    '''
+    Return the default logger used by Turbo Parser.
+    '''
+    global logger
+    if logger is not None:
+        return logger
+
+    logger = logging.getLogger('TurboParser')
+    logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('[%(asctime)s] %(message)s',
+                                  datefmt="%Y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.propagate = False
+
+    return logger
+
+
 def read_embeddings(path, extra_symbols=None, max_words=1000000):
     '''
     Read a text file, or xzipped text file, with word embeddings.
 
     :param path: path to the embeddings file
     :param extra_symbols: extra symbols such as UNK to create embeddings for.
-        They are placed in the beginning of the matrix and NOT in the
-        dictionary.
+        They are placed in the beginning of the matrix and of the word list.
     :param max_words: maximum word embeddings to read (the rest will be ignored)
-    :return: a dictionary mapping words to indices and a numpy array
+    :return: a word list and a numpy matrix
     '''
+    if extra_symbols:
+        # copy
+        words = extra_symbols[:]
+    else:
+        words = []
+
     vectors = []
-    words = {}
-    counter = 0
+    logger = get_logger()
 
     open_fn = lzma.open if path.endswith('.xz') else open
 
@@ -48,26 +77,24 @@ def read_embeddings(path, extra_symbols=None, max_words=1000000):
             try:
                 word = str(fields[0], 'utf-8')
             except UnicodeDecodeError:
-                print('Error reading line %d of embeddings file, skipping' %
-                      line_number)
+                error = 'Error reading line %d of embeddings file, ' \
+                        'skipping' % line_number
+                logger.error(error)
                 continue
 
-            # use a counter instead of len(words) to avoid problems with
-            # repeated words
-            words[word] = counter
-            counter += 1
-
+            words.append(word)
             vector = np.array([float(field) for field in fields[1:]])
             vectors.append(vector)
 
             if len(words) == max_words:
                 break
 
-    assert len(vectors) == len(words)
     embeddings = np.array(vectors, dtype=np.float32)
     if extra_symbols is not None:
         shape = (len(extra_symbols), embeddings.shape[1])
         extra_embeddings = np.zeros(shape, dtype=embeddings.dtype)
         embeddings = np.concatenate([extra_embeddings, embeddings], 0)
+
+    assert len(embeddings) == len(words)
 
     return words, embeddings

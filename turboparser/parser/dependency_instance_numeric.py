@@ -1,5 +1,6 @@
 from .dependency_instance import DependencyInstance
-
+from .token_dictionary import TokenDictionary
+from .constants import ROOT, EMPTY
 import numpy as np
 
 
@@ -7,23 +8,24 @@ class DependencyInstanceNumeric(DependencyInstance):
     """An dependency parsing instance with numeric fields."""
     def __init__(self, instance, token_dictionary, case_sensitive):
         """
+        Store numpy array containing the instance's words, lemmas, POS, morph
+        tags and dependencies.
+
         :param instance: DependencyInstance
         :param token_dictionary: TokenDictionary
+        :type token_dictionary: TokenDictionary
         :param case_sensitive: bool
         """
         length = len(instance)
 
         self.characters = [None for _ in range(length)]
         self.forms = np.full(length, -1, np.int32)
-        self.forms_lower = self.forms.copy()
         self.embedding_ids = self.forms.copy()
         self.lemmas = self.forms.copy()
-        self.prefixes = self.forms.copy()
-        self.suffixes = self.forms.copy()
+        self.lemma_characters = self.characters.copy()
         self.upos = self.forms.copy()
         self.xpos = self.forms.copy()
-        self.morph_tags = [[-1] * len(morph_tags)
-                           for morph_tags in instance.morph_tags]
+        self.morph_tags = self.characters.copy()
         self.morph_singletons = self.forms.copy()
 
         self.heads = np.full(length, -1, np.int32)
@@ -33,48 +35,50 @@ class DependencyInstanceNumeric(DependencyInstance):
         for i in range(length):
             # Form and lower-case form.
             form = instance.forms[i]
-            form_lower = form.lower()
+            lower_form = form.lower()
             if not case_sensitive:
-                form = form_lower
-            id_ = token_dictionary.get_form_id(form)
-            assert id_ < 0xffff
+                id_ = token_dictionary.get_form_id(lower_form)
+            else:
+                id_ = token_dictionary.get_form_id(form)
             self.forms[i] = id_
 
-            id_ = token_dictionary.get_form_lower_id(form_lower)
-            assert id_ < 0xffff
-            self.forms_lower[i] = id_
-
-            id_ = token_dictionary.get_embedding_id(form)
+            id_ = token_dictionary.get_embedding_id(lower_form)
             self.embedding_ids[i] = id_
-
-            # characters
-            self.characters[i] = [token_dictionary.get_character_id(c)
-                                  for c in form]
 
             # Lemma.
             lemma = instance.lemmas[i]
             id_ = token_dictionary.get_lemma_id(lemma)
-            assert id_ < 0xffff
             self.lemmas[i] = id_
+
+            # characters and morph tags
+            morph_tags = instance.morph_tags[i]
+            if i == 0:
+                characters = [token_dictionary.get_character_id(ROOT)]
+                morph_tags = token_dictionary.get_morph_ids(morph_tags, ROOT)
+                lemma_characters = [token_dictionary.get_character_id(ROOT)]
+            else:
+                characters = [token_dictionary.get_character_id(c)
+                              for c in form]
+                morph_tags = token_dictionary.get_morph_ids(morph_tags)
+                lemma_characters = [token_dictionary.get_character_id(c)
+                                    for c in lemma]
+
+            self.characters[i] = np.array(characters)
+            self.morph_tags[i] = np.array(morph_tags)
+            self.lemma_characters[i] = np.array(lemma_characters)
 
             # POS tag.
             tag = instance.upos[i]
             id_ = token_dictionary.get_upos_id(tag)
-            assert id_ < 0xff
             self.upos[i] = id_
 
             tag = instance.xpos[i]
+            if tag == '_':
+                tag = EMPTY
             id_ = token_dictionary.get_xpos_id(tag)
             self.xpos[i] = id_
 
             # Morphological tags.
-            morph_tags = instance.morph_tags[i]
-            for j in range(len(morph_tags)):
-                morph_tag = morph_tags[j]
-                id_ = token_dictionary.get_morph_tag_id(morph_tag)
-                assert id_ < 0xffff
-                self.morph_tags[i][j] = id_
-
             morph_singleton = instance.morph_singletons[i]
             self.morph_singletons[i] = token_dictionary.\
                 get_morph_singleton_id(morph_singleton)
@@ -91,12 +95,3 @@ class DependencyInstanceNumeric(DependencyInstance):
 
     def get_all_embedding_ids(self):
         return self.embedding_ids
-
-    def get_form_lower(self, i):
-        return self.forms_lower[i]
-
-    def get_prefix(self, i):
-        return self.prefixes[i]
-
-    def get_suffix(self, i):
-        return self.suffixes[i]

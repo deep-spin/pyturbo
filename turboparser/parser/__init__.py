@@ -1,5 +1,4 @@
 from .turbo_parser import TurboParser
-from .dependency_decoder import DependencyDecoder
 from .dependency_instance import DependencyInstance
 from .dependency_instance_numeric import *
 from .dependency_neural_model import DependencyNeuralModel
