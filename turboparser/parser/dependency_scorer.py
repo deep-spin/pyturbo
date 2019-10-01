@@ -2,11 +2,13 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import torch.optim as optim
-import entmax
-from entmax import sparsemax, entmax15, entmax_bisect
+import time
 
-from .constants import Target, dependency_targets
+from .constants import Target, dependency_targets, higher_order_parts
+from .constants import ParsingObjective as Objective
+from . import decoding
 from ..classifier.utils import get_logger
+from ..classifier.instance import InstanceData
 
 
 logger = get_logger()
@@ -52,21 +54,11 @@ class DependencyNeuralScorer(object):
     """
     Neural scorer for mediating the training of a Parser/Tagger neural model.
     """
-    def __init__(self, loss='softmax'):
+    def __init__(self):
         self.part_scores = None
         self.model = None
-        if loss == 'softmax':
-            fn = nn.CrossEntropyLoss
-        elif loss == 'sparsemax':
-            fn = entmax.SparsemaxLoss
-        elif loss == 'entmax15':
-            fn = entmax.Entmax15Loss
-        elif loss == 'adaptive-entmax':
-            fn = entmax.EntmaxBisectLoss
-        else:
-            raise ValueError('Unknown loss function: %s' % loss)
-        
-        self.loss_fn = fn(ignore_index=-1, reduction='elementwise_mean')
+        self.time_decoding = 0.
+        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
 
     def compute_loss_global_margin(self, instance_data, all_predicted_parts):
         """
@@ -110,6 +102,14 @@ class DependencyNeuralScorer(object):
 
         return losses
 
+    def compute_loss_global_probability(self, instance_data: InstanceData,
+                                        all_predicted_parts: list):
+        """
+        Compute the parsing loss as the cross-entropy of the correct parse tree
+        with respect to all possible parse trees, using the Matrix-Tree Theorem.
+        """
+        raise NotImplementedError
+
     def compute_loss(self, instance_data, predicted_parts=None):
         """
         Compute the losses for parsing and tagging. The appropriate function
@@ -127,11 +127,17 @@ class DependencyNeuralScorer(object):
         if self.model.predict_tree:
             # loss for dependency parsing
             gold_heads, gold_relations = get_gold_tensors(instance_data)
-            if self.normalization == 'global':
+            if self.parsing_loss == Objective.GLOBAL_MARGIN:
                 dep_losses = self.compute_loss_global_margin(instance_data,
                                                              predicted_parts)
-            else:
+            elif self.parsing_loss == Objective.LOCAL:
                 dep_losses = self.compute_loss_local(gold_heads, gold_relations)
+
+            elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                pass
+            else:
+                msg = 'Unknown parsing loss: %s' % self.parsing_loss
+                raise ValueError(msg)
 
             losses.update(dep_losses)
 
@@ -261,91 +267,139 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    def compute_scores(self, instance_data, dependency_logits=False):
+    def compute_scores(self, instance_data):
         """
         Compute the scores for all the targets this scorer
 
         :param instance_data: InstanceData
-        :param dependency_logits: if True, return the logits for dependency
-            heads and relations. If False, return the argmax of dependency
-            relations and a log softmax of heads.
         :return: a list of dictionaries mapping each target name to its scores
         """
         model_scores = self.model(instance_data.instances, instance_data.parts,
-                                  self.normalization)
+                                  self.parsing_loss)
 
-        numpy_scores = {}
+        detached_scores = {}
         for target in model_scores:
+            # distance and higher order scores are not necessary outside
+            # the graph
+            if target in higher_order_parts or target == Target.DISTANCE or \
+                    target == Target.SIGN:
+                continue
+
             value = model_scores[target]
             if isinstance(value, torch.Tensor):
-                value = value.detach()
+                value = value.detach().cpu()
+
+            detached_scores[target] = value
+
+        return detached_scores
+
+    def predict(self, instance_data: InstanceData, single_root: bool = True,
+                num_jobs: int = 2):
+        """
+        Predict the outputs for the given data, running decoding when necessary.
+
+        :param instance_data: data to predict outputs for
+        :param single_root: whether to enforce a single sentence root. Only used
+            if parsing
+        :param num_jobs: in case of higher order dependency decoding, number of
+            parallel jobs to launch
+        :return: a tuple (final predictions, predicted parts)
+            final predictions is a list of dictionaries that map each target
+            to the predictions
+        """
+        # scores is a dict[Target] -> batched arrays
+        scores = self.compute_scores(instance_data)
+        tagging_predictions = {}
+        output = []
+        parse = Target.HEADS in scores
+        head_scores = None
+        label_scores = None
+        predicted_parts = None
+
+        for target in scores:
+            target_scores = scores[target]
 
             if target not in dependency_targets:
                 # tagging and lemmatization
 
                 # at training time:
-                # tags: (batch, sentence_size, label_logits)
-                # lemmas: (batch, sentence_size, token_size, char_vocab_logits)
-                # at inference time, lemmas is (batch, sentence, token)
+                # tags: (batch, num_words, label_logits)
+                # lemmas: (batch, num_words, num_chars, char_vocab_logits)
+                # at inference time, lemmas is (batch, num_words, num_chars)
                 # because we use search algorithms over the output space
                 if target != Target.LEMMA or self.model.training:
-                    value = value.argmax(-1)
+                    tagging_predictions[target] = target_scores.argmax(-1)
+                else:
+                    tagging_predictions[target] = target_scores
 
-            elif self.normalization == 'local' and target not in \
-                    [Target.DISTANCE, Target.SIGN]:
-                # dependency targets
+            elif self.parsing_loss == Objective.LOCAL:
+                # take the log probability of the heads to run MST later
+                # and the most likely label for each (h, m)
+                if target == Target.HEADS:
+                    head_scores = F.log_softmax(target_scores, -1)
+                elif target == Target.RELATIONS:
+                    label_scores = target_scores.argmax(-1)
 
-                # local normalization stores tensors (num_words, num_words)
-                if target == Target.RELATIONS:
-                    # shape is (batch, modifier, head, label)
-                    if not dependency_logits:
-                        value = value.argmax(3)
+        # it may seem counter intuitive to loop through the scores to create a
+        # dictionary for each instance with part scores and later loop again
+        # to create a dictionary with parse trees, but this allows us to take
+        # advantage of batched parallel decoding
 
-                elif target == Target.HEADS:
-                    # (batch, modifier, head)
-                    if not dependency_logits:
-                        value = F.log_softmax(value, 2)
-            else:
-                # dependency parts under global normalization are treated
-                # differently
-                # sign scores and distance scores are ignored
-                continue
+        if parse and self.parsing_loss == Objective.GLOBAL_MARGIN:
+            # decode parts for all sentences
+            start_decoding = time.time()
+            actual_parts = higher_order_parts.union({Target.HEADS,
+                                                     Target.RELATIONS})
+            part_scores = [{target: self.model.scores[target][i]
+                            for target in self.model.scores
+                            if target in actual_parts}
+                           for i in range(len(instance_data))]
+            predicted_parts = decoding.batch_decode(
+                instance_data, part_scores, num_jobs)
+            end_decoding = time.time()
+            self.time_decoding += end_decoding - start_decoding
 
-            if isinstance(value, torch.Tensor):
-                value = value.cpu().numpy()
-            numpy_scores[target] = value
-
-        # now convert a dictionary of arrays into a list of dictionaries
-        score_list = []
+        # now create a list with a dictionary for each instance
         for i in range(len(instance_data)):
             length = len(instance_data.instances[i])
+            instance_output = {}
 
-            instance_scores = {}
-            for target in numpy_scores:
+            for target in tagging_predictions:
                 if target not in dependency_targets:
-                    # tagging tasks
-                    instance_scores[target] = numpy_scores[target][i, :length]
+                    target_prediction = tagging_predictions[target]
+                    instance_output[target] = target_prediction[i][:length]
+
+            if parse:
+                # decode the parse tree here
+                if predicted_parts is not None:
+                    # global objective, either with hinge loss or probability
+                    instance_predicted_parts = predicted_parts[i]
+                    heads, labels = decoding.decode_predictions(
+                        instance_predicted_parts, instance_data.parts[i],
+                        single_root=single_root)
+                    instance_output[Target.DEPENDENCY_PARTS] = \
+                        instance_predicted_parts
                 else:
-                    # head and label scores (local normalization only)
-                    instance_scores[target] = numpy_scores[target]\
-                        [i, :length - 1, :length]
+                    instance_head_scores = head_scores[i, :length - 1, :length]
+                    instance_label_scores = label_scores[
+                                            i, :length - 1, :length]
+                    heads, labels = decoding.decode_predictions(
+                        head_score_matrix=instance_head_scores,
+                        label_matrix=instance_label_scores,
+                        single_root=single_root)
+                    instance_output[Target.DEPENDENCY_PARTS] = None
 
-            if self.normalization == 'global':
-                # in the global normalization case, we have to detach tensors
-                # one by one
-                for target in dependency_targets:
-                    if target in model_scores:
-                        instance_scores[target] = model_scores[target][i]. \
-                            detach().cpu().numpy()
+                instance_output[Target.HEADS] = heads
+                instance_output[Target.RELATIONS] = labels
 
-            score_list.append(instance_scores)
+            output.append(instance_output)
 
-        return score_list
+        return output
 
-    def initialize(self, model, normalization='local', learning_rate=0.001,
-                   decay=1, beta1=0.9, beta2=0.95):
+    def initialize(self, model, parsing_loss=Objective.GLOBAL_MARGIN,
+                   learning_rate=0.001, decay=1, beta1=0.9, beta2=0.95):
         self.set_model(model)
-        self.normalization = normalization
+        self.parsing_loss = parsing_loss
         params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
             params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6)

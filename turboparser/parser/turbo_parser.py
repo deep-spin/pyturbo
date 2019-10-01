@@ -3,7 +3,7 @@
 from ..classifier import utils
 from ..classifier.instance import InstanceData
 from .token_dictionary import TokenDictionary
-from .constants import Target, target2string
+from .constants import Target, target2string, ParsingObjective as Objective
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
 from . import decoding
@@ -24,30 +24,6 @@ import time
 logger = utils.get_logger()
 
 
-class ModelType(object):
-    """Dummy class to store the types of parts used by a parser"""
-    def __init__(self, type_string):
-        """
-        :param type_string: a string encoding multiple types of parts:
-            af: arc factored (always used)
-            cs: consecutive siblings
-            gp: grandparents
-            as: arbitrary siblings
-            hb: head bigrams
-            gs: grandsiblings
-            ts: trisiblings
-
-            More than one type must be concatenated by +, e.g., af+cs+gp
-        """
-        codes = type_string.lower().split('+')
-        self.consecutive_siblings = 'cs' in codes
-        self.grandparents = 'gp' in codes
-        self.grandsiblings = 'gs' in codes
-        self.arbitrary_siblings = 'as' in codes
-        self.head_bigrams = 'hb' in codes
-        self.trisiblings = 'ts' in codes
-
-
 class TurboParser(object):
     '''Dependency parser.'''
     target_priority = [Target.RELATIONS, Target.HEADS, Target.LEMMA,
@@ -59,7 +35,7 @@ class TurboParser(object):
         self.writer = DependencyWriter()
         self.model = None
         self._set_options()
-        self.neural_scorer = DependencyNeuralScorer(loss=self.options.loss_function)
+        self.neural_scorer = DependencyNeuralScorer()
 
         if self.options.train:
             pretrain_words, pretrain_embeddings = self._load_embeddings()
@@ -71,7 +47,7 @@ class TurboParser(object):
                 lemma_cutoff=options.lemma_cutoff)
 
             model = DependencyNeuralModel(
-                self.model_type,
+                self.options.model_type,
                 self.token_dictionary, pretrain_embeddings,
                 char_hidden_size=self.options.char_hidden_size,
                 transform_size=self.options.transform_size,
@@ -96,7 +72,7 @@ class TurboParser(object):
                 predict_tree=options.parse)
 
             self.neural_scorer.initialize(
-                model, self.options.normalization, self.options.learning_rate,
+                model, self.options.parsing_loss, self.options.learning_rate,
                 options.decay, options.beta1, options.beta2)
 
             if self.options.verbose:
@@ -135,11 +111,10 @@ class TurboParser(object):
         Set some parameters of the parser determined from its `options`
         attribute.
         """
-        self.model_type = ModelType(self.options.model_type)
         self.has_pruner = bool(self.options.pruner_path)
 
-        if self.options.model_type != 'af':
-            if self.options.normalization == 'local':
+        if not self.options.model_type.first_order:
+            if self.options.parsing_loss == Objective.LOCAL:
                 msg = 'Local normalization not implemented for ' \
                       'higher order models'
                 logger.error(msg)
@@ -194,15 +169,7 @@ class TurboParser(object):
             options.upos = loaded_options.upos
             options.lemma = loaded_options.lemma
             options.parse = loaded_options.parse
-            if options.loss_function != loaded_options.loss_function:
-                msg = 'Loaded model has loss %s, but CLI arguments specified %s!'
-                msg %= (loaded_options.loss_function, options.loss_function)
-                logger.warning(msg)
-
-            # backwards compatibility
-            # TODO: change old saved models to include normalization model
-            options.normalization = loaded_options.normalization \
-                if hasattr(loaded_options, 'normalization') else 'local'
+            options.parsing_loss = loaded_options.parsing_loss
 
             # threshold for the basic pruner, if used
             options.pruner_posterior_threshold = \
@@ -217,7 +184,7 @@ class TurboParser(object):
             model = DependencyNeuralModel.load(f, parser.token_dictionary)
 
         parser.neural_scorer.set_model(model)
-        parser.neural_scorer.normalization = options.normalization
+        parser.neural_scorer.parsing_loss = options.parsing_loss
 
         # most of the time, we load a model to run its predictions
         parser.neural_scorer.eval_mode()
@@ -309,7 +276,7 @@ class TurboParser(object):
             inst_scores = scores[i]
             inst_parts = instance_data.parts[i]
 
-            if pruner.options.normalization == 'local':
+            if pruner.options.parsing_loss == Objective.LOCAL:
                 # if the pruner was trained with local normalization, its output
                 # for arcs is a (n - 1, n) matrix. Convert it to a list of part
                 # scores. First, transpose (modifier, head) to (head, modifier)
@@ -382,60 +349,6 @@ class TurboParser(object):
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
             logger.info(msg)
-
-    def decode_predictions(self, predicted_parts, parts, head_score_matrix=None,
-                           label_matrix=None):
-        """
-        Decode the predicted heads and labels over the output of the AD3 decoder
-        or just score matrices.
-
-        This function takes care of the cases when the variable assignments by
-        the decoder does not produce a valid tree running the Chu-Liu-Edmonds
-        algorithm.
-
-        :param predicted_parts: indicator array of predicted dependency parts
-            (with values between 0 and 1)
-        :param parts: the dependency parts
-        :type parts: DependencyParts
-        :return: a tuple (pred_heads, pred_labels)
-            The first is an array such that position heads[m] contains the head
-            for token m; it starts from the first actual word, not the root.
-            If the model is not trained for predicting labels, the second item
-            is None.
-        """
-        if head_score_matrix is None:
-            length = len(parts.arc_mask)
-            arc_scores = predicted_parts[:parts.num_arcs]
-            score_matrix = make_score_matrix(length, parts.arc_mask, arc_scores)
-        else:
-            # TODO: provide the matrix already (n x n)
-            zeros = np.zeros_like(head_score_matrix[0]).reshape([1, -1])
-            score_matrix = np.concatenate([zeros, head_score_matrix], 0)
-
-        if self.options.single_root:
-            pred_heads = chu_liu_edmonds_one_root(score_matrix)
-        else:
-            pred_heads = chu_liu_edmonds(score_matrix)
-
-        pred_heads = pred_heads[1:]
-        if parts.labeled:
-            if label_matrix is not None:
-                pred_labels = []
-                for m, h in enumerate(pred_heads):
-                    pred_labels.append(label_matrix[m, h])
-
-                pred_labels = np.array(pred_labels)
-            else:
-                offset_labels = parts.get_type_offset(Target.RELATIONS)
-                num_labeled = parts.num_labeled_arcs
-                labeled_parts = predicted_parts[offset_labels:
-                                                offset_labels+num_labeled]
-                labeled_parts2d = labeled_parts.reshape([parts.num_arcs, -1])
-                pred_labels = labeled_parts2d.argmax(1)
-        else:
-            pred_labels = None
-
-        return pred_heads, pred_labels
 
     def compute_validation_metrics(self, valid_data, valid_pred):
         """
@@ -597,8 +510,8 @@ class TurboParser(object):
             mask = None if prune_masks is None else prune_masks[i]
             numeric_instance = DependencyInstanceNumeric(
                 instance, self.token_dictionary, self.options.case_sensitive)
-            parts = DependencyParts(numeric_instance, self.model_type, mask,
-                                    labeled, num_relations)
+            parts = DependencyParts(numeric_instance, self.options.model_type,
+                                    mask, labeled, num_relations)
             gold_labels = self.get_gold_labels(numeric_instance)
 
             formatted_instances.append(numeric_instance)
@@ -616,8 +529,8 @@ class TurboParser(object):
         """
         self.num_train_instances = 0
         self.time_scores = 0
-        self.time_decoding = 0
         self.time_gradient = 0
+        self.neural_scorer.time_decoding = 0
         self.train_losses = defaultdict(float)
         self.accumulated_hits = {}
         for target in self.additional_targets:
@@ -725,7 +638,8 @@ class TurboParser(object):
         logger.info('\t'.join(msgs))
 
         time_msg = 'Time to score: %.2f\tDecode: %.2f\tGradient step: %.2f'
-        time_msg %= (self.time_scores, self.time_decoding, self.time_gradient)
+        time_msg %= (self.time_scores, self.neural_scorer.time_decoding,
+                     self.time_gradient)
         logger.info(time_msg)
 
     def run_batch(self, instance_data):
@@ -739,51 +653,17 @@ class TurboParser(object):
             prediction vector.
         """
         self.neural_scorer.eval_mode()
-        scores = self.neural_scorer.compute_scores(instance_data,
-                                                   dependency_logits=False)
+        predictions = self.neural_scorer.predict(
+            instance_data, self.options.single_root, self.options.num_jobs)
 
-        if self.options.parse:
-            if self.options.normalization == 'global':
-                predicted_parts = decoding.batch_decode(
-                    instance_data, scores, self.options.num_jobs)
-                head_scores = None
-                label_scores = None
-            else:
-                instance_predicted_parts = None
-
-        predictions = []
         eos = self.token_dictionary.get_character_id(EOS)
         empty = self.token_dictionary.get_character_id(EMPTY)
-        for i in range(len(instance_data)):
-            parts = instance_data.parts[i]
-            instance_output = scores[i]
-            instance_prediction = {}
-
-            if self.options.parse:
-                if self.options.normalization == 'global':
-                    instance_predicted_parts = predicted_parts[i]
-                else:
-                    head_scores = instance_output[Target.HEADS]
-                    label_scores = instance_output[Target.RELATIONS]
-
-                pred_heads, pred_labels = self.decode_predictions(
-                    instance_predicted_parts, parts, head_scores, label_scores)
-
-                instance_prediction[Target.HEADS] = pred_heads
-                instance_prediction[Target.RELATIONS] = pred_labels
-
-            for target in self.additional_targets:
-                target_predictions = instance_output[target]
-
-                if target == Target.LEMMA:
-                    lemmas = cut_sequences_at_eos(
-                        target_predictions, eos, empty)
-                    instance_prediction[target] = lemmas
-                else:
-                    # argmax is computed in the scorer
-                    instance_prediction[target] = target_predictions
-
-            predictions.append(instance_prediction)
+        if self.options.lemma:
+            # if this model includes a lemmatizer, cut sequences at EOS
+            for i in range(len(instance_data)):
+                lemma_prediction = predictions[i][Target.LEMMA]
+                lemmas = cut_sequences_at_eos(lemma_prediction, eos, empty)
+                predictions[i][Target.LEMMA] = lemmas
 
         return predictions
 
@@ -798,27 +678,19 @@ class TurboParser(object):
         self.neural_scorer.train_mode()
 
         start_time = time.time()
-
-        # scores is a list of dictionaries [target] -> score array
-        scores = self.neural_scorer.compute_scores(instance_data)
+        predictions = self.neural_scorer.predict(
+            instance_data, self.options.single_root, self.options.num_jobs)
         end_time = time.time()
         self.time_scores += end_time - start_time
 
-        all_predicted_parts = []
-        if self.options.parse and self.options.normalization == 'global':
-            # need to decode sentences in order to compute global loss
-            start_decoding = time.time()
-            all_predicted_parts = decoding.batch_decode(
-                instance_data, scores, self.options.num_jobs)
-
-            end_decoding = time.time()
-            self.time_decoding += end_decoding - start_decoding
-
         # run the gradient step for the whole batch
         start_time = time.time()
-        losses = self.neural_scorer.compute_loss(instance_data,
-                                                 all_predicted_parts)
+        predicted_parts = None if self.options.parsing_loss == Objective.LOCAL \
+            else [pred[Target.DEPENDENCY_PARTS] for pred in predictions]
+        losses = self.neural_scorer.compute_loss(instance_data, predicted_parts)
+
         self.neural_scorer.make_gradient_step(losses)
+
         batch_size = len(instance_data)
         self.num_train_instances += batch_size
         for target in losses:

@@ -1,4 +1,32 @@
 from ..classifier.options import OptionParser
+from .constants import string2objective
+
+
+class ModelType(object):
+    """Dummy class to store the types of parts used by a parser"""
+    def __init__(self, type_string):
+        """
+        :param type_string: a string encoding multiple types of parts:
+            af: arc factored (always used)
+            cs: consecutive siblings
+            gp: grandparents
+            as: arbitrary siblings
+            hb: head bigrams
+            gs: grandsiblings
+            ts: trisiblings
+
+            More than one type must be concatenated by +, e.g., af+cs+gp
+        """
+        codes = type_string.lower().split('+')
+        self.consecutive_siblings = 'cs' in codes
+        self.grandparents = 'gp' in codes
+        self.grandsiblings = 'gs' in codes
+        self.arbitrary_siblings = 'as' in codes
+        self.head_bigrams = 'hb' in codes
+        self.trisiblings = 'ts' in codes
+        self.first_order = not any(
+            [self.consecutive_siblings, self.grandparents, self.grandsiblings,
+             self.arbitrary_siblings, self.head_bigrams, self.trisiblings])
 
 
 class DependencyOptionParser(OptionParser):
@@ -49,18 +77,15 @@ class DependencyOptionParser(OptionParser):
                             default=0, const=1,
                             help="""Make the parser output just the backbone
                             dependencies.""")
-        parser.add_argument('--normalization', default='global',
-                            choices=['local', 'global'],
-                            help="""Type of output score normalization for 
-                            arc-factored models. local treats the head of each 
-                            word as an independent softmax, while global applies
-                            a margin loss over the complete structure. global 
-                            is slower but tends to give better results.""")
-        parser.add_argument('--loss_function', default='softmax',
-                            choices=['softmax', 'sparsemax', 'entmax15',
-                                     'adaptive-entmax'], help="""Activation function
-                            used to compute losses in parsing and tagging. 
-                            Not used in global parsing normalization.""")
+        parser.add_argument('--parsing_loss', default='global-margin',
+                            choices=['local', 'global-margin', 'global-prob'],
+                            help="""Type of parse loss function. 
+                            local treats the head of each word as an independent
+                            softmax; global-margin applies a margin loss over 
+                            the complete structure; global-prob maximizies the 
+                            probability of the whole structure.
+                            global-margin is slower than local but tends to give
+                            better results.""")
         parser.add_argument('--upos', action='store_true',
                             help='Predict UPOS tags')
         parser.add_argument('--xpos', action='store_true',
@@ -143,5 +168,8 @@ class DependencyOptionParser(OptionParser):
             options.model_type = 'af+cs+gp'
         elif options.model_type == 'full':
             options.model_type = 'af+cs+gp+as+hb+gs+ts'
+
+        options.model_type = ModelType(options.model_type)
+        options.parsing_loss = string2objective[options.parsing_loss]
 
         return options

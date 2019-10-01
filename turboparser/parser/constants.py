@@ -21,6 +21,12 @@ class Target(Enum):
     GRANDSIBLINGS = auto()
 
 
+class ParsingObjective(Enum):
+    LOCAL = auto()
+    GLOBAL_MARGIN = auto()
+    GLOBAL_PROBABILITY = auto()
+
+
 higher_order_parts = {Target.NEXT_SIBLINGS, Target.GRANDPARENTS,
                       Target.GRANDSIBLINGS}
 dependency_targets = {Target.HEADS, Target.RELATIONS, Target.DISTANCE,
@@ -38,6 +44,9 @@ target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
                  Target.RELATIONS: 'LAS',
                  Target.HEADS: 'UAS'}
 
+string2objective = {'local': ParsingObjective.LOCAL,
+                    'global-margin': ParsingObjective.GLOBAL_MARGIN,
+                    'global-prob': ParsingObjective.GLOBAL_PROBABILITY}
 
 ROOT = '_root_'
 UNKNOWN = '_unknown_'

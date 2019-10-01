@@ -11,7 +11,8 @@ from joeynmt.decoders import RecurrentDecoder
 from joeynmt.search import greedy
 
 from .token_dictionary import TokenDictionary, UNKNOWN
-from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS
+from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
+    ParsingObjective
 from ..classifier.lstm import CharLSTM, HighwayLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 
@@ -1006,7 +1007,7 @@ class DependencyNeuralModel(nn.Module):
         embeddings = embedding_matrix(index_matrix)
         return embeddings
 
-    def convert_arc_scores_to_parts(self, instances, parts):
+    def _convert_arc_scores_to_parts(self, instances, parts):
         """
         Convert the stored matrices with arc scores and label scores to 1d
         arrays, in the same order as in parts. Masks are also applied.
@@ -1059,20 +1060,27 @@ class DependencyNeuralModel(nn.Module):
         self.scores[Target.HEADS] = new_head_scores
         self.scores[Target.RELATIONS] = new_label_scores
 
-    def forward(self, instances, parts, normalization='local'):
+    def forward(self, instances, parts, normalization=ParsingObjective.LOCAL):
         """
         :param instances: a list of DependencyInstance objects
         :param parts: a list of DependencyParts objects
-        :param normalization: either "local" or "global". It only affects
+        :param normalization: a ParsingObjective value indicating "local",
+            "global-margin" or "global-prob". It only affects
             first order parts (arcs and labeled arcs).
 
             If "local", the losses for each word (as a modifier) is computed
             independently. The model will store a tensor with all arc scores
             (including padding) for efficient loss computation.
 
-            If "global", the loss is a hinge margin over the global structure.
-            The model will store scores as a list of 1d arrays (without padding)
-            that can easily be used with AD3 decoding functions.
+            If "global-margin", the loss is a hinge margin over the global
+            structure.
+
+            If "global-prob", the loss is the cross-entropy of the probability
+            of the global structure.
+
+            In the two latter cases, the model stores scores as a list of 1d
+            arrays (without padding) that can easily be used with AD3 decoding
+            functions.
 
         :return: a dictionary mapping each target to score tensors
         """
@@ -1188,7 +1196,8 @@ class DependencyNeuralModel(nn.Module):
                 if self.model_type.grandsiblings:
                     self._compute_grandsibling_scores(states, sent_parts)
 
-            if normalization == 'global':
-                self.convert_arc_scores_to_parts(instances, parts)
+            if normalization == ParsingObjective.GLOBAL_MARGIN or \
+                    normalization == ParsingObjective.GLOBAL_PROBABILITY:
+                self._convert_arc_scores_to_parts(instances, parts)
 
         return self.scores
