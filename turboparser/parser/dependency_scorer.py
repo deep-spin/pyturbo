@@ -369,7 +369,8 @@ class DependencyNeuralScorer(object):
                     target_prediction = tagging_predictions[target]
                     instance_output[target] = target_prediction[i][:length]
 
-            if parse:
+            # no need to decode the final parse during training
+            if parse and not self.model.training:
                 # decode the parse tree here
                 if predicted_parts is not None:
                     # global objective, either with hinge loss or probability
@@ -391,6 +392,9 @@ class DependencyNeuralScorer(object):
 
                 instance_output[Target.HEADS] = heads
                 instance_output[Target.RELATIONS] = labels
+            elif self.parsing_loss == Objective.GLOBAL_MARGIN or \
+                    self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                instance_output[Target.DEPENDENCY_PARTS] = predicted_parts[i]
 
             output.append(instance_output)
 
