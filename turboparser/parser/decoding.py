@@ -212,10 +212,14 @@ def decode_marginals(parts: DependencyParts, scores: dict, arcs: list) -> tuple:
     :return: a tuple with an array with marginal scores for each part,
         the log partition function and the entropy
     """
-    # if there are scores for labeled parts, add the highest label score
-    # of each arc to the arc score itself
-    _, best_label_scores = decode_labels(parts, scores)
-    arc_scores = scores[Target.HEADS] + best_label_scores
+    # if there are scores for labeled parts, add the partition function of the
+    # labels for each arc to the arc score itself
+    label_scores = scores[Target.RELATIONS]
+
+    # reshape as (num_arcs, num_relations)
+    label_scores = label_scores.reshape(-1, parts.num_relations)
+    label_partition_function = label_scores.logsumexp(1)
+    arc_scores = scores[Target.HEADS] + label_partition_function
 
     # create an index matrix such that masked out arcs have -1 and
     # others have their corresponding position in the arc list
@@ -226,10 +230,13 @@ def decode_marginals(parts: DependencyParts, scores: dict, arcs: list) -> tuple:
     marginals, log_partition, entropy = decode_matrix_tree(
         length, arc_index, arcs, arc_scores)
 
+    # the AD3 matrix tree implementation considers only unlabeled arcs
+    # we have to recompute the entropy considering the labeled arcs
+
     marginals = np.array(marginals)
     marginals[marginals < 0] = 0
 
-    return marginals, entropy
+    return marginals, log_partition, entropy
 
 
 def generate_arc_mask(parts, scores, max_heads, threshold=None):
@@ -254,7 +261,7 @@ def generate_arc_mask(parts, scores, max_heads, threshold=None):
     head_inds, modifier_inds = parts.get_arc_indices()
     arcs = list(zip(head_inds, modifier_inds))
 
-    marginals, entropy, _ = decode_marginals(parts, scores, arcs)
+    marginals, _, entropy = decode_marginals(parts, scores, arcs)
     candidate_heads = defaultdict(list)
     new_mask = np.zeros_like(parts.arc_mask)
 
