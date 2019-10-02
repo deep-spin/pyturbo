@@ -5,7 +5,7 @@ from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
 import numpy as np
 import os
 from joblib import Parallel, delayed
-from itertools import zip_longest
+from scipy.special import logsumexp, softmax
 
 from ..classifier.utils import get_logger
 from .dependency_instance import DependencyInstance
@@ -218,23 +218,32 @@ def decode_marginals(parts: DependencyParts, scores: dict, arcs: list) -> tuple:
 
     # reshape as (num_arcs, num_relations)
     label_scores = label_scores.reshape(-1, parts.num_relations)
-    label_partition_function = label_scores.logsumexp(1)
+    label_partition_function = logsumexp(label_scores, 1)
     arc_scores = scores[Target.HEADS] + label_partition_function
+    # label marginals contains P(label | arc)
+    label_marginals = softmax(label_scores, 1)
 
     # create an index matrix such that masked out arcs have -1 and
     # others have their corresponding position in the arc list
     # matrix should be (h, m) including root
-
     arc_index = parts.create_arc_index()
     length = len(arc_index)
     marginals, log_partition, entropy = decode_matrix_tree(
         length, arc_index, arcs, arc_scores)
+    marginals = np.array(marginals)
+    marginals[marginals < 0] = 0
 
     # the AD3 matrix tree implementation considers only unlabeled arcs
     # we have to recompute the entropy considering the labeled arcs
 
-    marginals = np.array(marginals)
-    marginals[marginals < 0] = 0
+    # label posteriors are P(label | arc) * P(arc)
+    label_posteriors = label_marginals * marginals.reshape(-1, 1)
+    entropy = log_partition - (label_scores * label_posteriors).sum()
+
+    if entropy < 0:
+        if entropy < -1e-6:
+            logger.warning('Negative marginal entropy: %f' % entropy)
+        entropy = 0
 
     return marginals, log_partition, entropy
 

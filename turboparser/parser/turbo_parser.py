@@ -267,31 +267,38 @@ class TurboParser(object):
             theorem
         """
         pruner = self.pruner
-        scores = pruner.neural_scorer.compute_scores(
-            instance_data, dependency_logits=True)
+        scores = pruner.neural_scorer.compute_scores(instance_data)
+        scores = {target: scores[target].numpy() for target in scores}
         masks = []
         entropies = []
 
-        for i in range(len(scores)):
-            inst_scores = scores[i]
-            inst_parts = instance_data.parts[i]
+        # scores is a dictionary mapping [target] -> (batch, scores)
+        for i in range(len(instance_data)):
+            instance_scores = {Target.HEADS: scores[Target.HEADS][i],
+                               Target.RELATIONS: scores[Target.RELATIONS][i]}
+            instance_parts = instance_data.parts[i]
 
             if pruner.options.parsing_loss == Objective.LOCAL:
                 # if the pruner was trained with local normalization, its output
                 # for arcs is a (n - 1, n) matrix. Convert it to a list of part
                 # scores. First, transpose (modifier, head) to (head, modifier)
-                head_scores = inst_scores[Target.HEADS].T
-                label_scores = inst_scores[Target.RELATIONS].transpose(1, 0, 2)
+                length = len(instance_data.instances[i])
+                head_scores = instance_scores[Target.HEADS]
+                head_scores = head_scores[:length - 1, :length].T
+                label_scores = instance_scores[Target.RELATIONS]
+                label_scores = label_scores[:length - 1, :length].\
+                    transpose(1, 0, 2)
 
                 # the existing mask only masks out self attachments and root
                 # attachments. It is useful to turn a matrix into a vector.
-                # the first column in the mask can be removed
-                mask = inst_parts.arc_mask[:, 1:]
-                inst_scores[Target.HEADS] = head_scores[mask]
-                inst_scores[Target.RELATIONS] = label_scores[mask].reshape(-1)
+                # the first column in the mask is removed to match (n - 1, n)
+                mask = instance_parts.arc_mask[:, 1:]
+                instance_scores[Target.HEADS] = head_scores[mask]
+                instance_scores[Target.RELATIONS] = label_scores[mask].\
+                    reshape(-1)
 
             new_mask, entropy = decoding.generate_arc_mask(
-                inst_parts, inst_scores, self.options.pruner_max_heads,
+                instance_parts, instance_scores, self.options.pruner_max_heads,
                 self.options.pruner_posterior_threshold)
 
             if self.options.train:
