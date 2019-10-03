@@ -1,10 +1,12 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.utils.rnn import pad_sequence
 import torch.optim as optim
 import time
 
-from .constants import Target, dependency_targets, higher_order_parts
+from .constants import Target, dependency_targets, higher_order_parts, \
+    structured_objectives
 from .constants import ParsingObjective as Objective
 from . import decoding
 from ..classifier.utils import get_logger
@@ -103,12 +105,52 @@ class DependencyNeuralScorer(object):
         return losses
 
     def compute_loss_global_probability(self, instance_data: InstanceData,
-                                        all_predicted_parts: list):
+                                        predicted_parts: list):
         """
         Compute the parsing loss as the cross-entropy of the correct parse tree
         with respect to all possible parse trees, using the Matrix-Tree Theorem.
         """
-        raise NotImplementedError
+        # entropy is (batch_size,)
+        entropy = torch.tensor(self.entropies)
+
+        # this is a list of lists of scores for each part
+        score_list = [self.model.scores[type_]
+                      for type_ in instance_data.parts[0].type_order]
+
+        # turn it into a list of single score tensors for each instance
+        score_list = [torch.cat(instance_scores)
+                      for instance_scores in zip(*score_list)]
+
+        # pad it to be (batch_size, num_parts)
+        part_scores = pad_sequence(score_list, batch_first=True)
+        gold_part_list = [torch.tensor(parts.gold_parts, dtype=torch.float,
+                                       device=part_scores.device)
+                          for parts in instance_data.parts]
+        gold_parts = pad_sequence(gold_part_list, batch_first=True)
+        predicted_parts = [torch.tensor(parts, dtype=torch.float,
+                                        device=part_scores.device)
+                           for parts in predicted_parts]
+        predicted_parts = pad_sequence(predicted_parts, batch_first=True)
+
+        # diff is (batch_size, num_parts)
+        diff = predicted_parts - gold_parts
+
+        # loss = entropy + sum_i(scores_i * (predicted_i - gold_i))
+        # compute the loss for each instance so we can check for < 0
+        losses = entropy.view(-1, 1) + (part_scores * diff).sum(1)
+
+        inds_subzero = losses < 0
+        if inds_subzero.sum().item():
+            values = losses[inds_subzero]
+            for value in values:
+                value = value.item()
+                if value < -1e-6:
+                    logger.warning('Ignoring negative loss: %.6f' % value)
+            losses[inds_subzero] = 0
+
+        losses = {Target.DEPENDENCY_PARTS: losses.mean()}
+
+        return losses
 
     def compute_loss(self, instance_data, predicted_parts=None):
         """
@@ -134,7 +176,8 @@ class DependencyNeuralScorer(object):
                 dep_losses = self.compute_loss_local(gold_heads, gold_relations)
 
             elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
-                pass
+                dep_losses = self.compute_loss_global_probability(
+                    instance_data, predicted_parts)
             else:
                 msg = 'Unknown parsing loss: %s' % self.parsing_loss
                 raise ValueError(msg)
@@ -281,13 +324,15 @@ class DependencyNeuralScorer(object):
         for target in model_scores:
             # distance and higher order scores are not necessary outside
             # the graph
-            if target in higher_order_parts or target == Target.DISTANCE or \
-                    target == Target.SIGN:
+            if target == Target.DISTANCE or target == Target.SIGN:
                 continue
 
             value = model_scores[target]
             if isinstance(value, torch.Tensor):
                 value = value.detach().cpu()
+            elif isinstance(value, list):
+                # structured prediction stores part lists of different sizes
+                value = [item.detach().cpu() for item in value]
 
             detached_scores[target] = value
 
@@ -314,7 +359,10 @@ class DependencyNeuralScorer(object):
         parse = Target.HEADS in scores
         head_scores = None
         label_scores = None
-        predicted_parts = None
+        predicted_parts = []
+        num_instances = len(instance_data)
+        if self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+            self.entropies = []
 
         for target in scores:
             target_scores = scores[target]
@@ -328,7 +376,8 @@ class DependencyNeuralScorer(object):
                 # at inference time, lemmas is (batch, num_words, num_chars)
                 # because we use search algorithms over the output space
                 if target != Target.LEMMA or self.model.training:
-                    tagging_predictions[target] = target_scores.argmax(-1)
+                    tagging_predictions[target] = target_scores.argmax(-1).\
+                        numpy()
                 else:
                     tagging_predictions[target] = target_scores
 
@@ -345,22 +394,34 @@ class DependencyNeuralScorer(object):
         # to create a dictionary with parse trees, but this allows us to take
         # advantage of batched parallel decoding
 
-        if parse and self.parsing_loss == Objective.GLOBAL_MARGIN:
+        if parse and self.parsing_loss in structured_objectives:
             # decode parts for all sentences
             start_decoding = time.time()
-            actual_parts = higher_order_parts.union({Target.HEADS,
-                                                     Target.RELATIONS})
-            part_scores = [{target: self.model.scores[target][i]
-                            for target in self.model.scores
-                            if target in actual_parts}
-                           for i in range(len(instance_data))]
-            predicted_parts = decoding.batch_decode(
-                instance_data, part_scores, num_jobs)
+            part_types = higher_order_parts.union({Target.HEADS,
+                                                   Target.RELATIONS})
+            part_scores = [{target: scores[target][i].numpy()
+                            for target in scores
+                            if target in part_types}
+                           for i in range(num_instances)]
+
+            if self.parsing_loss == Objective.GLOBAL_MARGIN:
+                predicted_parts = decoding.batch_decode(
+                    instance_data, part_scores, num_jobs)
+            elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                for i in range(num_instances):
+                    instance_parts = instance_data.parts[i]
+                    instance_scores = part_scores[i]
+                    result = decoding.decode_marginals(
+                        instance_parts, instance_scores)
+                    instance_prediction, _, entropy = result
+                    predicted_parts.append(instance_prediction)
+                    self.entropies.append(entropy)
+
             end_decoding = time.time()
             self.time_decoding += end_decoding - start_decoding
 
         # now create a list with a dictionary for each instance
-        for i in range(len(instance_data)):
+        for i in range(num_instances):
             length = len(instance_data.instances[i])
             instance_output = {}
 
@@ -392,8 +453,8 @@ class DependencyNeuralScorer(object):
 
                 instance_output[Target.HEADS] = heads
                 instance_output[Target.RELATIONS] = labels
-            elif self.parsing_loss == Objective.GLOBAL_MARGIN or \
-                    self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+
+            elif self.parsing_loss in structured_objectives:
                 instance_output[Target.DEPENDENCY_PARTS] = predicted_parts[i]
 
             output.append(instance_output)

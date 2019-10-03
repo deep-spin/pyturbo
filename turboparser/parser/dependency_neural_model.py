@@ -12,7 +12,7 @@ from joeynmt.search import greedy
 
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
-    ParsingObjective
+    ParsingObjective, structured_objectives
 from ..classifier.lstm import CharLSTM, HighwayLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 
@@ -1196,8 +1196,7 @@ class DependencyNeuralModel(nn.Module):
                 if self.model_type.grandsiblings:
                     self._compute_grandsibling_scores(states, sent_parts)
 
-            if normalization == ParsingObjective.GLOBAL_MARGIN or \
-                    normalization == ParsingObjective.GLOBAL_PROBABILITY:
+            if normalization in structured_objectives:
                 self._convert_arc_scores_to_parts(instances, parts)
 
         return self.scores

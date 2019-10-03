@@ -32,6 +32,8 @@ higher_order_parts = {Target.NEXT_SIBLINGS, Target.GRANDPARENTS,
 dependency_targets = {Target.HEADS, Target.RELATIONS, Target.DISTANCE,
                       Target.SIGN}
 dependency_targets.update(higher_order_parts)
+structured_objectives = {ParsingObjective.GLOBAL_MARGIN,
+                         ParsingObjective.GLOBAL_PROBABILITY}
 
 target2string = {Target.DEPENDENCY_PARTS: 'Dependency parts',
                  Target.XPOS: 'XPOS', Target.UPOS: 'UPOS',
