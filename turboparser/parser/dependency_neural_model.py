@@ -711,7 +711,7 @@ class DependencyNeuralModel(nn.Module):
         diag = diag.unsqueeze(0)
         head_scores.masked_fill_(diag, -np.inf)
 
-        if self.training and normalization == 'global':
+        if self.training and normalization == ParsingObjective.GLOBAL_MARGIN:
             dev = head_scores.device
             head_scores += gumbel.sample(head_scores.shape).to(dev)
             label_scores += gumbel.sample(label_scores.shape).to(dev)
@@ -1007,7 +1007,7 @@ class DependencyNeuralModel(nn.Module):
         embeddings = embedding_matrix(index_matrix)
         return embeddings
 
-    def _convert_arc_scores_to_parts(self, instances, parts):
+    def _convert_arc_scores_to_parts(self, instances, parts, add_margin):
         """
         Convert the stored matrices with arc scores and label scores to 1d
         arrays, in the same order as in parts. Masks are also applied.
@@ -1040,7 +1040,7 @@ class DependencyNeuralModel(nn.Module):
             head_scores1d = head_scores[mask]
             label_scores1d = label_scores[mask].view(-1)
 
-            if self.training:
+            if self.training and add_margin:
                 # apply the margin on the scores of gold parts
                 gold_arc_parts = torch.tensor(
                     inst_parts.gold_parts[:inst_parts.num_arcs],
@@ -1197,6 +1197,7 @@ class DependencyNeuralModel(nn.Module):
                     self._compute_grandsibling_scores(states, sent_parts)
 
             if normalization in structured_objectives:
-                self._convert_arc_scores_to_parts(instances, parts)
+                add_margin = normalization == ParsingObjective.GLOBAL_MARGIN
+                self._convert_arc_scores_to_parts(instances, parts, add_margin)
 
         return self.scores

@@ -238,7 +238,7 @@ def decode_marginals(parts: DependencyParts, scores: dict) -> tuple:
     arc_marginals, log_partition, entropy = decode_matrix_tree(
         length, arc_index, arcs, arc_scores)
     arc_marginals = np.array(arc_marginals)
-    arc_marginals[arc_marginals < 0] = 0
+    arc_marginals[arc_marginals < 0] = 0.
 
     # the AD3 matrix tree implementation considers only unlabeled arcs
     # we have to recompute the entropy considering the labeled arcs
@@ -250,7 +250,7 @@ def decode_marginals(parts: DependencyParts, scores: dict) -> tuple:
     if entropy < 0:
         if entropy < -1e-6:
             logger.warning('Negative marginal entropy: %f' % entropy)
-        entropy = 0
+        entropy = 0.
 
     label_marginals = label_marginals.reshape(-1)
     marginals = np.concatenate([arc_marginals, label_marginals])

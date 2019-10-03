@@ -133,11 +133,12 @@ class DependencyNeuralScorer(object):
         diff = predicted_parts - gold_parts
 
         # entropy is (batch_size,)
-        entropy = torch.tensor(self.entropies, device=part_scores.device)
+        entropy = torch.tensor(self.entropies, dtype=torch.float,
+                               device=part_scores.device)
 
         # loss = entropy + sum_i(scores_i * (predicted_i - gold_i))
         # compute the loss for each instance so we can check for < 0
-        losses = entropy.view(-1, 1) + (part_scores * diff).sum(1)
+        losses = entropy + (part_scores * diff).sum(1)
 
         inds_subzero = losses < 0
         if inds_subzero.sum().item():
@@ -359,7 +360,7 @@ class DependencyNeuralScorer(object):
         parse = Target.HEADS in scores
         head_scores = None
         label_scores = None
-        predicted_parts = []
+        predicted_parts = None
         num_instances = len(instance_data)
         if self.parsing_loss == Objective.GLOBAL_PROBABILITY:
             self.entropies = []
@@ -408,6 +409,7 @@ class DependencyNeuralScorer(object):
                 predicted_parts = decoding.batch_decode(
                     instance_data, part_scores, num_jobs)
             elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                predicted_parts = []
                 for i in range(num_instances):
                     instance_parts = instance_data.parts[i]
                     instance_scores = part_scores[i]
