@@ -110,9 +110,6 @@ class DependencyNeuralScorer(object):
         Compute the parsing loss as the cross-entropy of the correct parse tree
         with respect to all possible parse trees, using the Matrix-Tree Theorem.
         """
-        # entropy is (batch_size,)
-        entropy = torch.tensor(self.entropies)
-
         # this is a list of lists of scores for each part
         score_list = [self.model.scores[type_]
                       for type_ in instance_data.parts[0].type_order]
@@ -134,6 +131,9 @@ class DependencyNeuralScorer(object):
 
         # diff is (batch_size, num_parts)
         diff = predicted_parts - gold_parts
+
+        # entropy is (batch_size,)
+        entropy = torch.tensor(self.entropies, device=part_scores.device)
 
         # loss = entropy + sum_i(scores_i * (predicted_i - gold_i))
         # compute the loss for each instance so we can check for < 0
