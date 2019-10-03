@@ -63,53 +63,11 @@ class DependencyNeuralScorer(object):
         self.time_decoding = 0.
         self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
 
-    def compute_loss_global_margin(self, instance_data, all_predicted_parts):
+    def compute_loss_global(self, instance_data: InstanceData,
+                            predicted_parts: list) -> dict:
         """
-        Compute the losses for parsing and tagging.
-
-        :param instance_data: InstanceData object
-        :param all_predicted_parts: list of numpy arrays with predicted parts
-            for each instance
-        :return: dictionary mapping each target to a loss scalar, as a torch
-            variable
-        """
-        losses = {}
-
-        # dependency parts loss
-        parts_loss = torch.tensor(0.)
-        if torch.cuda.is_available():
-            parts_loss = parts_loss.cuda()
-
-        batch_size = len(instance_data)
-        for i in range(batch_size):
-            inst_parts = instance_data.parts[i]
-            part_score_list = [self.model.scores[type_][i]
-                               for type_ in inst_parts.type_order]
-            part_scores = torch.cat(part_score_list)
-
-            gold_parts = inst_parts.gold_parts
-            pred_parts = all_predicted_parts[i]
-            diff_predictions = torch.tensor(pred_parts - gold_parts,
-                                            dtype=torch.float,
-                                            device=parts_loss.device)
-            inst_parts_loss = diff_predictions.dot(part_scores)
-
-            if inst_parts_loss > 0:
-                parts_loss += inst_parts_loss
-            else:
-                if inst_parts_loss < -10e-6:
-                    logger.warning(
-                        'Ignoring negative loss: %.6f' % inst_parts_loss.item())
-
-        losses[Target.DEPENDENCY_PARTS] = parts_loss / batch_size
-
-        return losses
-
-    def compute_loss_global_probability(self, instance_data: InstanceData,
-                                        predicted_parts: list):
-        """
-        Compute the parsing loss as the cross-entropy of the correct parse tree
-        with respect to all possible parse trees, using the Matrix-Tree Theorem.
+        Compute the loss for either a hinge loss based or cross-entropy based
+        parser model that considers the whole tree structure.
         """
         # this is a list of lists of scores for each part
         score_list = [self.model.scores[type_]
@@ -125,21 +83,24 @@ class DependencyNeuralScorer(object):
                                        device=part_scores.device)
                           for parts in instance_data.parts]
         gold_parts = pad_sequence(gold_part_list, batch_first=True)
-        predicted_parts = [torch.tensor(parts, dtype=torch.float,
-                                        device=part_scores.device)
-                           for parts in predicted_parts]
-        predicted_parts = pad_sequence(predicted_parts, batch_first=True)
+        predicted_part_list = [torch.tensor(parts, dtype=torch.float,
+                                            device=part_scores.device)
+                               for parts in predicted_parts]
+        predicted_parts = pad_sequence(predicted_part_list, batch_first=True)
 
         # diff is (batch_size, num_parts)
         diff = predicted_parts - gold_parts
+        scores_times_diff = torch.sum(part_scores * diff, 1)
 
-        # entropy is (batch_size,)
-        entropy = torch.tensor(self.entropies, dtype=torch.float,
-                               device=part_scores.device)
-
-        # loss = entropy + sum_i(scores_i * (predicted_i - gold_i))
-        # compute the loss for each instance so we can check for < 0
-        losses = entropy + (part_scores * diff).sum(1)
+        if self.parsing_loss == Objective.GLOBAL_MARGIN:
+            losses = scores_times_diff
+        elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+            # entropy is (batch_size,)
+            entropy = torch.tensor(self.entropies, dtype=torch.float,
+                                   device=part_scores.device)
+            losses = entropy + scores_times_diff
+        else:
+            raise ValueError('Unknown parsing objective %s' % self.parsing_loss)
 
         inds_subzero = losses < 0
         if inds_subzero.sum().item():
@@ -171,15 +132,12 @@ class DependencyNeuralScorer(object):
         if self.model.predict_tree:
             # loss for dependency parsing
             gold_heads, gold_relations = get_gold_tensors(instance_data)
-            if self.parsing_loss == Objective.GLOBAL_MARGIN:
-                dep_losses = self.compute_loss_global_margin(instance_data,
-                                                             predicted_parts)
+            if self.parsing_loss in structured_objectives:
+                dep_losses = self.compute_loss_global(instance_data,
+                                                      predicted_parts)
             elif self.parsing_loss == Objective.LOCAL:
                 dep_losses = self.compute_loss_local(gold_heads, gold_relations)
 
-            elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
-                dep_losses = self.compute_loss_global_probability(
-                    instance_data, predicted_parts)
             else:
                 msg = 'Unknown parsing loss: %s' % self.parsing_loss
                 raise ValueError(msg)
@@ -387,11 +345,6 @@ class DependencyNeuralScorer(object):
             self.entropies = []
 
         for target in scores:
-            # # distance and higher order scores are not necessary outside
-            # # the graph
-            # if target == Target.DISTANCE or target == Target.SIGN:
-            #     continue
-
             target_scores = scores[target]
             if isinstance(target_scores, list):
                 # structured prediction stores part lists of different sizes
