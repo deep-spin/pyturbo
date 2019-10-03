@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 import torch.optim as optim
 import time
+from contextlib import suppress
 
 from .constants import Target, dependency_targets, higher_order_parts, \
     structured_objectives
@@ -311,62 +312,91 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    def compute_scores(self, instance_data):
-        """
-        Compute the scores for all the targets this scorer
+    # def compute_scores(self, instance_data):
+    #     """
+    #     Compute the scores for all the targets this scorer
+    #
+    #     :param instance_data: InstanceData
+    #     :return: a list of dictionaries mapping each target name to its scores
+    #     """
+    #     model_scores = self.model(instance_data.instances, instance_data.parts,
+    #                               self.parsing_loss)
+    #
+    #     detached_scores = {}
+    #     for target in model_scores:
+    #         # distance and higher order scores are not necessary outside
+    #         # the graph
+    #         if target == Target.DISTANCE or target == Target.SIGN:
+    #             continue
+    #
+    #         value = model_scores[target]
+    #         if isinstance(value, torch.Tensor):
+    #             value = value.detach().cpu()
+    #         elif isinstance(value, list):
+    #             # structured prediction stores part lists of different sizes
+    #             value = [item.detach().cpu() for item in value]
+    #
+    #         detached_scores[target] = value
+    #
+    #     return detached_scores
 
-        :param instance_data: InstanceData
-        :return: a list of dictionaries mapping each target name to its scores
-        """
-        model_scores = self.model(instance_data.instances, instance_data.parts,
-                                  self.parsing_loss)
-
-        detached_scores = {}
-        for target in model_scores:
-            # distance and higher order scores are not necessary outside
-            # the graph
-            if target == Target.DISTANCE or target == Target.SIGN:
-                continue
-
-            value = model_scores[target]
-            if isinstance(value, torch.Tensor):
-                value = value.detach().cpu()
-            elif isinstance(value, list):
-                # structured prediction stores part lists of different sizes
-                value = [item.detach().cpu() for item in value]
-
-            detached_scores[target] = value
-
-        return detached_scores
-
-    def predict(self, instance_data: InstanceData, single_root: bool = True,
-                num_jobs: int = 2):
+    def predict(self, instance_data: InstanceData, decode_tree: bool = True,
+                single_root: bool = True, training: bool = False,
+                num_jobs: int = 1):
         """
         Predict the outputs for the given data, running decoding when necessary.
 
         :param instance_data: data to predict outputs for
+        :param decode_tree: whether to decode the dependency tree. It still runs
+            AD3 in case of hinge loss, but that doesn't guarantee a valid tree.
+            It decodes the marginals in case of cross-entropy structured
+            loss, but not the MAP.
+        :param training: whether this is a training run. If True, it implies no
+            full decoding.
         :param single_root: whether to enforce a single sentence root. Only used
-            if parsing
+            if parsing and decode_tree is True
         :param num_jobs: in case of higher order dependency decoding, number of
             parallel jobs to launch
-        :return: a tuple (final predictions, predicted parts)
-            final predictions is a list of dictionaries that map each target
-            to the predictions
+        :return: If training is True, return only the predicted parts. It is a
+            list of predicted values for the parts of the dependency tree if
+            the model is trained for parsing with a structured objective, and
+            None otherwise.
+
+            If training is False, return a list of dictionaries, one for each
+            instance, mapping Targets to predictions.
         """
         # scores is a dict[Target] -> batched arrays
-        scores = self.compute_scores(instance_data)
-        tagging_predictions = {}
-        output = []
+        context = suppress if training else torch.no_grad
+        with context():
+            scores = self.model(instance_data.instances, instance_data.parts,
+                                self.parsing_loss)
+
         parse = Target.HEADS in scores
+        if training and (not parse or self.parsing_loss == Objective.LOCAL):
+            return
+
+        tagging_predictions = {}
+        part_scores = {}
+        output = []
         head_scores = None
         label_scores = None
+        best_labels = None
         predicted_parts = None
         num_instances = len(instance_data)
         if self.parsing_loss == Objective.GLOBAL_PROBABILITY:
             self.entropies = []
 
         for target in scores:
+            # # distance and higher order scores are not necessary outside
+            # # the graph
+            # if target == Target.DISTANCE or target == Target.SIGN:
+            #     continue
+
             target_scores = scores[target]
+            if isinstance(target_scores, list):
+                # structured prediction stores part lists of different sizes
+                part_scores[target] = [item.detach().cpu().numpy()
+                                       for item in target_scores]
 
             if target not in dependency_targets:
                 # tagging and lemmatization
@@ -382,45 +412,52 @@ class DependencyNeuralScorer(object):
                 else:
                     tagging_predictions[target] = target_scores
 
-            elif self.parsing_loss == Objective.LOCAL:
-                # take the log probability of the heads to run MST later
-                # and the most likely label for each (h, m)
-                if target == Target.HEADS:
-                    head_scores = F.log_softmax(target_scores, -1)
-                elif target == Target.RELATIONS:
-                    label_scores = target_scores.argmax(-1)
-
         # it may seem counter intuitive to loop through the scores to create a
         # dictionary for each instance with part scores and later loop again
         # to create a dictionary with parse trees, but this allows us to take
         # advantage of batched parallel decoding
 
-        if parse and self.parsing_loss in structured_objectives:
-            # decode parts for all sentences
-            start_decoding = time.time()
-            part_types = higher_order_parts.union({Target.HEADS,
-                                                   Target.RELATIONS})
-            part_scores = [{target: scores[target][i].numpy()
-                            for target in scores
-                            if target in part_types}
-                           for i in range(num_instances)]
+        if parse:
+            if self.parsing_loss == Objective.LOCAL:
+                # take the log probability of the heads to run MST later
+                # and the most likely label for each (h, m)
+                head_scores = F.log_softmax(scores[Target.HEADS], -1) \
+                    .cpu().numpy()
+                label_scores = scores[Target.RELATIONS].cpu().numpy()
+                best_labels = label_scores.argmax(-1)
 
-            if self.parsing_loss == Objective.GLOBAL_MARGIN:
-                predicted_parts = decoding.batch_decode(
-                    instance_data, part_scores, num_jobs)
-            elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
-                predicted_parts = []
-                for i in range(num_instances):
-                    instance_parts = instance_data.parts[i]
-                    instance_scores = part_scores[i]
-                    result = decoding.decode_marginals(
-                        instance_parts, instance_scores)
-                    instance_prediction, _, entropy = result
-                    predicted_parts.append(instance_prediction)
-                    self.entropies.append(entropy)
+            elif decode_tree:
+                # structured parsing, decode parts for all sentences
+                start_decoding = time.time()
+                part_scores = [{target: part_scores[target][i]
+                                for target in part_scores}
+                               for i in range(num_instances)]
 
-            end_decoding = time.time()
-            self.time_decoding += end_decoding - start_decoding
+                if self.parsing_loss == Objective.GLOBAL_MARGIN:
+                    predicted_parts = decoding.batch_decode(
+                        instance_data, part_scores, num_jobs)
+
+                elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                    predicted_parts = []
+                    for i in range(num_instances):
+                        instance_parts = instance_data.parts[i]
+                        instance_scores = part_scores[i]
+                        result = decoding.decode_marginals(
+                            instance_parts, instance_scores)
+                        instance_prediction, _, entropy = result
+                        predicted_parts.append(instance_prediction)
+                        self.entropies.append(entropy)
+
+                end_decoding = time.time()
+                self.time_decoding += end_decoding - start_decoding
+
+            else:
+                # structured parsing, but only interested in scores
+                head_scores = part_scores[Target.HEADS]
+                label_scores = part_scores[Target.RELATIONS]
+
+        if training:
+            return predicted_parts
 
         # now create a list with a dictionary for each instance
         for i in range(num_instances):
@@ -432,32 +469,45 @@ class DependencyNeuralScorer(object):
                     target_prediction = tagging_predictions[target]
                     instance_output[target] = target_prediction[i][:length]
 
-            # no need to decode the final parse during training
-            if parse and not self.model.training:
-                # decode the parse tree here
+            if parse:
                 if predicted_parts is not None:
-                    # global objective, either with hinge loss or probability
                     instance_predicted_parts = predicted_parts[i]
-                    heads, labels = decoding.decode_predictions(
-                        instance_predicted_parts, instance_data.parts[i],
-                        single_root=single_root)
                     instance_output[Target.DEPENDENCY_PARTS] = \
                         instance_predicted_parts
                 else:
-                    instance_head_scores = head_scores[i, :length - 1, :length]
-                    instance_label_scores = label_scores[
-                                            i, :length - 1, :length]
-                    heads, labels = decoding.decode_predictions(
-                        head_score_matrix=instance_head_scores,
-                        label_matrix=instance_label_scores,
-                        single_root=single_root)
                     instance_output[Target.DEPENDENCY_PARTS] = None
 
-                instance_output[Target.HEADS] = heads
-                instance_output[Target.RELATIONS] = labels
+                if decode_tree:
+                    if predicted_parts is not None:
+                        # global objective
+                        instance_predicted_parts = predicted_parts[i]
+                        instance_parts = instance_data.parts[i]
+                        heads, labels = decoding.decode_predictions(
+                            instance_predicted_parts, instance_parts,
+                            single_root=single_root)
+                    else:
+                        instance_head_scores = head_scores[
+                                           i, :length - 1, :length]
+                        instance_best_labels = best_labels[
+                                           i, :length - 1, :length]
+                        heads, labels = decoding.decode_predictions(
+                            head_score_matrix=instance_head_scores,
+                            label_matrix=instance_best_labels,
+                            single_root=single_root)
 
-            elif self.parsing_loss in structured_objectives:
-                instance_output[Target.DEPENDENCY_PARTS] = predicted_parts[i]
+                    instance_output[Target.HEADS] = heads
+                    instance_output[Target.RELATIONS] = labels
+
+                else:
+                    # don't decode; only store parsing scores
+                    if self.parsing_loss == Objective.LOCAL:
+                        instance_output[Target.HEADS] = head_scores[
+                                           i, :length - 1, :length]
+                        instance_output[Target.RELATIONS] = label_scores[
+                                           i, :length - 1, :length]
+                    else:
+                        instance_output[Target.HEADS] = head_scores[i]
+                        instance_output[Target.RELATIONS] = label_scores[i]
 
             output.append(instance_output)
 

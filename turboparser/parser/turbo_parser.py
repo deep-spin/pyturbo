@@ -267,26 +267,20 @@ class TurboParser(object):
             theorem
         """
         pruner = self.pruner
-        scores = pruner.neural_scorer.compute_scores(instance_data)
-        scores = {target: scores[target].numpy() for target in scores}
+        scores = pruner.neural_scorer.predict(instance_data, decode_tree=False)
         masks = []
         entropies = []
 
         # scores is a dictionary mapping [target] -> (batch, scores)
-        for i in range(len(instance_data)):
-            instance_scores = {Target.HEADS: scores[Target.HEADS][i],
-                               Target.RELATIONS: scores[Target.RELATIONS][i]}
+        for i, instance_scores in enumerate(scores):
             instance_parts = instance_data.parts[i]
 
             if pruner.options.parsing_loss == Objective.LOCAL:
                 # if the pruner was trained with local normalization, its output
                 # for arcs is a (n - 1, n) matrix. Convert it to a list of part
                 # scores. First, transpose (modifier, head) to (head, modifier)
-                length = len(instance_data.instances[i])
-                head_scores = instance_scores[Target.HEADS]
-                head_scores = head_scores[:length - 1, :length].T
-                label_scores = instance_scores[Target.RELATIONS]
-                label_scores = label_scores[:length - 1, :length].\
+                head_scores = instance_scores[Target.HEADS].T
+                label_scores = instance_scores[Target.RELATIONS].\
                     transpose(1, 0, 2)
 
                 # the existing mask only masks out self attachments and root
@@ -393,8 +387,8 @@ class TurboParser(object):
                 accumulated_uas += np.sum(head_hits)
 
                 pred_labels = inst_pred[Target.RELATIONS]
-                deprel_gold = gold_output[Target.RELATIONS]
-                label_hits = deprel_gold == pred_labels
+                gold_labels = gold_output[Target.RELATIONS]
+                label_hits = gold_labels == pred_labels
                 label_head_hits = np.logical_and(head_hits, label_hits)
                 accumulated_las += np.sum(label_head_hits)
 
@@ -661,7 +655,8 @@ class TurboParser(object):
         """
         self.neural_scorer.eval_mode()
         predictions = self.neural_scorer.predict(
-            instance_data, self.options.single_root, self.options.num_jobs)
+            instance_data, single_root=self.options.single_root,
+            num_jobs=self.options.num_jobs)
 
         eos = self.token_dictionary.get_character_id(EOS)
         empty = self.token_dictionary.get_character_id(EMPTY)
@@ -686,15 +681,13 @@ class TurboParser(object):
 
         start_time = time.time()
         predictions = self.neural_scorer.predict(
-            instance_data, self.options.single_root, self.options.num_jobs)
+            instance_data, num_jobs=self.options.num_jobs, training=True)
         end_time = time.time()
         self.time_scores += end_time - start_time
 
         # run the gradient step for the whole batch
         start_time = time.time()
-        predicted_parts = None if self.options.parsing_loss == Objective.LOCAL \
-            else [pred[Target.DEPENDENCY_PARTS] for pred in predictions]
-        losses = self.neural_scorer.compute_loss(instance_data, predicted_parts)
+        losses = self.neural_scorer.compute_loss(instance_data, predictions)
 
         self.neural_scorer.make_gradient_step(losses)
 

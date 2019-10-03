@@ -156,7 +156,7 @@ class DependencyOptionParser(OptionParser):
                             help='Dropout rate')
         parser.add_argument('--word_dropout', type=float, default=0.33,
                             help='Word dropout rate (replace by unknown)')
-        parser.add_argument('--num_jobs', type=int, default=2,
+        parser.add_argument('--num_jobs', type=int, default=1,
                             help='Number of parallel jobs for global decoding')
 
     def parse_args(self):

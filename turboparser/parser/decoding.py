@@ -100,7 +100,12 @@ def decode_predictions(predicted_parts=None, parts=None, head_score_matrix=None,
         labeled_parts = predicted_parts[offset_labels:
                                         offset_labels+num_labeled]
         labeled_parts2d = labeled_parts.reshape([parts.num_arcs, -1])
-        pred_labels = labeled_parts2d.argmax(1)
+
+        # best_labels contains the best label for each arc
+        best_labels = labeled_parts2d.argmax(1)
+        arc_index = parts.create_arc_index()
+        pred_labels = [best_labels[arc_index[h, m]]
+                       for (m, h) in enumerate(pred_heads, 1)]
 
     return pred_heads, pred_labels
 
@@ -190,12 +195,11 @@ def decode(instance, parts, scores):
     offset = num_arcs
     num_relations = parts.num_relations
 
-    if parts.labeled:
-        for i in range(len(graph_wrapper.arcs)):
-            label = graph_wrapper.best_labels[i]
-            posterior = posteriors[i]
-            predicted_output[offset + label] = posterior
-            offset += num_relations
+    for i in range(len(graph_wrapper.arcs)):
+        label = graph_wrapper.best_labels[i]
+        posterior = posteriors[i]
+        predicted_output[offset + label] = posterior
+        offset += num_relations
 
     return predicted_output
 
@@ -228,7 +232,8 @@ def decode_marginals(parts: DependencyParts, scores: dict) -> tuple:
     arc_scores = scores[Target.HEADS] + label_partition_function
 
     # label conditionals contain P(label | arc)
-    label_conditionals = softmax(label_scores, 1)
+    partition_function2d = label_partition_function.reshape(-1, 1)
+    label_conditionals = np.exp(label_scores - partition_function2d)
 
     # create an index matrix such that masked out arcs have -1 and
     # others have their corresponding position in the arc list
@@ -319,9 +324,6 @@ class FactorGraph(object):
         self.right_grandparents = None
         self.left_grandsiblings = None
         self.right_grandsiblings = None
-
-        # best_labels is an array with the best label for the i-th arc
-        self.best_labels = None
 
         self.use_siblings = parts.has_type(Target.NEXT_SIBLINGS)
         self.use_grandparents = parts.has_type(Target.GRANDPARENTS)
@@ -423,7 +425,6 @@ class FactorGraph(object):
         length = len(instance)
 
         best_labels, label_scores = decode_labels(parts, scores)
-        parts.save_best_labels(best_labels, self.arcs)
         arc_scores = scores[Target.HEADS] + label_scores
         self.best_labels = best_labels
 
