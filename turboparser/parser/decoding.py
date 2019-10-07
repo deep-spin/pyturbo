@@ -251,6 +251,7 @@ def decode_marginals(parts: DependencyParts, scores: dict) -> tuple:
     # label marginals are P(label | arc) * P(arc)
     label_marginals = label_conditionals * arc_marginals.reshape(-1, 1)
     entropy = log_partition - (label_scores * label_marginals).sum()
+    entropy -= arc_marginals.dot(scores[Target.HEADS])
 
     if entropy < 0:
         if entropy < -1e-6:

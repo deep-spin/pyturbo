@@ -487,7 +487,6 @@ class DependencyNeuralScorer(object):
         params = [p for p in self.model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
             params, amsgrad=True, lr=learning_rate, betas=(beta1, beta2))
-        # self.optimizer = optim.SGD(params, lr=learning_rate)
 
     def train_mode(self):
         """
