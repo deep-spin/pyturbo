@@ -32,14 +32,14 @@ def set_seeds(seed):
 
 
 def train_parser(options):
-    logger.info('Training the parser')
+    logger.info('Starting parser in training mode')
     dependency_parser = TurboParser(options)
     log_options(dependency_parser)
     dependency_parser.train()
 
 
 def test_parser(options):
-    logger.info('Running the parser')
+    logger.info('Starting parser in inference mode')
     dependency_parser = TurboParser.load(options)
     log_options(dependency_parser)
     dependency_parser.run()
