@@ -54,8 +54,6 @@ class TurboParser(object):
                 trainable_word_embedding_size=self.options.embedding_size,
                 char_embedding_size=self.options.char_embedding_size,
                 tag_embedding_size=self.options.tag_embedding_size,
-                distance_embedding_size=self.options.
-                distance_embedding_size,
                 rnn_size=self.options.rnn_size,
                 arc_mlp_size=self.options.arc_mlp_size,
                 label_mlp_size=self.options.label_mlp_size,
@@ -157,39 +155,45 @@ class TurboParser(object):
         """Save the full configuration and model."""
         if not model_path:
             model_path = self.options.model_path
+
+        data = {'options': self.options,
+                'dictionary': self.token_dictionary,
+                'metadata': self.neural_scorer.model.create_metadata()}
+
         with open(model_path, 'wb') as f:
-            pickle.dump(self.options, f)
-            self.token_dictionary.save(f)
+            pickle.dump(data, f)
             self.neural_scorer.model.save(f)
 
     @classmethod
     def load(cls, options):
         """Load the full configuration and model."""
         with open(options.model_path, 'rb') as f:
-            loaded_options = pickle.load(f)
+            data = pickle.load(f)
+            loaded_options = data['options']
+            token_dictionary = data['dictionary']
+            model_metadata = data['metadata']
+            model = DependencyNeuralModel.load(
+                f, loaded_options, token_dictionary, model_metadata)
 
-            options.model_type = loaded_options.model_type
-            options.unlabeled = loaded_options.unlabeled
-            options.morph = loaded_options.morph
-            options.xpos = loaded_options.xpos
-            options.upos = loaded_options.upos
-            options.lemma = loaded_options.lemma
-            options.parse = loaded_options.parse
-            options.parsing_loss = loaded_options.parsing_loss
+        options.model_type = loaded_options.model_type
+        options.unlabeled = loaded_options.unlabeled
+        options.morph = loaded_options.morph
+        options.xpos = loaded_options.xpos
+        options.upos = loaded_options.upos
+        options.lemma = loaded_options.lemma
+        options.parse = loaded_options.parse
+        options.parsing_loss = loaded_options.parsing_loss
 
-            # threshold for the basic pruner, if used
-            options.pruner_posterior_threshold = \
-                loaded_options.pruner_posterior_threshold
+        # threshold for the basic pruner, if used
+        options.pruner_posterior_threshold = \
+            loaded_options.pruner_posterior_threshold
 
-            # maximum candidate heads per word in the basic pruner, if used
-            options.pruner_max_heads = loaded_options.pruner_max_heads
+        # maximum candidate heads per word in the basic pruner, if used
+        options.pruner_max_heads = loaded_options.pruner_max_heads
 
-            parser = TurboParser(options)
-            parser.token_dictionary.load(f)
-
-            model = DependencyNeuralModel.load(f, parser.token_dictionary)
-
+        parser = TurboParser(options)
         parser.neural_scorer.set_model(model)
+        parser.token_dictionary = token_dictionary
         parser.neural_scorer.parsing_loss = options.parsing_loss
 
         # most of the time, we load a model to run its predictions

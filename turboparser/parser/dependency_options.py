@@ -136,8 +136,6 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--transform_size', type=int, default=125,
                             help='''Size of the linear transformation for 
                             char-based and pretrained representations''')
-        parser.add_argument('--distance_embedding_size', type=int, default=20,
-                            help='Size of distance embeddings')
         parser.add_argument('--rnn_size', type=int, default=400,
                             help='Size of hidden RNN layers')
         parser.add_argument('--arc_mlp_size', type=int, default=400,

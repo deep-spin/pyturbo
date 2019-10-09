@@ -286,7 +286,6 @@ class DependencyNeuralModel(nn.Module):
                  char_hidden_size,
                  transform_size,
                  tag_embedding_size,
-                 distance_embedding_size,
                  rnn_size,
                  arc_mlp_size,
                  label_mlp_size,
@@ -315,7 +314,6 @@ class DependencyNeuralModel(nn.Module):
         self.char_embedding_size = char_embedding_size
         self.char_hidden_size = char_hidden_size
         self.tag_embedding_size = tag_embedding_size
-        self.distance_embedding_size = distance_embedding_size
         self.transform_size = transform_size
         self.rnn_size = rnn_size
         self.arc_mlp_size = arc_mlp_size
@@ -593,58 +591,43 @@ class DependencyNeuralModel(nn.Module):
         return mlp
 
     def save(self, file):
-        pickle.dump(self.fixed_word_embeddings.weight.shape[0], file)
-        pickle.dump(self.fixed_word_embeddings.weight.shape[1], file)
-        dim = 0 if self.trainable_word_embeddings is None \
-            else self.trainable_word_embeddings.weight.shape[1]
-        pickle.dump(dim, file)
-        pickle.dump(self.char_embedding_size, file)
-        pickle.dump(self.tag_embedding_size, file)
-        pickle.dump(self.distance_embedding_size, file)
-        pickle.dump(self.char_hidden_size, file)
-        pickle.dump(self.transform_size, file)
-        pickle.dump(self.rnn_size, file)
-        pickle.dump(self.arc_mlp_size, file)
-        pickle.dump(self.tag_mlp_size, file)
-        pickle.dump(self.label_mlp_size, file)
-        pickle.dump(self.ho_mlp_size, file)
-        pickle.dump(self.rnn_layers, file)
-        pickle.dump(self.mlp_layers, file)
-        pickle.dump(self.dropout_rate, file)
-        pickle.dump(self.word_dropout_rate, file)
-        pickle.dump(self.predict_upos, file)
-        pickle.dump(self.predict_xpos, file)
-        pickle.dump(self.predict_morph, file)
-        pickle.dump(self.predict_lemma, file)
-        pickle.dump(self.predict_tree, file)
-        pickle.dump(self.model_type, file)
         torch.save(self.state_dict(), file)
 
+    def create_metadata(self):
+        """
+        Return a dictionary with metadata needed to reconstruct a serialized
+        model.
+        """
+        vocab, dim = self.fixed_word_embeddings.weight.shape
+        data = {'fixed_embedding_vocabulary': vocab,
+                'fixed_embedding_size': dim}
+
+        return data
+
     @classmethod
-    def load(cls, file, token_dictionary):
-        fixed_embedding_vocab_size = pickle.load(file)
-        fixed_embedding_size = pickle.load(file)
-        trainable_embedding_size = pickle.load(file)
-        char_embedding_size = pickle.load(file)
-        tag_embedding_size = pickle.load(file)
-        distance_embedding_size = pickle.load(file)
-        char_hidden_size = pickle.load(file)
-        transform_size = pickle.load(file)
-        rnn_size = pickle.load(file)
-        arc_mlp_size = pickle.load(file)
-        tag_mlp_size = pickle.load(file)
-        label_mlp_size = pickle.load(file)
-        ho_mlp_size = pickle.load(file)
-        rnn_layers = pickle.load(file)
-        mlp_layers = pickle.load(file)
-        dropout = pickle.load(file)
-        word_dropout = pickle.load(file)
-        predict_upos = pickle.load(file)
-        predict_xpos = pickle.load(file)
-        predict_morph = pickle.load(file)
-        predict_lemma = pickle.load(file)
-        predict_tree = pickle.load(file)
-        model_type = pickle.load(file)
+    def load(cls, torch_file, options, token_dictionary, metadata):
+        fixed_embedding_vocab_size = metadata['fixed_embedding_vocabulary']
+        fixed_embedding_size = metadata['fixed_embedding_size']
+        trainable_embedding_size = options.embedding_size
+        char_embedding_size = options.char_embedding_size
+        tag_embedding_size = options.tag_embedding_size
+        char_hidden_size = options.char_hidden_size
+        transform_size = options.transform_size
+        rnn_size = options.rnn_size
+        arc_mlp_size = options.arc_mlp_size
+        tag_mlp_size = options.tag_mlp_size
+        label_mlp_size = options.label_mlp_size
+        ho_mlp_size = options.ho_mlp_size
+        rnn_layers = options.rnn_layers
+        mlp_layers = options.mlp_layers
+        dropout = options.dropout
+        word_dropout = options.word_dropout
+        predict_upos = options.upos
+        predict_xpos = options.xpos
+        predict_morph = options.morph
+        predict_lemma = options.lemma
+        predict_tree = options.parse
+        model_type = options.model_type
 
         dummy_embeddings = np.empty([fixed_embedding_vocab_size,
                                      fixed_embedding_size], np.float32)
@@ -653,7 +636,6 @@ class DependencyNeuralModel(nn.Module):
             trainable_embedding_size,
             char_embedding_size,
             tag_embedding_size=tag_embedding_size,
-            distance_embedding_size=distance_embedding_size,
             char_hidden_size=char_hidden_size,
             transform_size=transform_size,
             rnn_size=rnn_size,
@@ -670,9 +652,9 @@ class DependencyNeuralModel(nn.Module):
             predict_tree=predict_tree)
 
         if model.on_gpu:
-            state_dict = torch.load(file)
+            state_dict = torch.load(torch_file)
         else:
-            state_dict = torch.load(file, map_location='cpu')
+            state_dict = torch.load(torch_file, map_location='cpu')
 
         # kind of a hack to allow compatibility with previous versions
         own_state_dict = model.state_dict()
