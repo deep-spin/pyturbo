@@ -113,9 +113,20 @@ class TurboParser(object):
         """
         self.has_pruner = bool(self.options.pruner_path)
 
-        if not self.options.model_type.first_order:
-            if self.options.parsing_loss == Objective.LOCAL:
-                msg = 'Local normalization not implemented for ' \
+        if self.options.model_type.first_order:
+            if self.options.num_jobs > 1:
+                msg = 'Number of parallel jobs > 1 only worth it with higher ' \
+                      'order models; setting it to 1'
+                logger.warning(msg)
+                self.options.num_jobs = 1
+
+            if self.has_pruner:
+                msg = 'Pruner set for arc-factored model. This is probably ' \
+                      'not necessary and inefficient'
+                logger.warning(msg)
+        else:
+            if self.options.parsing_loss != Objective.GLOBAL_MARGIN:
+                msg = 'Only global margin objective implemented for ' \
                       'higher order models'
                 logger.error(msg)
                 exit(1)
@@ -124,11 +135,6 @@ class TurboParser(object):
                 msg = 'Running higher-order model without pruner! ' \
                       'Parser may be very slow!'
                 logger.warning(msg)
-        elif self.options.num_jobs > 1:
-            msg = 'Number of parallel jobs > 1 only worth it with higher ' \
-                  'order models; setting it to 1'
-            logger.warning(msg)
-            self.options.num_jobs = 1
 
         if self.has_pruner:
             self.pruner = load_pruner(self.options.pruner_path)
