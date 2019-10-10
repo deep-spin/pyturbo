@@ -706,7 +706,7 @@ class TurboParser(object):
         :param output: dictionary mapping target names to predictions
         :return:
         """
-        for m in range(1, len(instance) - 1):
+        for m in range(1, len(instance)):
             if self.options.parse:
                 instance.heads[m] = output[Target.HEADS][m - 1]
                 relation = output[Target.RELATIONS][m - 1]
