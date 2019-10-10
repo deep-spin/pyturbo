@@ -668,10 +668,11 @@ class TurboParser(object):
             instance_data, single_root=self.options.single_root,
             num_jobs=self.options.num_jobs)
 
-        eos = self.token_dictionary.get_character_id(EOS)
-        empty = self.token_dictionary.get_character_id(EMPTY)
         if self.options.lemma:
             # if this model includes a lemmatizer, cut sequences at EOS
+            eos = self.token_dictionary.get_character_id(EOS)
+            empty = self.token_dictionary.get_character_id(EMPTY)
+
             for i in range(len(instance_data)):
                 lemma_prediction = predictions[i][Target.LEMMA]
                 lemmas = cut_sequences_at_eos(lemma_prediction, eos, empty)

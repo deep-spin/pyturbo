@@ -27,6 +27,13 @@ class ModelType(object):
         self.first_order = not any(
             [self.consecutive_siblings, self.grandparents, self.grandsiblings,
              self.arbitrary_siblings, self.head_bigrams, self.trisiblings])
+        self.code = '+'.join(sorted(codes))
+
+    def __str__(self):
+        return self.code
+
+    def __repr__(self):
+        return self.code
 
 
 class DependencyOptionParser(OptionParser):
