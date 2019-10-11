@@ -1,11 +1,11 @@
 from collections import defaultdict
 import ad3.factor_graph as fg
 from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
-    decode_matrix_tree, PFactorGrandparentHeadAutomaton
+    PFactorGrandparentHeadAutomaton
 import numpy as np
 import os
 from joblib import Parallel, delayed
-from scipy.special import logsumexp, softmax
+from scipy.special import logsumexp
 
 from ..classifier.utils import get_logger
 from .dependency_instance import DependencyInstance
@@ -110,6 +110,78 @@ def decode_predictions(predicted_parts=None, parts=None, head_score_matrix=None,
     return pred_heads, pred_labels
 
 
+def decode_matrix_tree(scores):
+    """
+    Compute the log-partition function and its gradients (marginal
+    probabilities) for non-projective dependency parser given a weighted
+    adjacency matrix `scores: head × modifier ↦ log-weight` (note: diagonal
+    ignored). Root should be counted as a possible head but not modifier.
+
+    Implementation adapted from Tim Vieira.
+    (https://github.com/timvieira/spanning_tree)
+
+    References
+    - Koo, Globerson, Carreras and Collins (EMNLP'07)
+      Structured Prediction Models via the Matrix-Tree Theorem
+      https://www.aclweb.org/anthology/D07-1015
+    - Smith and Smith (EMNLP'07)
+      Probabilistic Models of Nonprojective Dependency Trees
+      https://www.aclweb.org/anthology/D07-1014
+    - McDonald & Satta (IWPT'07)
+      https://www.aclweb.org/anthology/W07-2216
+
+    :return: a tuple (log_partition_function, marginals).
+        log_partition_function is a float
+        marginals is a matrix (head, modifier) with root included as head only
+    """
+    # split root from real words
+    r = scores[0]
+    A = scores[1:]
+
+    # Numerical stability trick: We use an extension of the log-sum-exp and
+    # exp-normalize tricks to our log-det-exp setting. [I haven't never seen
+    # this trick elsewhere.]
+    #
+    # Note: The `exp` function below is point-wise exponential, not the matrix
+    # exponential!
+    #
+    # for any value c,
+    #
+    #    log(det(exp(c) * exp(A - c)))
+    #     = log(exp(c)^n * det(exp(A - c)))
+    #     = c*n + log(det(exp(A - c)))
+    #
+    # Furthermore,
+    #
+    #    ∇ log(det(exp(c) * exp(A - c)))
+    #     = ∇ [ c*n + log(det(exp(A - c))) ]
+    #     = exp(A - c)⁻ᵀ
+    #
+    c = max(r.max(), A.max())
+
+    r = np.exp(r - c)
+    A = np.exp(A - c)
+    np.fill_diagonal(A, 0)
+
+    L = np.diag(A.sum(axis=0)) - A   # The Laplacian matrix of a graph
+    L[0, :] = r                      # Koo et al.'s efficiency trick
+
+    log_z = np.linalg.slogdet(L)[1] + c * len(r)
+
+    dL = np.linalg.inv(L).T
+    dr = r * dL[0, :]
+
+    dA = np.zeros_like(A)
+    num_tokens = len(r)
+    for h in range(num_tokens):
+        for m in range(num_tokens):
+            dA[h, m] = A[h, m] * (dL[m, m] * (m != 0) - dL[h, m] * (h != 0))
+
+    marginals = np.concatenate([dr.reshape([1, -1]), dA])
+
+    return log_z, marginals
+
+
 def decode_labels(parts, scores):
     """
     Take the highest scoring label for each part and their scores.
@@ -212,56 +284,50 @@ def decode_marginals(parts: DependencyParts, scores: dict) -> tuple:
     It considers a factorization into unlabeled and labeled parts.
 
     :param parts: list of dependency parts
-    :param scores: dictionary mapping target names to 1d numpy arrays
-        with part scores
-    :return: a tuple with an array with marginal scores for each part,
-        the log partition function and the entropy. The marginals contain
-        probabilities for arcs and labeled arcs, such that
-        sum(marginals[:num_arcs]) == 1 and sum(marginals[num_arcs:]) == 1
+    :param scores: dictionary mapping target names to arrays. Target.HEADS
+        should map to (head, modifier) and Target.RELATIONS to (head, modifier,
+        label). Both should only include root as a head.
+    :return: a tuple (head_marginals, label_marginals, log_partition, entropy)
+        log_partition and entropy are floats, the marginals are arrays with
+        the same shape as the scores.
     """
-    head_inds, modifier_inds = parts.get_arc_indices()
-    arcs = list(zip(head_inds, modifier_inds))
-
-    # if there are scores for labeled parts, add the partition function of the
-    # labels for each arc to the arc score itself
+    # (n + 1, n, labels)
     label_scores = scores[Target.RELATIONS]
+    # (n + 1, n)
+    arc_scores = scores[Target.HEADS]
 
-    # reshape as (num_arcs, num_relations)
-    label_scores = label_scores.reshape(-1, parts.num_relations)
-    label_partition_function = logsumexp(label_scores, 1)
-    arc_scores = scores[Target.HEADS] + label_partition_function
+    # add the label partition function for each arc to the arc score itself
+    label_z = logsumexp(label_scores, -1)
+    log_z, arc_marginals = decode_matrix_tree(arc_scores + label_z)
+
+    if np.any(arc_marginals < 0):
+        lowest = arc_marginals.min()
+        if lowest < -1e-6:
+            logger.warning('Negative arc marginal: .8f' % lowest)
+
+        arc_marginals[arc_marginals < 0] = 0.
 
     # label conditionals contain P(label | arc)
-    partition_function2d = label_partition_function.reshape(-1, 1)
-    label_conditionals = np.exp(label_scores - partition_function2d)
-
-    # create an index matrix such that masked out arcs have -1 and
-    # others have their corresponding position in the arc list
-    # matrix should be (h, m) including root
-    arc_index = parts.create_arc_index()
-    length = len(arc_index)
-    arc_marginals, log_partition, entropy = decode_matrix_tree(
-        length, arc_index, arcs, arc_scores)
-    arc_marginals = np.array(arc_marginals)
-    arc_marginals[arc_marginals < 0] = 0.
-
-    # the AD3 matrix tree implementation considers only unlabeled arcs
-    # we have to recompute the entropy considering the labeled arcs
+    # (operation equivalent to softmax)
+    # label_conditionals will be > 0 for (i, i), but when we compute the
+    # posterior it will be 0
+    label_z_3d = np.expand_dims(label_z, 2)
+    label_conditionals = np.exp(label_scores - label_z_3d)
 
     # label marginals are P(label | arc) * P(arc)
-    label_marginals = label_conditionals * arc_marginals.reshape(-1, 1)
-    entropy = log_partition - (label_scores * label_marginals).sum()
-    entropy -= arc_marginals.dot(scores[Target.HEADS])
+    label_marginals = label_conditionals * np.expand_dims(arc_marginals, 2)
+
+    # replace -inf with 0 to avoid nan and numpy warnings
+    arc_scores[np.isinf(arc_scores)] = 0.
+    entropy = log_z - (label_scores * label_marginals).sum() - \
+        (arc_scores * arc_marginals).sum()
 
     if entropy < 0:
         if entropy < -1e-6:
             logger.warning('Negative marginal entropy: %f' % entropy)
         entropy = 0.
 
-    label_marginals = label_marginals.reshape(-1)
-    marginals = np.concatenate([arc_marginals, label_marginals])
-
-    return marginals, log_partition, entropy
+    return arc_marginals, label_marginals, log_z, entropy
 
 
 def generate_arc_mask(parts, scores, max_heads, threshold=None):
