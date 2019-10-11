@@ -496,12 +496,14 @@ class DependencyNeuralScorer(object):
         return output
 
     def initialize(self, model, parsing_loss=Objective.GLOBAL_MARGIN,
-                   learning_rate=0.001, decay=1, beta1=0.9, beta2=0.95):
+                   learning_rate=0.001, decay=1, beta1=0.9, beta2=0.95,
+                   l2_regularizer=0):
         self.set_model(model)
         self.parsing_loss = parsing_loss
         params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = optim.Adam(
-            params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6)
+            params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6,
+            weight_decay=l2_regularizer)
         self.decay = decay
 
     def set_model(self, model):

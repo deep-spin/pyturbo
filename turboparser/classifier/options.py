@@ -53,9 +53,8 @@ class OptionParser(object):
                             help='''Number of evaluations without 
                             improvement in the validation set to wait before 
                             terminating training.''')
-        parser.add_argument('--regularization_constant', type=float,
-                            default=1e12,
-                            help='Regularization parameter C.')
+        parser.add_argument('--l2', type=float, default=0.,
+                            help='L2 regularization constant')
         parser.add_argument('--batch_size', type=int, default=3000,
                             help='Number of words per batch')
         parser.add_argument('-v', '--verbose', action='store_true',
