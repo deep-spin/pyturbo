@@ -352,6 +352,7 @@ def generate_arc_mask(scores: dict, max_heads: int, threshold: float = None):
     marginals, _,  _, entropy = decode_marginals(scores)
     # easier to work with (head, modifier)
     marginals = marginals.T
+    n = len(marginals)
 
     # max_marginals contains the highest probability head for each word
     max_marginals = marginals.max(0)
@@ -377,6 +378,9 @@ def generate_arc_mask(scores: dict, max_heads: int, threshold: float = None):
 
     # allow all heads where all had 0 probability (anything goes!)
     mask[:, invalid] = True
+
+    # mask is expected to be (n + 1, n + 1)
+    mask = np.concatenate([np.zeros([n, 1], dtype=np.bool), mask], 1)
 
     return mask, entropy
 

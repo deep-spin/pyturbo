@@ -688,23 +688,25 @@ class DependencyNeuralModel(nn.Module):
         s2 = self.dropout(states)
         label_scores = self.label_scorer(s1, s2)
 
-        # set arc scores from each word to itself as -inf
-        diag = torch.eye(max_sent_size, device=states.device).bool()
-        diag = diag.unsqueeze(0)
-        head_scores.masked_fill_(diag, -np.inf)
+        if normalization == ParsingObjective.LOCAL:
+            # set arc scores from each word to itself as -inf
+            # structured models don't need it as these arcs are never predicted
+            diag = torch.eye(max_sent_size, device=states.device).bool()
+            diag = diag.unsqueeze(0)
+            head_scores.masked_fill_(diag, -np.inf)
+
+            # set padding head scores to -inf
+            # during training, label loss is computed with respect to the gold
+            # arcs, so there's no need to set -inf scores to invalid positions
+            # in label scores.
+            padding_mask = create_padding_mask(lengths)
+            head_scores = head_scores.masked_fill(padding_mask.unsqueeze(1),
+                                                  -np.inf)
 
         if self.training and normalization == ParsingObjective.GLOBAL_MARGIN:
             dev = head_scores.device
             head_scores += gumbel.sample(head_scores.shape).to(dev)
             label_scores += gumbel.sample(label_scores.shape).to(dev)
-
-        # set padding head scores to -inf
-        # during training, label loss is computed with respect to the gold
-        # arcs, so there's no need to set -inf scores to invalid positions
-        # in label scores.
-        padding_mask = create_padding_mask(lengths)
-        head_scores = head_scores.masked_fill(padding_mask.unsqueeze(1),
-                                              -np.inf)
 
         # linearization (scoring heads after/before modifier)
         arange = torch.arange(max_sent_size, device=states.device)

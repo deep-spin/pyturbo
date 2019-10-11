@@ -77,6 +77,12 @@ class TurboParser(object):
                 logger.debug('Model summary:')
                 logger.debug(str(model))
 
+    def set_as_pruner(self):
+        """Set this model to be used as a pruner"""
+        self.options.train = False
+        self.options.parsing_loss = Objective.GLOBAL_PROBABILITY
+        self.neural_scorer.parsing_loss = Objective.GLOBAL_PROBABILITY
+
     def _create_random_embeddings(self):
         """
         Create random embeddings for the vocabulary of the token dict.
@@ -165,9 +171,12 @@ class TurboParser(object):
             self.neural_scorer.model.save(f)
 
     @classmethod
-    def load(cls, options):
+    def load(cls, options=None, path=None):
         """Load the full configuration and model."""
-        with open(options.model_path, 'rb') as f:
+        if path is None:
+            path = options.model_path
+
+        with open(path, 'rb') as f:
             data = pickle.load(f)
             loaded_options = data['options']
             token_dictionary = data['dictionary']
@@ -175,21 +184,24 @@ class TurboParser(object):
             model = DependencyNeuralModel.load(
                 f, loaded_options, token_dictionary, model_metadata)
 
-        options.model_type = loaded_options.model_type
-        options.unlabeled = loaded_options.unlabeled
-        options.morph = loaded_options.morph
-        options.xpos = loaded_options.xpos
-        options.upos = loaded_options.upos
-        options.lemma = loaded_options.lemma
-        options.parse = loaded_options.parse
-        options.parsing_loss = loaded_options.parsing_loss
+        if options is None:
+            options = loaded_options
+        else:
+            options.model_type = loaded_options.model_type
+            options.unlabeled = loaded_options.unlabeled
+            options.morph = loaded_options.morph
+            options.xpos = loaded_options.xpos
+            options.upos = loaded_options.upos
+            options.lemma = loaded_options.lemma
+            options.parse = loaded_options.parse
+            options.parsing_loss = loaded_options.parsing_loss
 
-        # threshold for the basic pruner, if used
-        options.pruner_posterior_threshold = \
-            loaded_options.pruner_posterior_threshold
+            # threshold for the basic pruner, if used
+            options.pruner_posterior_threshold = \
+                loaded_options.pruner_posterior_threshold
 
-        # maximum candidate heads per word in the basic pruner, if used
-        options.pruner_max_heads = loaded_options.pruner_max_heads
+            # maximum candidate heads per word in the basic pruner, if used
+            options.pruner_max_heads = loaded_options.pruner_max_heads
 
         parser = TurboParser(options)
         parser.neural_scorer.set_model(model)
@@ -261,7 +273,7 @@ class TurboParser(object):
 
         return masks
 
-    def prune_batch(self, instance_data):
+    def prune_batch(self, instance_data: InstanceData):
         """
         Prune out some possible arcs in the given instances.
 
@@ -283,23 +295,6 @@ class TurboParser(object):
 
         # scores is a dictionary mapping [target] -> (batch, scores)
         for i, instance_scores in enumerate(scores):
-            instance_parts = instance_data.parts[i]
-
-            if pruner.options.parsing_loss == Objective.LOCAL:
-                # if the pruner was trained with local normalization, its output
-                # for arcs is a (n - 1, n) matrix. Convert it to a list of part
-                # scores. First, transpose (modifier, head) to (head, modifier)
-                head_scores = instance_scores[Target.HEADS].T
-                label_scores = instance_scores[Target.RELATIONS].\
-                    transpose(1, 0, 2)
-
-                # the existing mask only masks out self attachments and root
-                # attachments. It is useful to turn a matrix into a vector.
-                # the first column in the mask is removed to match (n - 1, n)
-                mask = instance_parts.arc_mask[:, 1:]
-                instance_scores[Target.HEADS] = head_scores[mask]
-                instance_scores[Target.RELATIONS] = label_scores[mask].\
-                    reshape(-1)
 
             new_mask, entropy = decoding.generate_arc_mask(
                 instance_scores, self.options.pruner_max_heads,
@@ -757,12 +752,8 @@ def load_pruner(model_path):
     configurations separate.
     """
     logger.info('Loading pruner from %s' % model_path)
-    with open(model_path, 'rb') as f:
-        pruner_options = pickle.load(f)
-
-    pruner_options.train = False
-    pruner_options.model_path = model_path
-    pruner = TurboParser.load(pruner_options)
+    pruner = TurboParser.load(path=model_path)
+    pruner.set_as_pruner()
 
     return pruner
 
