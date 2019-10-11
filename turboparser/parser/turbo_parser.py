@@ -302,7 +302,7 @@ class TurboParser(object):
                     reshape(-1)
 
             new_mask, entropy = decoding.generate_arc_mask(
-                instance_parts, instance_scores, self.options.pruner_max_heads,
+                instance_scores, self.options.pruner_max_heads,
                 self.options.pruner_posterior_threshold)
 
             if self.options.train:

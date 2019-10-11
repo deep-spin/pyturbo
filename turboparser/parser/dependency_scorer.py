@@ -63,8 +63,51 @@ class DependencyNeuralScorer(object):
         self.time_decoding = 0.
         self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
 
-    def compute_loss_global(self, instance_data: InstanceData,
-                            predicted_parts: list) -> dict:
+    def compute_loss_global_probability(
+            self, instance_data: InstanceData, predictions: list,
+            gold_heads: torch.tensor, gold_labels: torch.tensor):
+        """
+        Compute the loss for a parser model training with global cross-entropy.
+
+        :param predictions: list of (head_marginals, label_marginals)
+        """
+        num_instances = len(instance_data)
+        head_scores = self.model.scores[Target.HEADS]
+        label_scores = self.model.scores[Target.RELATIONS]
+
+        # create a single tensor with all predicted probabilities for all arcs
+        head_diff = torch.zeros_like(head_scores)
+        label_diff = torch.zeros_like(label_scores)
+        for i in range(num_instances):
+            arc_marginals, label_marginals = predictions[i]
+            arc_marginals = torch.tensor(arc_marginals,
+                                         device=head_scores.device)
+            label_marginals = torch.tensor(label_marginals,
+                                           device=label_scores.device)
+            n, m = arc_marginals.shape
+            gold_heads_i = gold_heads[i, :n]
+            gold_labels_i = gold_labels[i, :n]
+
+            head_diff[i, :n, :m] = arc_marginals
+            head_diff[i, torch.arange(n), gold_heads_i] -= 1
+            label_diff[i, :n, :m] = label_marginals
+            label_diff[i, torch.arange(n), gold_heads_i, gold_labels_i] -= 1
+
+        # entropy is (batch_size,)
+        entropy = torch.tensor(self.entropies, dtype=torch.float,
+                               device=head_scores.device)
+
+        head_term = torch.sum(head_scores * head_diff, 2).sum(1)
+        label_term = torch.sum(label_scores * label_diff, 3).sum(2).sum(1)
+        losses = entropy + head_term + label_term
+
+        check_negative_loss(losses)
+        losses = {Target.DEPENDENCY_PARTS: losses.mean()}
+
+        return losses
+
+    def compute_loss_global_margin(self, instance_data: InstanceData,
+                                   predicted_parts: list) -> dict:
         """
         Compute the loss for either a hinge loss based or cross-entropy based
         parser model that considers the whole tree structure.
@@ -92,36 +135,27 @@ class DependencyNeuralScorer(object):
         diff = predicted_parts - gold_parts
         scores_times_diff = torch.sum(part_scores * diff, 1)
 
-        if self.parsing_loss == Objective.GLOBAL_MARGIN:
-            losses = scores_times_diff
-        elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
-            # entropy is (batch_size,)
-            entropy = torch.tensor(self.entropies, dtype=torch.float,
-                                   device=part_scores.device)
-            losses = entropy + scores_times_diff
-        else:
-            raise ValueError('Unknown parsing objective %s' % self.parsing_loss)
+        # if self.parsing_loss == Objective.GLOBAL_MARGIN:
+        losses = scores_times_diff
+        # elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+        #     entropy = torch.tensor(self.entropies, dtype=torch.float,
+        #                            device=part_scores.device)
+        #     losses = entropy + scores_times_diff
+        # else:
+        #     raise ValueError('Unknown parsing objective %s' % self.parsing_loss)
 
-        inds_subzero = losses < 0
-        if inds_subzero.sum().item():
-            values = losses[inds_subzero]
-            for value in values:
-                value = value.item()
-                if value < -1e-6:
-                    logger.warning('Ignoring negative loss: %.6f' % value)
-            losses[inds_subzero] = 0
-
+        check_negative_loss(losses)
         losses = {Target.DEPENDENCY_PARTS: losses.mean()}
 
         return losses
 
-    def compute_loss(self, instance_data, predicted_parts=None):
+    def compute_loss(self, instance_data, predictions=None):
         """
         Compute the losses for parsing and tagging. The appropriate function
         will be called depending on local or global normalization.
 
         :param instance_data: InstanceData object
-        :param predicted_parts: list of numpy arrays with predicted parts for
+        :param predictions: list of numpy arrays with predicted parts for
             each instance
         :return: dictionary mapping each target to a loss scalar, as a torch
             variable
@@ -131,12 +165,18 @@ class DependencyNeuralScorer(object):
 
         if self.model.predict_tree:
             # loss for dependency parsing
-            gold_heads, gold_relations = get_gold_tensors(instance_data)
-            if self.parsing_loss in structured_objectives:
-                dep_losses = self.compute_loss_global(instance_data,
-                                                      predicted_parts)
+            gold_heads, gold_labels = get_gold_tensors(instance_data)
+
+            if self.parsing_loss == Objective.GLOBAL_MARGIN:
+                dep_losses = self.compute_loss_global_margin(instance_data,
+                                                             predictions)
+
+            elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                dep_losses = self.compute_loss_global_probability(
+                    instance_data, predictions, gold_heads, gold_labels)
+
             elif self.parsing_loss == Objective.LOCAL:
-                dep_losses = self.compute_loss_local(gold_heads, gold_relations)
+                dep_losses = self.compute_loss_local(gold_heads, gold_labels)
 
             else:
                 msg = 'Unknown parsing loss: %s' % self.parsing_loss
@@ -270,34 +310,6 @@ class DependencyNeuralScorer(object):
 
         return losses
 
-    # def compute_scores(self, instance_data):
-    #     """
-    #     Compute the scores for all the targets this scorer
-    #
-    #     :param instance_data: InstanceData
-    #     :return: a list of dictionaries mapping each target name to its scores
-    #     """
-    #     model_scores = self.model(instance_data.instances, instance_data.parts,
-    #                               self.parsing_loss)
-    #
-    #     detached_scores = {}
-    #     for target in model_scores:
-    #         # distance and higher order scores are not necessary outside
-    #         # the graph
-    #         if target == Target.DISTANCE or target == Target.SIGN:
-    #             continue
-    #
-    #         value = model_scores[target]
-    #         if isinstance(value, torch.Tensor):
-    #             value = value.detach().cpu()
-    #         elif isinstance(value, list):
-    #             # structured prediction stores part lists of different sizes
-    #             value = [item.detach().cpu() for item in value]
-    #
-    #         detached_scores[target] = value
-    #
-    #     return detached_scores
-
     def predict(self, instance_data: InstanceData, decode_tree: bool = True,
                 single_root: bool = True, training: bool = False,
                 num_jobs: int = 1):
@@ -315,10 +327,13 @@ class DependencyNeuralScorer(object):
             if parsing and decode_tree is True
         :param num_jobs: in case of higher order dependency decoding, number of
             parallel jobs to launch
-        :return: If training is True, return only the predicted parts. It is a
-            list of predicted values for the parts of the dependency tree if
-            the model is trained for parsing with a structured objective, and
-            None otherwise.
+        :return: If training is True:
+            if there is no parser model: None
+            if the parsing objective is local: None
+            if the parsing objective is global structure:  list of predicted
+                values for the parts of the dependency tree
+            if the parsing objective is global probability: list of tuples of
+                2d arrays with arc and label marginals for each sentence
 
             If training is False, return a list of dictionaries, one for each
             instance, mapping Targets to predictions.
@@ -339,7 +354,6 @@ class DependencyNeuralScorer(object):
         head_scores = None
         label_scores = None
         best_labels = None
-        predicted_parts = None
         num_instances = len(instance_data)
         if self.parsing_loss == Objective.GLOBAL_PROBABILITY:
             self.entropies = []
@@ -379,38 +393,47 @@ class DependencyNeuralScorer(object):
                 label_scores = scores[Target.RELATIONS].cpu().numpy()
                 best_labels = label_scores.argmax(-1)
 
-            elif decode_tree:
-                # structured parsing, decode parts for all sentences
+            elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                head_scores = scores[Target.HEADS].detach().cpu().numpy()
+                label_scores = scores[Target.RELATIONS].detach().cpu().numpy()
+
+                predicted = []
+                best_labels = []
                 start_decoding = time.time()
-                part_scores = [{target: part_scores[target][i]
-                                for target in part_scores}
-                               for i in range(num_instances)]
-
-                if self.parsing_loss == Objective.GLOBAL_MARGIN:
-                    predicted_parts = decoding.batch_decode(
-                        instance_data, part_scores, num_jobs)
-
-                elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
-                    predicted_parts = []
-                    for i in range(num_instances):
-                        instance_parts = instance_data.parts[i]
-                        instance_scores = part_scores[i]
-                        result = decoding.decode_marginals(
-                            instance_parts, instance_scores)
-                        instance_prediction, _, entropy = result
-                        predicted_parts.append(instance_prediction)
-                        self.entropies.append(entropy)
+                # decode marginal probabilities
+                for i in range(num_instances):
+                    # TODO: simplify and remove repeated code
+                    n = len(instance_data.instances[i])
+                    instance_scores = {
+                        Target.HEADS: head_scores[i, :n - 1, :n],
+                        Target.RELATIONS: label_scores[i, :n - 1, :n]}
+                    result = decoding.decode_marginals(instance_scores)
+                    head_marginals, label_marginals, _, entropy = result
+                    predicted.append((head_marginals, label_marginals))
+                    best_labels.append(label_marginals.argmax(-1))
+                    self.entropies.append(entropy)
 
                 end_decoding = time.time()
                 self.time_decoding += end_decoding - start_decoding
 
             else:
-                # structured parsing, but only interested in scores
-                head_scores = part_scores[Target.HEADS]
-                label_scores = part_scores[Target.RELATIONS]
+                # Global margin objective
+                start_decoding = time.time()
+                part_scores = [{target: part_scores[target][i]
+                                for target in part_scores}
+                               for i in range(num_instances)]
+                predicted = decoding.batch_decode(
+                    instance_data, part_scores, num_jobs)
+                end_decoding = time.time()
+                self.time_decoding += end_decoding - start_decoding
 
         if training:
-            return predicted_parts
+            return predicted
+
+        if not decode_tree and self.parsing_loss == Objective.GLOBAL_MARGIN:
+            msg = 'Scorer called at inference time with a global margin ' \
+                  'objective but decode_tree=False; will decode anyway'
+            logger.warning(msg)
 
         # now create a list with a dictionary for each instance
         for i in range(num_instances):
@@ -423,44 +446,50 @@ class DependencyNeuralScorer(object):
                     instance_output[target] = target_prediction[i][:length]
 
             if parse:
-                if predicted_parts is not None:
-                    instance_predicted_parts = predicted_parts[i]
+                if self.parsing_loss == Objective.GLOBAL_MARGIN:
+                    instance_prediction = predicted[i]
                     instance_output[Target.DEPENDENCY_PARTS] = \
-                        instance_predicted_parts
-                else:
-                    instance_output[Target.DEPENDENCY_PARTS] = None
+                        instance_prediction
+                    instance_parts = instance_data.parts[i]
+                    heads, labels = decoding.decode_predictions(
+                        instance_prediction, instance_parts,
+                        single_root=single_root)
+                    instance_output[Target.HEADS] = heads
+                    instance_output[Target.RELATIONS] = labels
 
-                if decode_tree:
-                    if predicted_parts is not None:
-                        # global objective
-                        instance_predicted_parts = predicted_parts[i]
-                        instance_parts = instance_data.parts[i]
+                elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
+                    instance_output[Target.DEPENDENCY_PARTS] = None
+                    instance_head_scores = predicted[i][0]
+                    instance_best_labels = best_labels[i]
+                    if decode_tree:
                         heads, labels = decoding.decode_predictions(
-                            instance_predicted_parts, instance_parts,
+                            head_score_matrix=instance_head_scores,
+                            label_matrix=instance_best_labels,
                             single_root=single_root)
+                        instance_output[Target.HEADS] = heads
+                        instance_output[Target.RELATIONS] = labels
                     else:
-                        instance_head_scores = head_scores[
-                                           i, :length - 1, :length]
+                        instance_output[Target.HEADS] = instance_head_scores
+                        instance_output[Target.RELATIONS] = predicted[i][1]
+
+                elif self.parsing_loss == Objective.LOCAL:
+                    instance_output[Target.DEPENDENCY_PARTS] = None
+                    instance_head_scores = head_scores[
+                                       i, :length - 1, :length]
+
+                    if decode_tree:
                         instance_best_labels = best_labels[
                                            i, :length - 1, :length]
                         heads, labels = decoding.decode_predictions(
                             head_score_matrix=instance_head_scores,
                             label_matrix=instance_best_labels,
                             single_root=single_root)
-
-                    instance_output[Target.HEADS] = heads
-                    instance_output[Target.RELATIONS] = labels
-
-                else:
-                    # don't decode; only store parsing scores
-                    if self.parsing_loss == Objective.LOCAL:
-                        instance_output[Target.HEADS] = head_scores[
-                                           i, :length - 1, :length]
+                        instance_output[Target.HEADS] = heads
+                        instance_output[Target.RELATIONS] = labels
+                    else:
+                        instance_output[Target.HEADS] = instance_head_scores
                         instance_output[Target.RELATIONS] = label_scores[
                                            i, :length - 1, :length]
-                    else:
-                        instance_output[Target.HEADS] = head_scores[i]
-                        instance_output[Target.RELATIONS] = label_scores[i]
 
             output.append(instance_output)
 
@@ -538,3 +567,15 @@ def pad_labels(labels):
         padded = padded.cuda()
 
     return padded
+
+
+def check_negative_loss(losses):
+    """Checks if loss values are negative and set them to 0"""
+    inds_subzero = losses < 0
+    if inds_subzero.sum().item():
+        values = losses[inds_subzero]
+        for value in values:
+            value = value.item()
+            if value < -1e-6:
+                logger.warning('Ignoring negative loss: %.6f' % value)
+        losses[inds_subzero] = 0
