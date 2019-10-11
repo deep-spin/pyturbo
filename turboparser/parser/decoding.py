@@ -302,7 +302,7 @@ def decode_marginals(scores: dict) -> tuple:
     if np.any(arc_marginals < 0):
         lowest = arc_marginals.min()
         if lowest < -1e-6:
-            logger.warning('Negative arc marginal: .8f' % lowest)
+            logger.warning('Negative arc marginal: %.8f' % lowest)
 
         arc_marginals[arc_marginals < 0] = 0.
 
