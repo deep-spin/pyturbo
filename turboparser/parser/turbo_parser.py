@@ -535,7 +535,7 @@ class TurboParser(object):
         Reset some variables used to keep track of training performance.
         """
         self.num_train_instances = 0
-        self.time_scores = 0
+        self.neural_scorer.time_scoring = 0
         self.time_gradient = 0
         self.neural_scorer.time_decoding = 0
         self.train_losses = defaultdict(float)
@@ -645,7 +645,8 @@ class TurboParser(object):
         logger.info('\t'.join(msgs))
 
         time_msg = 'Time to score: %.2f\tDecode: %.2f\tGradient step: %.2f'
-        time_msg %= (self.time_scores, self.neural_scorer.time_decoding,
+        time_msg %= (self.neural_scorer.time_scoring,
+                     self.neural_scorer.time_decoding,
                      self.time_gradient)
         logger.info(time_msg)
 
@@ -686,11 +687,8 @@ class TurboParser(object):
         '''
         self.neural_scorer.train_mode()
 
-        start_time = time.time()
         predictions = self.neural_scorer.predict(
             instance_data, num_jobs=self.options.num_jobs, training=True)
-        end_time = time.time()
-        self.time_scores += end_time - start_time
 
         # run the gradient step for the whole batch
         start_time = time.time()

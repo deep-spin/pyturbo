@@ -61,6 +61,7 @@ class DependencyNeuralScorer(object):
         self.part_scores = None
         self.model = None
         self.time_decoding = 0.
+        self.time_scoring = 0.
         self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
 
     def compute_loss_global_probability(
@@ -340,9 +341,11 @@ class DependencyNeuralScorer(object):
         """
         # scores is a dict[Target] -> batched arrays
         context = suppress if training else torch.no_grad
+        start_scoring = time.time()
         with context():
             scores = self.model(instance_data.instances, instance_data.parts,
                                 self.parsing_loss)
+        self.time_scoring += time.time() - start_scoring
 
         parse = Target.HEADS in scores
         if training and (not parse or self.parsing_loss == Objective.LOCAL):
@@ -434,6 +437,7 @@ class DependencyNeuralScorer(object):
             msg = 'Scorer called at inference time with a global margin ' \
                   'objective but decode_tree=False; will decode anyway'
             logger.warning(msg)
+            decode_tree = True
 
         # now create a list with a dictionary for each instance
         for i in range(num_instances):
@@ -451,45 +455,39 @@ class DependencyNeuralScorer(object):
                     instance_output[Target.DEPENDENCY_PARTS] = \
                         instance_prediction
                     instance_parts = instance_data.parts[i]
-                    heads, labels = decoding.decode_predictions(
-                        instance_prediction, instance_parts,
-                        single_root=single_root)
-                    instance_output[Target.HEADS] = heads
-                    instance_output[Target.RELATIONS] = labels
+                    instance_head_scores = None
+                    instance_best_labels = None
 
                 elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
                     instance_output[Target.DEPENDENCY_PARTS] = None
+                    instance_prediction = None
+                    instance_parts = None
                     instance_head_scores = predicted[i][0]
                     instance_best_labels = best_labels[i]
-                    if decode_tree:
-                        heads, labels = decoding.decode_predictions(
-                            head_score_matrix=instance_head_scores,
-                            label_matrix=instance_best_labels,
-                            single_root=single_root)
-                        instance_output[Target.HEADS] = heads
-                        instance_output[Target.RELATIONS] = labels
-                    else:
-                        instance_output[Target.HEADS] = instance_head_scores
-                        instance_output[Target.RELATIONS] = predicted[i][1]
+                    instance_label_scores = predicted[i][1]
 
                 elif self.parsing_loss == Objective.LOCAL:
                     instance_output[Target.DEPENDENCY_PARTS] = None
+                    instance_parts = None
+                    instance_prediction = None
                     instance_head_scores = head_scores[
                                        i, :length - 1, :length]
+                    instance_label_scores = label_scores[
+                                           i, :length - 1, :length]
+                    instance_best_labels = best_labels[i]
 
-                    if decode_tree:
-                        instance_best_labels = best_labels[
-                                           i, :length - 1, :length]
-                        heads, labels = decoding.decode_predictions(
-                            head_score_matrix=instance_head_scores,
-                            label_matrix=instance_best_labels,
-                            single_root=single_root)
-                        instance_output[Target.HEADS] = heads
-                        instance_output[Target.RELATIONS] = labels
-                    else:
-                        instance_output[Target.HEADS] = instance_head_scores
-                        instance_output[Target.RELATIONS] = label_scores[
-                                           i, :length - 1, :length]
+                if decode_tree:
+                    start_decoding = time.time()
+                    heads, labels = decoding.decode_predictions(
+                        instance_prediction, instance_parts,
+                        instance_head_scores, instance_best_labels,
+                        single_root)
+                    self.time_decoding += time.time() - start_decoding
+                    instance_output[Target.HEADS] = heads
+                    instance_output[Target.RELATIONS] = labels
+                else:
+                    instance_output[Target.HEADS] = instance_head_scores
+                    instance_output[Target.RELATIONS] = instance_label_scores
 
             output.append(instance_output)
 
