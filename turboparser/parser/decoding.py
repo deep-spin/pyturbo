@@ -171,11 +171,10 @@ def decode_matrix_tree(scores):
     dL = np.linalg.inv(L).T
     dr = r * dL[0, :]
 
-    dA = np.zeros_like(A)
     num_tokens = len(r)
-    for h in range(num_tokens):
-        for m in range(num_tokens):
-            dA[h, m] = A[h, m] * (dL[m, m] * (m != 0) - dL[h, m] * (h != 0))
+    h = np.arange(num_tokens)
+    m = np.arange(num_tokens)
+    dA = A * (dL[m, m] * (m != 0) - dL * (h.reshape(-1, 1) != 0))
 
     marginals = np.concatenate([dr.reshape([1, -1]), dA])
 
