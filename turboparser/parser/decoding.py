@@ -556,7 +556,7 @@ class FactorGraph(object):
                 if len(incoming_arcs) == 0:
                     # no grandparent structure; create simple head automaton
                     self._create_head_automata(
-                        [siblings_structure], self.graph, variables, decreasing)
+                        [siblings_structure], variables, decreasing)
                     continue
 
                 outgoing_var_inds = [self.arc_index[arc[0], arc[1]]
