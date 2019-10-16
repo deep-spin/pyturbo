@@ -7,8 +7,6 @@ from .constants import Target, target2string, ParsingObjective as Objective
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
 from . import decoding
-from .decoding import chu_liu_edmonds_one_root, make_score_matrix, \
-    chu_liu_edmonds
 from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
@@ -107,7 +105,6 @@ class TurboParser(object):
         else:
             words = None
             embeddings = None
-        logger.info('Loaded')
 
         return words, embeddings
 
