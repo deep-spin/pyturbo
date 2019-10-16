@@ -53,7 +53,7 @@ string2objective = {'local': ParsingObjective.LOCAL,
 ROOT = '_root_'
 UNKNOWN = '_unknown_'
 PADDING = '_padding_'
-EMPTY = '_'
+EMPTY = '_empty_'
 SPECIAL_SYMBOLS = [PADDING, UNKNOWN, EMPTY, ROOT]
 
 BOS = '_bos_'

@@ -69,6 +69,8 @@ class DependencyInstanceNumeric(DependencyInstance):
 
             # POS tag.
             tag = instance.upos[i]
+            if tag == '_':
+                tag = EMPTY
             id_ = token_dictionary.get_upos_id(tag)
             self.upos[i] = id_
 

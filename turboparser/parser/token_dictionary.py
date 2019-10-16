@@ -226,14 +226,17 @@ class TokenDictionary(Dictionary):
 
                     # POS tags
                     tag = instance.get_upos(i)
-                    upos_counts[tag] += 1
+                    if tag != '_':
+                        # tag _ is represented by EMPTY and added anyway
+                        upos_counts[tag] += 1
 
                     tag = instance.get_xpos(i)
-                    xpos_counts[tag] += 1
+                    if tag != '_':
+                        xpos_counts[tag] += 1
 
                     # Morph features
                     morph_singleton = instance.get_morph_singleton(i)
-                    if morph_singleton != EMPTY:
+                    if morph_singleton != '_':
                         self.morph_singleton_alphabet.insert(morph_singleton)
 
                         # Add each key/value UFeats pair
