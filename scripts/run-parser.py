@@ -1,13 +1,9 @@
-import logging
 import torch
 import random
 import numpy as np
 
 from turboparser.parser import DependencyOptionParser, TurboParser
-from turboparser.classifier.utils import get_logger
-
-
-logger = get_logger()
+from turboparser.classifier.utils import get_logger, configure_logger
 
 
 def main():
@@ -15,6 +11,8 @@ def main():
     # Parse arguments.
     option_parser = DependencyOptionParser()
     options = option_parser.parse_args()
+
+    configure_logger(options.verbose)
     set_seeds(options.seed)
 
     if options.train:
@@ -32,6 +30,7 @@ def set_seeds(seed):
 
 
 def train_parser(options):
+    logger = get_logger()
     logger.info('Starting parser in training mode')
     dependency_parser = TurboParser(options)
     log_options(dependency_parser)
@@ -39,6 +38,7 @@ def train_parser(options):
 
 
 def test_parser(options):
+    logger = get_logger()
     logger.info('Starting parser in inference mode')
     dependency_parser = TurboParser.load(options)
     log_options(dependency_parser)
@@ -47,8 +47,9 @@ def test_parser(options):
 
 def log_options(parser):
     """Log parser options"""
+    logger = get_logger()
     msg = 'Parser options: ' + str(parser.options)
-    logger.info(msg)
+    logger.debug(msg)
 
 
 if __name__ == '__main__':

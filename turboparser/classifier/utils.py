@@ -23,25 +23,48 @@ def nearly_zero_tol(a, tol):
     return (a <= tol) and (a >= -tol)
 
 
-def get_logger():
-    '''
-    Return the default logger used by Turbo Parser.
-    '''
-    global logger
-    if logger is not None:
-        return logger
+def configure_logger(verbose):
+    """Configure the log to be used by Turbo Parser"""
+    level = logging.DEBUG if verbose else logging.INFO
+    # logging.basicConfig(level=level)
 
     logger = logging.getLogger('TurboParser')
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(level)
     formatter = logging.Formatter('[%(asctime)s] %(message)s',
                                   datefmt="%Y-%m-%d %H:%M:%S")
     handler = logging.StreamHandler()
-    handler.setLevel(logging.DEBUG)
+    handler.setLevel(level)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.propagate = False
+
+
+def create_logger(verbose):
+    """Create a log to be used by Turbo Parser"""
+    global logger
+    if logger is not None:
+        logging.warning('Trying to create logger, but one already exists')
+        return logger
+
+    level = logging.DEBUG if verbose else logging.INFO
+    logger = logging.getLogger('TurboParser')
+    logger.setLevel(level)
+    formatter = logging.Formatter('[%(asctime)s] %(message)s',
+                                  datefmt="%Y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.propagate = False
 
     return logger
+
+
+def get_logger():
+    '''
+    Return the default logger used by Turbo Parser.
+    '''
+    return logging.getLogger('TurboParser')
 
 
 def read_embeddings(path, extra_symbols=None, max_words=1000000):

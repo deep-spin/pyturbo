@@ -307,15 +307,15 @@ class TokenDictionary(Dictionary):
         #     self.embedding_alphabet.insert(new_word)
         self.pretrain_alphabet.stop_growth()
 
-        logger.info('Number of characters: %d' % len(self.character_alphabet))
-        logger.info('Number of pretrained embedding forms: %d' %
+        logger.debug('Number of characters: %d' % len(self.character_alphabet))
+        logger.debug('Number of pretrained embedding forms: %d' %
                      len(self.pretrain_alphabet))
-        logger.info('Number of forms: %d' % len(self.form_alphabet))
-        logger.info('Number of lemmas: %d' % len(self.lemma_alphabet))
-        logger.info('Number of coarse POS tags: %d' % len(self.upos_alphabet))
-        logger.info('Number of fine POS tags: %d' %
-                     len(self.xpos_alphabet))
-        logger.info('Number of morph singletons (combination of morph tags '
+        logger.debug('Number of forms: %d' % len(self.form_alphabet))
+        logger.debug('Number of lemmas: %d' % len(self.lemma_alphabet))
+        logger.debug('Number of coarse POS tags: %d' % len(self.upos_alphabet))
+        logger.debug('Number of fine POS tags: %d' %
+                      len(self.xpos_alphabet))
+        logger.debug('Number of morph singletons (combination of morph tags '
                      'seen in data): %d' % len(self.morph_singleton_alphabet))
-        logger.info('Number of dependency relations: %d' %
+        logger.debug('Number of dependency relations: %d' %
                      len(self.deprel_alphabet))
