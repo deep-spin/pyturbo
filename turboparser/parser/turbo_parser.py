@@ -204,6 +204,7 @@ class TurboParser(object):
             # maximum candidate heads per word in the basic pruner, if used
             options.pruner_max_heads = loaded_options.pruner_max_heads
 
+        options.train = False
         parser = TurboParser(options)
         parser.neural_scorer.set_model(model)
         parser.token_dictionary = token_dictionary
