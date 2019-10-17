@@ -346,7 +346,8 @@ class TurboParser(object):
         head_to_token = num_arcs / num_tokens
         msg = '%f heads per token' % head_to_token
         if self.has_pruner:
-            msg += ', out of %d possible' % num_possible_arcs
+            possible_heads = num_possible_arcs / num_tokens
+            msg += ', out of %f possible' % possible_heads
         logger.info(msg)
 
         for part_type in num_higher_order:
