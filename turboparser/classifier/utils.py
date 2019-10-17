@@ -39,27 +39,6 @@ def configure_logger(verbose):
     logger.propagate = False
 
 
-def create_logger(verbose):
-    """Create a log to be used by Turbo Parser"""
-    global logger
-    if logger is not None:
-        logging.warning('Trying to create logger, but one already exists')
-        return logger
-
-    level = logging.DEBUG if verbose else logging.INFO
-    logger = logging.getLogger('TurboParser')
-    logger.setLevel(level)
-    formatter = logging.Formatter('[%(asctime)s] %(message)s',
-                                  datefmt="%Y-%m-%d %H:%M:%S")
-    handler = logging.StreamHandler()
-    handler.setLevel(level)
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.propagate = False
-
-    return logger
-
-
 def get_logger():
     '''
     Return the default logger used by Turbo Parser.
