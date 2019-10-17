@@ -336,11 +336,17 @@ class TurboParser(object):
                 num_parts = len(inst_parts.part_lists[part_type])
                 num_higher_order[part_type] += num_parts
 
-        msg = '%f heads per token after pruning' % (num_arcs / num_tokens)
+        logger.info('%d tokens in the data' % num_tokens)
+        msg = '%d arcs' % num_arcs
+        if self.has_pruner:
+            msg += ', out of %d possible (%f)' % \
+                   (num_possible_arcs, num_arcs / num_possible_arcs)
         logger.info(msg)
 
-        msg = '%d arcs after pruning, out of %d possible (%f)' % \
-              (num_arcs, num_possible_arcs, num_arcs / num_possible_arcs)
+        head_to_token = num_arcs / num_tokens
+        msg = '%f heads per token' % head_to_token
+        if self.has_pruner:
+            msg += ', out of %d possible' % num_possible_arcs
         logger.info(msg)
 
         for part_type in num_higher_order:
@@ -349,9 +355,10 @@ class TurboParser(object):
             msg = '%d %s parts' % (num, name)
             logger.info(msg)
 
-        if self.options.train:
+        if self.options.train and self.has_pruner:
             ratio = (num_tokens - self.pruner_mistakes) / num_tokens
             msg = 'Pruner recall (gold arcs retained after pruning): %f' % ratio
+            msg += '\n%d arcs incorrectly pruned' % self.pruner_mistakes
             logger.info(msg)
 
     def compute_validation_metrics(self, valid_data, valid_pred):
