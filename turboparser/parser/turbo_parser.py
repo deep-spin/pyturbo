@@ -290,13 +290,12 @@ class TurboParser(object):
         pruner = self.pruner
         scores = pruner.neural_scorer.predict(instance_data, decode_tree=False)
         masks = []
-        entropies = []
 
         # scores is a dictionary mapping [target] -> (batch, scores)
         for i, instance_scores in enumerate(scores):
-
-            new_mask, entropy = decoding.generate_arc_mask(
-                instance_scores, self.options.pruner_max_heads,
+            marginals = instance_scores[Target.HEADS].T
+            new_mask = decoding.generate_arc_mask(
+                marginals, self.options.pruner_max_heads,
                 self.options.pruner_posterior_threshold)
 
             if self.options.train:
@@ -309,8 +308,8 @@ class TurboParser(object):
                         self.pruner_mistakes += 1
 
             masks.append(new_mask)
-            entropies.append(entropy)
 
+        entropies = pruner.neural_scorer.entropies
         return masks, entropies
 
     def _report_make_parts(self, data):
