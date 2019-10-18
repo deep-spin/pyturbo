@@ -134,10 +134,6 @@ def decode_matrix_tree(scores):
         log_partition_function is a float
         marginals is a matrix (head, modifier) with root included as head only
     """
-    # split root from real words
-    r = scores[0]
-    A = scores[1:]
-
     # Numerical stability trick: We use an extension of the log-sum-exp and
     # exp-normalize tricks to our log-det-exp setting. [I haven't never seen
     # this trick elsewhere.]
@@ -156,11 +152,19 @@ def decode_matrix_tree(scores):
     #    ∇ log(det(exp(c) * exp(A - c)))
     #     = ∇ [ c*n + log(det(exp(A - c))) ]
     #     = exp(A - c)⁻ᵀ
-    #
-    c = max(r.max(), A.max())
 
-    r = np.exp(r - c)
-    A = np.exp(A - c)
+    c = scores.max()
+    scores = scores - c
+
+    # if c is too high, we may have underflows resulting in a matrix full of
+    # zeroes and without an inverse. Add a small term to avoid that and keep
+    # the relative ordering
+    exp_scores = np.exp(scores) + 1e-100 * scores
+
+    # split root from real words
+    r = exp_scores[0]
+    A = exp_scores[1:]
+
     np.fill_diagonal(A, 0)
 
     L = np.diag(A.sum(axis=0)) - A   # The Laplacian matrix of a graph
