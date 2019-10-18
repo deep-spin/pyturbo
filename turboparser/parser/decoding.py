@@ -159,7 +159,7 @@ def decode_matrix_tree(scores):
     # if c is too high, we may have underflows resulting in a matrix full of
     # zeroes and without an inverse. Add a small term to avoid that and keep
     # the relative ordering
-    exp_scores = np.exp(scores) + 1e-100 * scores
+    exp_scores = np.exp(scores) + 1e-40 * scores
 
     # split root from real words
     r = exp_scores[0]
