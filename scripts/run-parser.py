@@ -22,6 +22,7 @@ def main():
 
 
 def set_seeds(seed):
+    np.seterr(over='warn', under='warn')
     random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
