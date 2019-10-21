@@ -154,12 +154,13 @@ def decode_matrix_tree(scores):
     #     = exp(A - c)⁻ᵀ
 
     c = scores.max()
-    scores = scores - c
+    scores_plus = scores - scores.min()
+    scores_minus = scores - c
 
     # if c is too high, we may have underflows resulting in a matrix full of
     # zeroes and without an inverse. Add a small term to avoid that and keep
     # the relative ordering
-    exp_scores = np.exp(scores) + 1e-40 * scores
+    exp_scores = np.exp(scores_minus) + 1e-40 * scores_plus
 
     # split root from real words
     r = exp_scores[0]
