@@ -479,6 +479,7 @@ class DependencyNeuralModel(nn.Module):
                     hidden_size=self.ho_mlp_size)
                 self.gp_modifier_mlp = self._create_mlp(
                     hidden_size=self.ho_mlp_size)
+                self.gp_coeff = self._create_parameter_tensor(3, 1.)
                 self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings:
@@ -488,6 +489,7 @@ class DependencyNeuralModel(nn.Module):
                     hidden_size=self.ho_mlp_size)
                 self.sib_sibling_mlp = self._create_mlp(
                     hidden_size=self.ho_mlp_size)
+                self.sib_coeff = self._create_parameter_tensor(3, 1.)
                 self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings or model_type.grandsiblings \
@@ -518,12 +520,15 @@ class DependencyNeuralModel(nn.Module):
         states = nn.utils.rnn.PackedSequence(states_data, states_lengths)
         return states
 
-    def _create_parameter_tensor(self, shape):
+    def _create_parameter_tensor(self, shape, value=None):
         """
         Create a tensor for representing some special token. It is included in
         the model parameters.
         """
-        tensor = torch.randn(shape) / np.sqrt(shape)
+        if value is None:
+            tensor = torch.randn(shape) / np.sqrt(shape)
+        else:
+            tensor = torch.full(shape, value)
         if self.on_gpu:
             tensor = tensor.cuda()
         
@@ -772,9 +777,10 @@ class DependencyNeuralModel(nn.Module):
         grandparents = grandparent_tensors[grandparent_indices]
 
         # we don't have H+M because those are already encoded in the arcs
-        states_mg = torch.tanh(modifiers + grandparents)
-        states_hg = torch.tanh(heads + grandparents)
-        states_hmg = torch.tanh(heads + modifiers + grandparents)
+        c = self.gp_coeff
+        states_mg = c[0] * torch.tanh(modifiers + grandparents)
+        states_hg = c[1] * torch.tanh(heads + grandparents)
+        states_hmg = c[2] * torch.tanh(heads + modifiers + grandparents)
         final_states = states_mg + states_hg + states_hmg
         part_scores = self.grandparent_scorer(final_states)
 
@@ -819,9 +825,10 @@ class DependencyNeuralModel(nn.Module):
         siblings = sibling_tensors[sibling_indices]
 
         # we don't have H+M because those are already encoded in the arcs
-        states_hs = torch.tanh(heads + siblings)
-        states_ms = torch.tanh(modifiers + siblings)
-        states_hms = torch.tanh(heads + modifiers + siblings)
+        c = self.sib_coeff
+        states_hs = c[0] * torch.tanh(heads + siblings)
+        states_ms = c[1] * torch.tanh(modifiers + siblings)
+        states_hms = c[2] * torch.tanh(heads + modifiers + siblings)
         final_states = states_hs + states_ms + states_hms
 
         sibling_scores = self.sibling_scorer(final_states)
