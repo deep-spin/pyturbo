@@ -429,29 +429,27 @@ class DependencyNeuralModel(nn.Module):
 
         if self.predict_tags:
             self.tagger_rnn = HighwayLSTM(2 * rnn_size, rnn_size, dropout=dropout)
-        self.tanh = nn.Tanh()
-        self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
 
         # POS tags
         if predict_upos:
             self.upos_mlp = self._create_mlp(
                 hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=self.relu)
+                output_activation=torch.relu)
             num_tags = token_dictionary.get_num_upos_tags()
             self.upos_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                    bias=True)
         if predict_xpos:
             self.xpos_mlp = self._create_mlp(
                 hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=self.relu)
+                output_activation=torch.relu)
             num_tags = token_dictionary.get_num_xpos_tags()
             self.xpos_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                    bias=True)
         if predict_morph:
             self.morph_mlp = self._create_mlp(
                 hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=self.relu)
+                output_activation=torch.relu)
             num_tags = token_dictionary.get_num_morph_singletons()
             self.morph_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                     bias=True)
@@ -578,7 +576,7 @@ class DependencyNeuralModel(nn.Module):
         layers = []
         for i in range(num_layers):
             if i > 0:
-                layers.append(self.relu)
+                layers.append(torch.relu)
 
             linear = nn.Linear(input_size, hidden_size)
             layers.extend([self.dropout, linear])
@@ -772,7 +770,14 @@ class DependencyNeuralModel(nn.Module):
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
         grandparents = grandparent_tensors[grandparent_indices]
-        part_states = self.tanh(heads + modifiers + grandparents)
+
+        # we don't have H+M because those are already encoded in the arcs
+        states_mg = torch.tanh(modifiers + grandparents)
+        states_hg = torch.tanh(heads + grandparents)
+        states_hmg = torch.tanh(heads + modifiers + grandparents)
+        final_states = states_mg + states_hg + states_hmg
+
+        part_states = torch.tanh(heads + modifiers + grandparents)
         part_scores = self.grandparent_scorer(part_states)
 
         self.scores[Target.GRANDPARENTS].append(part_scores.view(-1))
@@ -814,8 +819,14 @@ class DependencyNeuralModel(nn.Module):
         heads = head_tensors[head_indices]
         modifiers = modifier_tensors[modifier_indices]
         siblings = sibling_tensors[sibling_indices]
-        sibling_states = self.tanh(heads + modifiers + siblings)
-        sibling_scores = self.sibling_scorer(sibling_states)
+
+        # we don't have H+M because those are already encoded in the arcs
+        states_hs = torch.tanh(heads + siblings)
+        states_ms = torch.tanh(modifiers + siblings)
+        states_hms = torch.tanh(heads + modifiers + siblings)
+        final_states = states_hs + states_ms + states_hms
+
+        sibling_scores = self.sibling_scorer(final_states)
 
         self.scores[Target.NEXT_SIBLINGS].append(sibling_scores.view(-1))
 
@@ -859,7 +870,7 @@ class DependencyNeuralModel(nn.Module):
         modifiers = modifier_tensors[modifier_indices]
         siblings = sibling_tensors[sibling_indices]
         grandparents = grandparent_tensors[grandparent_indices]
-        gsib_states = self.tanh(heads + modifiers + siblings + grandparents)
+        gsib_states = torch.tanh(heads + modifiers + siblings + grandparents)
         gsib_scores = self.grandsibling_scorer(gsib_states)
 
         self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
