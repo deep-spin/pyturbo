@@ -776,9 +776,7 @@ class DependencyNeuralModel(nn.Module):
         states_hg = torch.tanh(heads + grandparents)
         states_hmg = torch.tanh(heads + modifiers + grandparents)
         final_states = states_mg + states_hg + states_hmg
-
-        part_states = torch.tanh(heads + modifiers + grandparents)
-        part_scores = self.grandparent_scorer(part_states)
+        part_scores = self.grandparent_scorer(final_states)
 
         self.scores[Target.GRANDPARENTS].append(part_scores.view(-1))
 
