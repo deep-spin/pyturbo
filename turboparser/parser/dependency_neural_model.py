@@ -479,7 +479,7 @@ class DependencyNeuralModel(nn.Module):
                     hidden_size=self.ho_mlp_size)
                 self.gp_modifier_mlp = self._create_mlp(
                     hidden_size=self.ho_mlp_size)
-                self.gp_coeff = self._create_parameter_tensor(3, 1.)
+                self.gp_coeff = self._create_parameter_tensor([3], 1.)
                 self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings:
@@ -489,7 +489,7 @@ class DependencyNeuralModel(nn.Module):
                     hidden_size=self.ho_mlp_size)
                 self.sib_sibling_mlp = self._create_mlp(
                     hidden_size=self.ho_mlp_size)
-                self.sib_coeff = self._create_parameter_tensor(3, 1.)
+                self.sib_coeff = self._create_parameter_tensor([3], 1.)
                 self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings or model_type.grandsiblings \
