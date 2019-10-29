@@ -6,7 +6,8 @@ import numpy as np
 
 class DependencyInstanceNumeric(DependencyInstance):
     """An dependency parsing instance with numeric fields."""
-    def __init__(self, instance, token_dictionary, case_sensitive):
+    def __init__(self, instance, token_dictionary, case_sensitive,
+                 bert_tokenizer):
         """
         Store numpy array containing the instance's words, lemmas, POS, morph
         tags and dependencies.
@@ -31,6 +32,17 @@ class DependencyInstanceNumeric(DependencyInstance):
         self.heads = np.full(length, -1, np.int32)
         self.relations = self.heads.copy()
         self.multiwords = instance.multiwords
+
+        # join to tokenize faster everything
+        sentence = ' '.join(self.forms)
+        bert_tokens = bert_tokenizer.tokenize(sentence)
+        self.bert_token_starts = np.array([not token.startswith('##')
+                                           for token in bert_tokens], np.bool)
+        cls_id = bert_tokenizer.cls_token_id
+        sep_id = bert_tokenizer.sep_token_id
+        token_ids = bert_tokenizer.convert_tokens_to_ids(bert_tokens)
+        bert_ids = [cls_id] + token_ids + [sep_id]
+        self.bert_ids = np.array(bert_ids)
 
         for i in range(length):
             # Form and lower-case form.

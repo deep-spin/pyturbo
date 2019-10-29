@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from torch.nn.utils import rnn as rnn_utils
 from torch.distributions.gumbel import Gumbel
 import numpy as np
-import pickle
+from transformers import BertModel
 from joeynmt.embeddings import Embeddings as Seq2seqEmbeddings
 from joeynmt.encoders import RecurrentEncoder
 from joeynmt.decoders import RecurrentDecoder
@@ -12,12 +12,13 @@ from joeynmt.search import greedy
 
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
-    ParsingObjective, structured_objectives
-from ..classifier.lstm import CharLSTM, HighwayLSTM
+    ParsingObjective
+from ..classifier.lstm import CharLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 
 
 gumbel = Gumbel(0, 1)
+encoder_dim = 768
 
 
 def create_padding_mask(lengths):
@@ -281,17 +282,14 @@ class DependencyNeuralModel(nn.Module):
                  model_type,
                  token_dictionary,
                  fixed_word_embeddings,
-                 trainable_word_embedding_size,
+                 lemma_embedding_size,
                  char_embedding_size,
                  char_hidden_size,
                  transform_size,
                  tag_embedding_size,
-                 rnn_size,
                  arc_mlp_size,
                  label_mlp_size,
                  ho_mlp_size,
-                 rnn_layers,
-                 mlp_layers,
                  dropout,
                  word_dropout,
                  predict_upos,
@@ -299,14 +297,14 @@ class DependencyNeuralModel(nn.Module):
                  predict_morph,
                  predict_lemma,
                  predict_tree,
-                 tag_mlp_size):
+                 tag_mlp_size,
+                 bert_model='bert-base-multilingual-cased'):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
         :type token_dictionary: TokenDictionary
         :param fixed_word_embeddings: numpy or torch embedding matrix
             (kept fixed)
-        :param trainable_word_embedding_size: size for trainable word embeddings
         :param word_dropout: probability of replacing a word with the unknown
             token
         """
@@ -315,13 +313,10 @@ class DependencyNeuralModel(nn.Module):
         self.char_hidden_size = char_hidden_size
         self.tag_embedding_size = tag_embedding_size
         self.transform_size = transform_size
-        self.rnn_size = rnn_size
         self.arc_mlp_size = arc_mlp_size
         self.tag_mlp_size = tag_mlp_size
         self.ho_mlp_size = ho_mlp_size
         self.label_mlp_size = label_mlp_size
-        self.rnn_layers = rnn_layers
-        self.mlp_layers = mlp_layers
         self.dropout_rate = dropout
         self.word_dropout_rate = word_dropout
         self.on_gpu = torch.cuda.is_available()
@@ -345,18 +340,15 @@ class DependencyNeuralModel(nn.Module):
             alphabet = morph_alphabets[feature_name]
             self.unknown_morphs[i] = alphabet.lookup(UNKNOWN)
 
-        rnn_input_size = 0
+        total_encoded_dim = encoder_dim
 
-        if trainable_word_embedding_size:
-            num_words = token_dictionary.get_num_forms()
-            self.trainable_word_embeddings = nn.Embedding(
-                num_words, trainable_word_embedding_size)
+        if lemma_embedding_size:
             num_lemmas = token_dictionary.get_num_lemmas()
             self.lemma_embeddings = nn.Embedding(
-                num_lemmas, trainable_word_embedding_size)
-            rnn_input_size += 2 * trainable_word_embedding_size
+                num_lemmas, lemma_embedding_size)
+            total_encoded_dim += lemma_embedding_size
         else:
-            self.trainable_word_embeddings = None
+            self.lemma_embeddings = None
 
         if tag_embedding_size:
             # only use tag embeddings if there are actual tags, not only special
@@ -382,13 +374,13 @@ class DependencyNeuralModel(nn.Module):
             if self.upos_embeddings is not None or \
                     self.xpos_embeddings is not None:
                 # both types of POS embeddings are summed
-                rnn_input_size += tag_embedding_size
+                total_encoded_dim += tag_embedding_size
             self.morph_embeddings = nn.ModuleList()
             for feature_name in morph_alphabets:
                 alphabet = morph_alphabets[feature_name]
                 embeddings = nn.Embedding(len(alphabet), tag_embedding_size)
                 self.morph_embeddings.append(embeddings)
-            rnn_input_size += tag_embedding_size
+            total_encoded_dim += tag_embedding_size
         else:
             self.upos_embeddings = None
             self.xpos_embeddings = None
@@ -403,11 +395,7 @@ class DependencyNeuralModel(nn.Module):
             num_directions = 1
             self.char_projection = nn.Linear(
                 num_directions * char_hidden_size, transform_size, bias=False)
-            rnn_input_size += transform_size
-
-            # # tensor to replace char representation with word dropout
-            # self.char_dropout_replacement = self._create_parameter_tensor(
-            #     num_directions * char_hidden_size)
+            total_encoded_dim += transform_size
         else:
             self.char_rnn = None
 
@@ -417,19 +405,13 @@ class DependencyNeuralModel(nn.Module):
             fixed_word_embeddings, freeze=True)
         self.fixed_embedding_projection = nn.Linear(
             fixed_word_embeddings.shape[1], transform_size, bias=False)
-        rnn_input_size += transform_size
-
-        self.shared_rnn = HighwayLSTM(rnn_input_size, rnn_size, rnn_layers,
-                                      dropout=self.dropout_rate)
-        self.parser_rnn = HighwayLSTM(2 * rnn_size, rnn_size,
-                                      dropout=self.dropout_rate)
-
+        total_encoded_dim += transform_size
+        self.encoder = BertModel.from_pretrained(
+            bert_model, output_hidden_states=True)
         self.dropout_replacement = nn.Parameter(
-            torch.randn(rnn_input_size) / np.sqrt(rnn_input_size))
-
-        if self.predict_tags:
-            self.tagger_rnn = HighwayLSTM(2 * rnn_size, rnn_size, dropout=dropout)
+            torch.randn(total_encoded_dim) / np.sqrt(total_encoded_dim))
         self.dropout = nn.Dropout(dropout)
+        self.total_encoded_dim = total_encoded_dim
 
         # POS tags
         if predict_upos:
@@ -456,20 +438,23 @@ class DependencyNeuralModel(nn.Module):
         if predict_lemma:
             self.lemmatizer = Lemmatizer(
                 num_chars, char_embedding_size, char_hidden_size, dropout,
-                2 * rnn_size, token_dictionary)
+                total_encoded_dim, token_dictionary)
 
         if self.predict_tree:
             # first order layers
             num_labels = token_dictionary.get_num_deprels()
             self.arc_scorer = DeepBiaffineScorer(
-                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
-            self.label_scorer = DeepBiaffineScorer(
-                2 * rnn_size, 2 * rnn_size, label_mlp_size, num_labels,
+                total_encoded_dim, total_encoded_dim, arc_mlp_size, 1,
                 dropout=dropout)
+            self.label_scorer = DeepBiaffineScorer(
+                total_encoded_dim, total_encoded_dim, label_mlp_size,
+                num_labels, dropout=dropout)
             self.linearization_scorer = DeepBiaffineScorer(
-                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+                total_encoded_dim, total_encoded_dim, arc_mlp_size, 1,
+                dropout=dropout)
             self.distance_scorer = DeepBiaffineScorer(
-                2 * rnn_size, 2 * rnn_size, arc_mlp_size, 1, dropout=dropout)
+                total_encoded_dim, total_encoded_dim, arc_mlp_size, 1,
+                dropout=dropout)
 
             # Higher order layers
             if model_type.grandparents:
@@ -495,7 +480,7 @@ class DependencyNeuralModel(nn.Module):
             if model_type.consecutive_siblings or model_type.grandsiblings \
                     or model_type.trisiblings or model_type.arbitrary_siblings:
                 self.null_sibling_tensor = self._create_parameter_tensor(
-                    2 * rnn_size)
+                    total_encoded_dim)
 
             if model_type.grandsiblings:
                 self.gsib_head_mlp = self._create_mlp(
@@ -552,7 +537,7 @@ class DependencyNeuralModel(nn.Module):
 
         return scorer
 
-    def _create_mlp(self, input_size=None, hidden_size=None, num_layers=None,
+    def _create_mlp(self, input_size=None, hidden_size=None, num_layers=1,
                     output_activation=None):
         """
         Create the weights for a fully connected subnetwork.
@@ -572,11 +557,9 @@ class DependencyNeuralModel(nn.Module):
             to hidden_units.
         """
         if input_size is None:
-            input_size = self.rnn_size * 2
+            input_size = self.total_encoded_dim
         if hidden_size is None:
             hidden_size = self.arc_mlp_size
-        if num_layers is None:
-            num_layers = self.mlp_layers
 
         layers = []
         for i in range(num_layers):
@@ -880,6 +863,29 @@ class DependencyNeuralModel(nn.Module):
 
         self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
 
+    def _get_bert_representations(self, instances):
+        """Get BERT encoded representations for the instances"""
+        batch_size = len(instances)
+        lengths = torch.tensor([len(inst.bert_ids) for inst in instances],
+                               dtype=torch.long)
+        if self.on_gpu:
+            lengths = lengths.cuda()
+        max_length = lengths.max()
+        indices = torch.zeros([batch_size, max_length], dtype=torch.long,
+                              device=lengths.device)
+        for i, inst in enumerate(instances):
+            inst_length = lengths[i]
+            indices[i, :inst_length] = inst.bert_ids
+
+        ones = torch.ones_like(indices)
+        mask = ones.cumsum(1) <= lengths.unsqueeze(1)
+        _, _, hidden = self.encoder(indices, mask)
+
+        # use a better aggregation scheme
+        last_states = torch.stack(hidden[-4:])
+        encoded = last_states.mean(0)
+        return encoded
+
     def get_word_representations(self, instances, max_length, char_indices,
                                  token_lengths):
         """
@@ -896,10 +902,8 @@ class DependencyNeuralModel(nn.Module):
         projection = self.fixed_embedding_projection(word_embeddings)
         all_embeddings.append(projection)
 
-        if self.trainable_word_embeddings is not None:
-            trainable_embeddings = self._get_embeddings(instances, max_length,
-                                                        'trainableword')
-            all_embeddings.append(trainable_embeddings)
+        bert_embeddings = self._get_bert_representations(instances)
+
         if self.lemma_embeddings is not None:
             lemma_embeddings = self._get_embeddings(instances, max_length,
                                                     'lemma')
@@ -1115,76 +1119,60 @@ class DependencyNeuralModel(nn.Module):
 
         embeddings = self.get_word_representations(
             instances, max_length, char_indices, token_lengths)
-        sorted_embeddings = embeddings[inds]
 
-        # pack to account for variable lengths
-        packed_embeddings = nn.utils.rnn.pack_padded_sequence(
-            sorted_embeddings, sorted_lengths, batch_first=True)
-
-        shared_states, _ = self.shared_rnn(packed_embeddings)
-
-        if self.predict_tags or self.predict_lemma:
-            if self.predict_tree:
-                # If we don't create a copy, we get an error for variable
-                # rewrite on gradient computation.
-                padded, lens = rnn_utils.pad_packed_sequence(
-                    shared_states, batch_first=True)
-                packed = rnn_utils.pack_padded_sequence(padded, lens, True)
-            else:
-                packed = shared_states
-
-            tagger_packed_states, _ = self.tagger_rnn(packed)
-            tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
-                tagger_packed_states, batch_first=True)
-            tagger_batch_states = tagger_batch_states[rev_inds]
-
-            # ignore root
-            tagger_batch_states = tagger_batch_states[:, 1:]
-
-            if self.predict_upos:
-                hidden = self.upos_mlp(tagger_batch_states)
-                self.scores[Target.UPOS] = self.upos_scorer(hidden)
-
-            if self.predict_xpos:
-                hidden = self.xpos_mlp(tagger_batch_states)
-                self.scores[Target.XPOS] = self.xpos_scorer(hidden)
-
-            if self.predict_morph:
-                hidden = self.morph_mlp(tagger_batch_states)
-                self.scores[Target.MORPH] = self.morph_scorer(hidden)
-
-            if self.predict_lemma:
-                if self.training:
-                    lemmas, lemma_lengths = get_padded_lemma_indices(
-                        instances, max_length)
-                    lemmas = lemmas.to(lengths.device)
-                    lemma_lengths = lemma_lengths.to(lengths.device)
-                else:
-                    lemmas, lemma_lengths = None, None
-
-                # skip root
-                logits = self.lemmatizer(
-                    char_indices[:, 1:], tagger_batch_states,
-                    token_lengths[:, 1:], lemmas, lemma_lengths)
-                self.scores[Target.LEMMA] = logits
+        # if self.predict_tags or self.predict_lemma:
+        #     if self.predict_tree:
+        #         # If we don't create a copy, we get an error for variable
+        #         # rewrite on gradient computation.
+        #         padded, lens = rnn_utils.pad_packed_sequence(
+        #             shared_states, batch_first=True)
+        #         packed = rnn_utils.pack_padded_sequence(padded, lens, True)
+        #     else:
+        #         packed = shared_states
+        #
+        #     tagger_packed_states, _ = self.tagger_rnn(packed)
+        #     tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
+        #         tagger_packed_states, batch_first=True)
+        #     tagger_batch_states = tagger_batch_states[rev_inds]
+        #
+        #     # ignore root
+        #     tagger_batch_states = tagger_batch_states[:, 1:]
+        #
+        #     if self.predict_upos:
+        #         hidden = self.upos_mlp(tagger_batch_states)
+        #         self.scores[Target.UPOS] = self.upos_scorer(hidden)
+        #
+        #     if self.predict_xpos:
+        #         hidden = self.xpos_mlp(tagger_batch_states)
+        #         self.scores[Target.XPOS] = self.xpos_scorer(hidden)
+        #
+        #     if self.predict_morph:
+        #         hidden = self.morph_mlp(tagger_batch_states)
+        #         self.scores[Target.MORPH] = self.morph_scorer(hidden)
+        #
+        #     if self.predict_lemma:
+        #         if self.training:
+        #             lemmas, lemma_lengths = get_padded_lemma_indices(
+        #                 instances, max_length)
+        #             lemmas = lemmas.to(lengths.device)
+        #             lemma_lengths = lemma_lengths.to(lengths.device)
+        #         else:
+        #             lemmas, lemma_lengths = None, None
+        #
+        #         # skip root
+        #         logits = self.lemmatizer(
+        #             char_indices[:, 1:], tagger_batch_states,
+        #             token_lengths[:, 1:], lemmas, lemma_lengths)
+        #         self.scores[Target.LEMMA] = logits
 
         if self.predict_tree:
-            parser_packed_states, _ = self.parser_rnn(shared_states)
-
-            # batch_states is (batch, num_tokens, hidden_size)
-            parser_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
-                parser_packed_states, batch_first=True)
-
-            # return to the original ordering
-            parser_batch_states = parser_batch_states[rev_inds]
-
             self._compute_arc_scores(
-                parser_batch_states, lengths, normalization)
+                embeddings, lengths, normalization)
 
             # now go through each batch item
             for i in range(batch_size):
                 length = lengths[i].item()
-                states = parser_batch_states[i, :length]
+                states = embeddings[i, :length]
                 sent_parts = parts[i]
 
                 if self.model_type.consecutive_siblings:
