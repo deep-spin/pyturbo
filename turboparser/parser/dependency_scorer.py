@@ -5,13 +5,14 @@ from torch.nn.utils.rnn import pad_sequence
 import torch.optim as optim
 import time
 from contextlib import suppress
+from transformers import AdamW, WarmupLinearSchedule
 
-from .constants import Target, dependency_targets, higher_order_parts, \
-    structured_objectives
+from .constants import Target, dependency_targets
 from .constants import ParsingObjective as Objective
 from . import decoding
 from ..classifier.utils import get_logger
 from ..classifier.instance import InstanceData
+from .dependency_neural_model import DependencyNeuralModel
 
 
 logger = get_logger()
@@ -493,15 +494,25 @@ class DependencyNeuralScorer(object):
 
         return output
 
-    def initialize(self, model, parsing_loss=Objective.GLOBAL_MARGIN,
-                   learning_rate=0.001, decay=1, beta1=0.9, beta2=0.95,
-                   l2_regularizer=0):
+    def initialize(self, model: DependencyNeuralModel,
+                   parsing_loss: Objective = Objective.GLOBAL_MARGIN,
+                   training_steps=10000, learning_rate=0.001, decay=1,
+                   beta1=0.9, beta2=0.95, l2_regularizer=0):
         self.set_model(model)
         self.parsing_loss = parsing_loss
-        params = [p for p in model.parameters() if p.requires_grad]
+        bert_params = model.encoder.parameters()
+        params = [p for name, p in model.named_parameters()
+                  if p.requires_grad and not name.startswith('encoder.')]
         self.optimizer = optim.Adam(
             params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6,
             weight_decay=l2_regularizer)
+        self.bert_optimizer = AdamW(
+            bert_params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6,
+            weight_decay=l2_regularizer)
+
+        warmup = 0.1 * training_steps
+        self.bert_schedule = WarmupLinearSchedule(
+            self.bert_optimizer, warmup, training_steps)
         self.decay = decay
 
     def set_model(self, model):
@@ -546,6 +557,9 @@ class DependencyNeuralScorer(object):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
         self.optimizer.step()
+        self.bert_optimizer.step()
+        self.bert_schedule.step()
+
         # Clear out the gradients before the next batch.
         self.model.zero_grad()
 

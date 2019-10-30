@@ -66,9 +66,9 @@ class TurboParser(object):
                 predict_tree=options.parse)
 
             self.neural_scorer.initialize(
-                model, self.options.parsing_loss, self.options.learning_rate,
-                options.decay, options.beta1, options.beta2,
-                options.l2)
+                model, self.options.parsing_loss, options.max_steps,
+                self.options.learning_rate, options.decay, options.beta1,
+                options.beta2, options.l2)
 
             if self.options.verbose:
                 logger.debug('Model summary:')
