@@ -11,12 +11,13 @@ from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
-from .constants import SPECIAL_SYMBOLS, EOS, EMPTY
+from .constants import SPECIAL_SYMBOLS, EOS, EMPTY, bert_model_name
 
 from collections import defaultdict
 import pickle
 import numpy as np
 import time
+from transformers import BertTokenizer
 
 
 logger = utils.get_logger()
@@ -47,17 +48,14 @@ class TurboParser(object):
             model = DependencyNeuralModel(
                 self.options.model_type,
                 self.token_dictionary, pretrain_embeddings,
+                lemma_embedding_size=0,
                 char_hidden_size=self.options.char_hidden_size,
                 transform_size=self.options.transform_size,
-                trainable_word_embedding_size=self.options.embedding_size,
                 char_embedding_size=self.options.char_embedding_size,
                 tag_embedding_size=self.options.tag_embedding_size,
-                rnn_size=self.options.rnn_size,
                 arc_mlp_size=self.options.arc_mlp_size,
                 label_mlp_size=self.options.label_mlp_size,
                 ho_mlp_size=self.options.ho_mlp_size,
-                rnn_layers=self.options.rnn_layers,
-                mlp_layers=self.options.mlp_layers,
                 dropout=self.options.dropout,
                 word_dropout=options.word_dropout,
                 tag_mlp_size=options.tag_mlp_size,
@@ -512,6 +510,7 @@ class TurboParser(object):
         self.pruner_mistakes = 0
         num_relations = self.token_dictionary.get_num_deprels()
         labeled = not self.options.unlabeled
+        tokenizer = BertTokenizer.from_pretrained(bert_model_name)
 
         if self.options.parse and self.has_pruner:
             prune_masks = self.run_pruner(instances)
@@ -521,7 +520,8 @@ class TurboParser(object):
         for i, instance in enumerate(instances):
             mask = None if prune_masks is None else prune_masks[i]
             numeric_instance = DependencyInstanceNumeric(
-                instance, self.token_dictionary, self.options.case_sensitive)
+                instance, self.token_dictionary, self.options.case_sensitive,
+                tokenizer)
             parts = DependencyParts(numeric_instance, self.options.model_type,
                                     mask, labeled, num_relations)
             gold_labels = self.get_gold_labels(numeric_instance)

@@ -58,3 +58,5 @@ SPECIAL_SYMBOLS = [PADDING, UNKNOWN, EMPTY, ROOT]
 
 BOS = '_bos_'
 EOS = '_eos_'
+
+bert_model_name = 'bert-base-multilingual-cased'

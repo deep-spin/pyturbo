@@ -121,6 +121,8 @@ class DependencyOptionParser(OptionParser):
                             if P(h,m) < pruner_posterior_threshold * P(h',m),
                             where h' is the best scored head, then (h,m) will be
                             pruned out.""")
+        parser.add_argument('--lemma_embedding_size', type=int, default=75,
+                            help='Dimension of the lemma embeddings, if used')
         parser.add_argument('--pruner_max_heads', type=int,
                             default=10,
                             help="""Maximum number of possible head words for a
@@ -131,8 +133,6 @@ class DependencyOptionParser(OptionParser):
                             of dimensions; each other line must have a word
                             followed by the values of its vector. These are
                             kept frozen.""")
-        parser.add_argument('--embedding_size', help="""Dimension of trainable
-                            embeddings.""", default=75, type=int)
         parser.add_argument('--char_embedding_size', type=int, default=100,
                             help='Size of char embeddings')
         parser.add_argument('--char_hidden_size', default=200, type=int,

@@ -12,7 +12,7 @@ from joeynmt.search import greedy
 
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
-    ParsingObjective
+    ParsingObjective, bert_model_name
 from ..classifier.lstm import CharLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 
@@ -298,7 +298,7 @@ class DependencyNeuralModel(nn.Module):
                  predict_lemma,
                  predict_tree,
                  tag_mlp_size,
-                 bert_model='bert-base-multilingual-cased'):
+                 bert_model=bert_model_name):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
@@ -328,6 +328,7 @@ class DependencyNeuralModel(nn.Module):
         self.predict_tags = predict_upos or predict_xpos or \
             predict_morph or predict_lemma
         self.model_type = model_type
+        self.bert_model = bert_model
 
         self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
         self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
@@ -586,7 +587,8 @@ class DependencyNeuralModel(nn.Module):
         """
         vocab, dim = self.fixed_word_embeddings.weight.shape
         data = {'fixed_embedding_vocabulary': vocab,
-                'fixed_embedding_size': dim}
+                'fixed_embedding_size': dim,
+                'bert_model': self.bert_model}
 
         return data
 
@@ -594,18 +596,15 @@ class DependencyNeuralModel(nn.Module):
     def load(cls, torch_file, options, token_dictionary, metadata):
         fixed_embedding_vocab_size = metadata['fixed_embedding_vocabulary']
         fixed_embedding_size = metadata['fixed_embedding_size']
-        trainable_embedding_size = options.embedding_size
+        lemma_embedding_size = options.lemma_embedding_size
         char_embedding_size = options.char_embedding_size
         tag_embedding_size = options.tag_embedding_size
         char_hidden_size = options.char_hidden_size
         transform_size = options.transform_size
-        rnn_size = options.rnn_size
         arc_mlp_size = options.arc_mlp_size
         tag_mlp_size = options.tag_mlp_size
         label_mlp_size = options.label_mlp_size
         ho_mlp_size = options.ho_mlp_size
-        rnn_layers = options.rnn_layers
-        mlp_layers = options.mlp_layers
         dropout = options.dropout
         word_dropout = options.word_dropout
         predict_upos = options.upos
@@ -619,18 +618,15 @@ class DependencyNeuralModel(nn.Module):
                                      fixed_embedding_size], np.float32)
         model = DependencyNeuralModel(
             model_type, token_dictionary, dummy_embeddings,
-            trainable_embedding_size,
+            lemma_embedding_size,
             char_embedding_size,
             tag_embedding_size=tag_embedding_size,
             char_hidden_size=char_hidden_size,
             transform_size=transform_size,
-            rnn_size=rnn_size,
             arc_mlp_size=arc_mlp_size,
             tag_mlp_size=tag_mlp_size,
             label_mlp_size=label_mlp_size,
             ho_mlp_size=ho_mlp_size,
-            rnn_layers=rnn_layers,
-            mlp_layers=mlp_layers,
             dropout=dropout,
             word_dropout=word_dropout,
             predict_upos=predict_upos, predict_xpos=predict_xpos,
@@ -863,8 +859,12 @@ class DependencyNeuralModel(nn.Module):
 
         self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
 
-    def _get_bert_representations(self, instances):
-        """Get BERT encoded representations for the instances"""
+    def _get_bert_representations(self, instances, max_num_tokens):
+        """
+        Get BERT encoded representations for the instances
+
+        :return: a tensor (batch, max_num_tokens, encoder_dim)
+        """
         batch_size = len(instances)
         lengths = torch.tensor([len(inst.bert_ids) for inst in instances],
                                dtype=torch.long)
@@ -873,17 +873,37 @@ class DependencyNeuralModel(nn.Module):
         max_length = lengths.max()
         indices = torch.zeros([batch_size, max_length], dtype=torch.long,
                               device=lengths.device)
+
+        # this contains the indices of the first word piece of real tokens
+        # positions past the sequence size will have 0's and will be ignored
+        # afterwards anyway (treated as padding)
+        real_indices = torch.zeros([batch_size, max_num_tokens],
+                                   dtype=torch.long, device=lengths.device)
         for i, inst in enumerate(instances):
             inst_length = lengths[i]
-            indices[i, :inst_length] = inst.bert_ids
+            indices[i, :inst_length] = torch.tensor(
+                inst.bert_ids, device=indices.device)
+
+            # instance length is not the same as wordpiece length!
+            # start from 1, because 0 will point to CLS as the root symbol
+            real_indices[i, 1:len(inst)] = torch.tensor(
+                inst.bert_token_starts, device=indices.device)
 
         ones = torch.ones_like(indices)
         mask = ones.cumsum(1) <= lengths.unsqueeze(1)
+
+        # hidden is a tuple of embeddings and hidden layers
         _, _, hidden = self.encoder(indices, mask)
 
-        # use a better aggregation scheme
+        # TODO: use a better aggregation scheme
         last_states = torch.stack(hidden[-4:])
         encoded = last_states.mean(0)
+
+        # get the first wordpiece for tokens that were split, and CLS for root
+        encoded2d = encoded.view(-1, encoder_dim)
+        encoded2d = torch.index_select(encoded2d, 0, real_indices.view(-1))
+        encoded = encoded2d.view(batch_size, -1, encoder_dim)
+
         return encoded
 
     def get_word_representations(self, instances, max_length, char_indices,
@@ -902,7 +922,8 @@ class DependencyNeuralModel(nn.Module):
         projection = self.fixed_embedding_projection(word_embeddings)
         all_embeddings.append(projection)
 
-        bert_embeddings = self._get_bert_representations(instances)
+        bert_embeddings = self._get_bert_representations(instances, max_length)
+        all_embeddings.append(bert_embeddings)
 
         if self.lemma_embeddings is not None:
             lemma_embeddings = self._get_embeddings(instances, max_length,

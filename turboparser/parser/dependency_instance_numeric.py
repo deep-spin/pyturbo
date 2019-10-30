@@ -17,6 +17,7 @@ class DependencyInstanceNumeric(DependencyInstance):
         :type token_dictionary: TokenDictionary
         :param case_sensitive: bool
         """
+        # length includes root
         length = len(instance)
 
         self.characters = [None for _ in range(length)]
@@ -33,11 +34,16 @@ class DependencyInstanceNumeric(DependencyInstance):
         self.relations = self.heads.copy()
         self.multiwords = instance.multiwords
 
-        # join to tokenize faster everything
-        sentence = ' '.join(self.forms)
-        bert_tokens = bert_tokenizer.tokenize(sentence)
-        self.bert_token_starts = np.array([not token.startswith('##')
-                                           for token in bert_tokens], np.bool)
+        # skip root
+        bert_tokens = []
+        bert_token_starts = []
+        for form in instance.forms[1:]:
+            # store the position of the first word piece of each token
+            bert_token_starts.append(len(bert_tokens))
+            bert_tokens.extend(bert_tokenizer.tokenize(form))
+
+        self.bert_token_starts = np.array(bert_token_starts)
+
         cls_id = bert_tokenizer.cls_token_id
         sep_id = bert_tokenizer.sep_token_id
         token_ids = bert_tokenizer.convert_tokens_to_ids(bert_tokens)
