@@ -420,25 +420,16 @@ class DependencyNeuralModel(nn.Module):
 
         # POS tags
         if predict_upos:
-            self.upos_mlp = self._create_mlp(
-                hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=torch.relu)
             num_tags = token_dictionary.get_num_upos_tags()
-            self.upos_scorer = self._create_scorer(tag_mlp_size, num_tags,
+            self.upos_scorer = self._create_scorer(total_encoded_dim, num_tags,
                                                    bias=True)
         if predict_xpos:
-            self.xpos_mlp = self._create_mlp(
-                hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=torch.relu)
             num_tags = token_dictionary.get_num_xpos_tags()
-            self.xpos_scorer = self._create_scorer(tag_mlp_size, num_tags,
+            self.xpos_scorer = self._create_scorer(total_encoded_dim, num_tags,
                                                    bias=True)
         if predict_morph:
-            self.morph_mlp = self._create_mlp(
-                hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=torch.relu)
             num_tags = token_dictionary.get_num_morph_singletons()
-            self.morph_scorer = self._create_scorer(tag_mlp_size, num_tags,
+            self.morph_scorer = self._create_scorer(total_encoded_dim, num_tags,
                                                     bias=True)
         if predict_lemma:
             self.lemmatizer = Lemmatizer(
@@ -1154,50 +1145,33 @@ class DependencyNeuralModel(nn.Module):
         embeddings = self.get_word_representations(
             instances, max_length, char_indices, token_lengths)
 
-        # if self.predict_tags or self.predict_lemma:
-        #     if self.predict_tree:
-        #         # If we don't create a copy, we get an error for variable
-        #         # rewrite on gradient computation.
-        #         padded, lens = rnn_utils.pad_packed_sequence(
-        #             shared_states, batch_first=True)
-        #         packed = rnn_utils.pack_padded_sequence(padded, lens, True)
-        #     else:
-        #         packed = shared_states
-        #
-        #     tagger_packed_states, _ = self.tagger_rnn(packed)
-        #     tagger_batch_states, _ = nn.utils.rnn.pad_packed_sequence(
-        #         tagger_packed_states, batch_first=True)
-        #     tagger_batch_states = tagger_batch_states[rev_inds]
-        #
-        #     # ignore root
-        #     tagger_batch_states = tagger_batch_states[:, 1:]
-        #
-        #     if self.predict_upos:
-        #         hidden = self.upos_mlp(tagger_batch_states)
-        #         self.scores[Target.UPOS] = self.upos_scorer(hidden)
-        #
-        #     if self.predict_xpos:
-        #         hidden = self.xpos_mlp(tagger_batch_states)
-        #         self.scores[Target.XPOS] = self.xpos_scorer(hidden)
-        #
-        #     if self.predict_morph:
-        #         hidden = self.morph_mlp(tagger_batch_states)
-        #         self.scores[Target.MORPH] = self.morph_scorer(hidden)
-        #
-        #     if self.predict_lemma:
-        #         if self.training:
-        #             lemmas, lemma_lengths = get_padded_lemma_indices(
-        #                 instances, max_length)
-        #             lemmas = lemmas.to(lengths.device)
-        #             lemma_lengths = lemma_lengths.to(lengths.device)
-        #         else:
-        #             lemmas, lemma_lengths = None, None
-        #
-        #         # skip root
-        #         logits = self.lemmatizer(
-        #             char_indices[:, 1:], tagger_batch_states,
-        #             token_lengths[:, 1:], lemmas, lemma_lengths)
-        #         self.scores[Target.LEMMA] = logits
+        if self.predict_tags or self.predict_lemma:
+            # ignore root
+            tagger_embeddings = embeddings[:, 1:]
+
+            if self.predict_upos:
+                self.scores[Target.UPOS] = self.upos_scorer(tagger_embeddings)
+
+            if self.predict_xpos:
+                self.scores[Target.XPOS] = self.xpos_scorer(tagger_embeddings)
+
+            if self.predict_morph:
+                self.scores[Target.MORPH] = self.morph_scorer(tagger_embeddings)
+
+            # if self.predict_lemma:
+            #     if self.training:
+            #         lemmas, lemma_lengths = get_padded_lemma_indices(
+            #             instances, max_length)
+            #         lemmas = lemmas.to(lengths.device)
+            #         lemma_lengths = lemma_lengths.to(lengths.device)
+            #     else:
+            #         lemmas, lemma_lengths = None, None
+            #
+            #     # skip root
+            #     logits = self.lemmatizer(
+            #         char_indices[:, 1:], tagger_batch_states,
+            #         token_lengths[:, 1:], lemmas, lemma_lengths)
+            #     self.scores[Target.LEMMA] = logits
 
         if self.predict_tree:
             self._compute_arc_scores(
