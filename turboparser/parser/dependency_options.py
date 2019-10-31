@@ -121,7 +121,7 @@ class DependencyOptionParser(OptionParser):
                             if P(h,m) < pruner_posterior_threshold * P(h',m),
                             where h' is the best scored head, then (h,m) will be
                             pruned out.""")
-        parser.add_argument('--lemma_embedding_size', type=int, default=75,
+        parser.add_argument('--lemma_embedding_size', type=int, default=0,
                             help='Dimension of the lemma embeddings, if used')
         parser.add_argument('--pruner_max_heads', type=int,
                             default=10,
