@@ -48,7 +48,7 @@ class TurboParser(object):
             model = DependencyNeuralModel(
                 self.options.model_type,
                 self.token_dictionary, pretrain_embeddings,
-                lemma_embedding_size=0,
+                lemma_embedding_size=self.options.lemma_embedding_size,
                 char_hidden_size=self.options.char_hidden_size,
                 transform_size=self.options.transform_size,
                 char_embedding_size=self.options.char_embedding_size,
