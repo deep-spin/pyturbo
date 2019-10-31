@@ -500,19 +500,14 @@ class DependencyNeuralScorer(object):
                    beta1=0.9, beta2=0.95, l2_regularizer=0):
         self.set_model(model)
         self.parsing_loss = parsing_loss
-        bert_params = model.encoder.parameters()
-        params = [p for name, p in model.named_parameters()
-                  if p.requires_grad and not name.startswith('encoder.')]
-        self.optimizer = optim.Adam(
+        params = [p for p in model.parameters() if p.requires_grad]
+        self.optimizer = AdamW(
             params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6,
-            weight_decay=l2_regularizer)
-        self.bert_optimizer = AdamW(
-            bert_params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6,
             weight_decay=l2_regularizer)
 
         warmup = 0.1 * training_steps
-        self.bert_schedule = WarmupLinearSchedule(
-            self.bert_optimizer, warmup, training_steps)
+        self.schedule = WarmupLinearSchedule(
+            self.optimizer, warmup, training_steps)
         self.decay = decay
 
     def set_model(self, model):
@@ -557,8 +552,7 @@ class DependencyNeuralScorer(object):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
         self.optimizer.step()
-        self.bert_optimizer.step()
-        self.bert_schedule.step()
+        self.schedule.step()
 
         # Clear out the gradients before the next batch.
         self.model.zero_grad()
