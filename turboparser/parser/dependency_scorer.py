@@ -378,6 +378,7 @@ class DependencyNeuralScorer(object):
                 # at inference time, lemmas is (batch, num_words, num_chars)
                 # because we use search algorithms over the output space
                 if target != Target.LEMMA or self.model.training:
+                    target_scores = target_scores.detach().cpu()
                     tagging_predictions[target] = target_scores.argmax(-1).\
                         numpy()
                 else:
