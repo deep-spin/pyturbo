@@ -608,6 +608,7 @@ class TurboParser(object):
                     encoder_lr = self.options.learning_rate / 20
                     self.neural_scorer.unfreeze_encoder(encoder_lr,
                                                         self.options.max_steps)
+                    frozen_encoder = False
 
         msg = 'Saved model with the following validation accuracies:\n'
         for target in self.best_metric_value:
