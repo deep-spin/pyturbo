@@ -435,21 +435,21 @@ class DependencyNeuralModel(nn.Module):
         if predict_upos:
             self.upos_mlp = self._create_mlp(
                 hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=torch.relu)
+                output_activation=nn.ReLU())
             num_tags = token_dictionary.get_num_upos_tags()
             self.upos_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                    bias=True)
         if predict_xpos:
             self.xpos_mlp = self._create_mlp(
                 hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=torch.relu)
+                output_activation=nn.ReLU())
             num_tags = token_dictionary.get_num_xpos_tags()
             self.xpos_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                    bias=True)
         if predict_morph:
             self.morph_mlp = self._create_mlp(
                 hidden_size=tag_mlp_size, num_layers=1,
-                output_activation=torch.relu)
+                output_activation=nn.ReLU())
             num_tags = token_dictionary.get_num_morph_singletons()
             self.morph_scorer = self._create_scorer(tag_mlp_size, num_tags,
                                                     bias=True)
