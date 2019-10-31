@@ -304,7 +304,7 @@ class DependencyNeuralModel(nn.Module):
         :param token_dictionary: TokenDictionary object
         :type token_dictionary: TokenDictionary
         :param fixed_word_embeddings: numpy or torch embedding matrix
-            (kept fixed)
+            (kept fixed), or None
         :param word_dropout: probability of replacing a word with the unknown
             token
         """
@@ -400,13 +400,17 @@ class DependencyNeuralModel(nn.Module):
         else:
             self.char_rnn = None
 
-        fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
-                                             dtype=torch.float)
-        self.fixed_word_embeddings = nn.Embedding.from_pretrained(
-            fixed_word_embeddings, freeze=True)
-        self.fixed_embedding_projection = nn.Linear(
-            fixed_word_embeddings.shape[1], transform_size, bias=False)
-        total_encoded_dim += transform_size
+        if fixed_word_embeddings is None:
+            self.fixed_word_embeddings = None
+        else:
+            fixed_word_embeddings = torch.tensor(fixed_word_embeddings,
+                                                 dtype=torch.float)
+            self.fixed_word_embeddings = nn.Embedding.from_pretrained(
+                fixed_word_embeddings, freeze=True)
+            self.fixed_embedding_projection = nn.Linear(
+                fixed_word_embeddings.shape[1], transform_size, bias=False)
+            total_encoded_dim += transform_size
+
         self.encoder = BertModel.from_pretrained(
             bert_model, output_hidden_states=True)
         self.dropout_replacement = nn.Parameter(
@@ -585,7 +589,10 @@ class DependencyNeuralModel(nn.Module):
         Return a dictionary with metadata needed to reconstruct a serialized
         model.
         """
-        vocab, dim = self.fixed_word_embeddings.weight.shape
+        if self.fixed_word_embeddings is None:
+            vocab, dim = 0, 0
+        else:
+            vocab, dim = self.fixed_word_embeddings.weight.shape
         data = {'fixed_embedding_vocabulary': vocab,
                 'fixed_embedding_size': dim,
                 'bert_model': self.bert_model}
@@ -614,8 +621,12 @@ class DependencyNeuralModel(nn.Module):
         predict_tree = options.parse
         model_type = options.model_type
 
-        dummy_embeddings = np.empty([fixed_embedding_vocab_size,
-                                     fixed_embedding_size], np.float32)
+        if fixed_embedding_vocab_size > 0:
+            dummy_embeddings = np.empty([fixed_embedding_vocab_size,
+                                         fixed_embedding_size], np.float32)
+        else:
+            dummy_embeddings = None
+
         model = DependencyNeuralModel(
             model_type, token_dictionary, dummy_embeddings,
             lemma_embedding_size,
@@ -917,13 +928,15 @@ class DependencyNeuralModel(nn.Module):
         :return: a tensor with shape (batch, max_num_tokens, embedding_size)
         """
         all_embeddings = []
-        word_embeddings = self._get_embeddings(
-            instances, max_length, 'fixedword')
-        projection = self.fixed_embedding_projection(word_embeddings)
-        all_embeddings.append(projection)
 
         bert_embeddings = self._get_bert_representations(instances, max_length)
         all_embeddings.append(bert_embeddings)
+
+        if self.fixed_word_embeddings is not None:
+            word_embeddings = self._get_embeddings(
+                instances, max_length, 'fixedword')
+            projection = self.fixed_embedding_projection(word_embeddings)
+            all_embeddings.append(projection)
 
         if self.lemma_embeddings is not None:
             lemma_embeddings = self._get_embeddings(instances, max_length,

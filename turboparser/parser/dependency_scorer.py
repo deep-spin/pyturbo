@@ -494,20 +494,33 @@ class DependencyNeuralScorer(object):
 
         return output
 
-    def initialize(self, model: DependencyNeuralModel,
-                   parsing_loss: Objective = Objective.GLOBAL_MARGIN,
-                   training_steps=10000, learning_rate=0.001, decay=1,
-                   beta1=0.9, beta2=0.95, l2_regularizer=0):
-        self.set_model(model)
-        self.parsing_loss = parsing_loss
-        params = [p for p in model.parameters() if p.requires_grad]
-        self.optimizer = AdamW(
-            params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6,
-            weight_decay=l2_regularizer)
+    def unfreeze_encoder(self, learning_rate, training_steps):
+        """
+        Unfreeze the encoder weights and set the given learning rate to them.
+        """
+        self.optimizer.param_groups[0]['lr'] = learning_rate
 
         warmup = 0.1 * training_steps
         self.schedule = WarmupLinearSchedule(
             self.optimizer, warmup, training_steps)
+
+    def initialize(self, model: DependencyNeuralModel,
+                   parsing_loss: Objective = Objective.GLOBAL_MARGIN,
+                   learning_rate=0.001, decay=1,
+                   beta1=0.9, beta2=0.95, l2_regularizer=0):
+
+        self.set_model(model)
+        self.parsing_loss = parsing_loss
+        bert_params = model.encoder.parameters()
+        model_params = [p for name, p in model.named_parameters()
+                        if not name.startswith('encoder.')]
+        params = [{'params': bert_params, 'lr': 0},
+                  {'params': model_params}]
+        self.optimizer = AdamW(
+            params, lr=learning_rate, betas=(beta1, beta2), eps=1e-6,
+            weight_decay=l2_regularizer)
+        self.schedule = None
+
         self.decay = decay
 
     def set_model(self, model):
@@ -552,7 +565,8 @@ class DependencyNeuralScorer(object):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
         self.optimizer.step()
-        self.schedule.step()
+        if self.schedule is not None:
+            self.schedule.step()
 
         # Clear out the gradients before the next batch.
         self.model.zero_grad()

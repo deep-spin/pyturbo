@@ -66,7 +66,7 @@ class TurboParser(object):
                 predict_tree=options.parse)
 
             self.neural_scorer.initialize(
-                model, self.options.parsing_loss, options.max_steps,
+                model, self.options.parsing_loss,
                 self.options.learning_rate, options.decay, options.beta1,
                 options.beta2, options.l2)
 
@@ -569,6 +569,7 @@ class TurboParser(object):
 
         self._reset_best_validation_metric()
         self.reset_performance_metrics()
+        frozen_encoder = True
         using_amsgrad = False
         num_bad_evals = 0
 
@@ -601,6 +602,12 @@ class TurboParser(object):
                         num_bad_evals = 0
                     else:
                         break
+
+                # unfreeze encoder weights after first dev set run
+                if frozen_encoder:
+                    encoder_lr = self.options.learning_rate / 20
+                    self.neural_scorer.unfreeze_encoder(encoder_lr,
+                                                        self.options.max_steps)
 
         msg = 'Saved model with the following validation accuracies:\n'
         for target in self.best_metric_value:
