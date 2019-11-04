@@ -868,31 +868,32 @@ class DependencyNeuralModel(nn.Module):
         :return: a tensor (batch, max_num_tokens, encoder_dim)
         """
         batch_size = len(instances)
-        lengths = torch.tensor([len(inst.bert_ids) for inst in instances],
-                               dtype=torch.long)
+        # word piece lengths
+        wp_lengths = torch.tensor([len(inst.bert_ids) for inst in instances],
+                                   dtype=torch.long)
         if self.on_gpu:
-            lengths = lengths.cuda()
-        max_length = lengths.max()
+            wp_lengths = wp_lengths.cuda()
+        max_length = wp_lengths.max()
         indices = torch.zeros([batch_size, max_length], dtype=torch.long,
-                              device=lengths.device)
+                              device=wp_lengths.device)
 
         # this contains the indices of the first word piece of real tokens
         # positions past the sequence size will have 0's and will be ignored
         # afterwards anyway (treated as padding)
         real_indices = torch.zeros([batch_size, max_num_tokens],
-                                   dtype=torch.long, device=lengths.device)
+                                   dtype=torch.long, device=wp_lengths.device)
         for i, inst in enumerate(instances):
-            inst_length = lengths[i]
+            inst_length = wp_lengths[i]
             indices[i, :inst_length] = torch.tensor(
                 inst.bert_ids, device=indices.device)
 
             # instance length is not the same as wordpiece length!
             # start from 1, because 0 will point to CLS as the root symbol
             real_indices[i, 1:len(inst)] = torch.tensor(
-                inst.bert_token_starts, device=indices.device)
+                inst.bert_token_starts, device=indices.device) + 1
 
         ones = torch.ones_like(indices)
-        mask = ones.cumsum(1) <= lengths.unsqueeze(1)
+        mask = ones.cumsum(1) <= wp_lengths.unsqueeze(1)
 
         # hidden is a tuple of embeddings and hidden layers
         _, _, hidden = self.encoder(indices, mask)
@@ -902,9 +903,8 @@ class DependencyNeuralModel(nn.Module):
         encoded = last_states.mean(0)
 
         # get the first wordpiece for tokens that were split, and CLS for root
-        encoded2d = encoded.view(-1, encoder_dim)
-        encoded2d = torch.index_select(encoded2d, 0, real_indices.view(-1))
-        encoded = encoded2d.view(batch_size, -1, encoder_dim)
+        r = torch.arange(batch_size, device=encoded.device).unsqueeze(1)
+        encoded = encoded[r, real_indices]
 
         return encoded
 
