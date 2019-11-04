@@ -570,7 +570,6 @@ class TurboParser(object):
         self._reset_best_validation_metric()
         self.reset_performance_metrics()
         frozen_encoder = True
-        using_amsgrad = False
         num_bad_evals = 0
 
         for global_step in range(1, self.options.max_steps + 1):
@@ -593,15 +592,7 @@ class TurboParser(object):
                     self.neural_scorer.decrease_learning_rate()
 
                 if num_bad_evals == self.options.patience:
-                    if not using_amsgrad:
-                        logger.info('Switching to AMSGrad')
-                        using_amsgrad = True
-                        self.neural_scorer.switch_to_amsgrad(
-                            self.options.learning_rate, self.options.beta1,
-                            self.options.beta2)
-                        num_bad_evals = 0
-                    else:
-                        break
+                    break
 
                 # unfreeze encoder weights after first dev set run
                 if frozen_encoder:

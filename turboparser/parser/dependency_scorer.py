@@ -529,14 +529,6 @@ class DependencyNeuralScorer(object):
         if torch.cuda.is_available():
             self.model.cuda()
 
-    def switch_to_amsgrad(self, learning_rate=0.001, beta1=0.9, beta2=0.95):
-        """
-        Switch the optimizer to AMSGrad.
-        """
-        params = [p for p in self.model.parameters() if p.requires_grad]
-        self.optimizer = optim.Adam(
-            params, amsgrad=True, lr=learning_rate, betas=(beta1, beta2))
-
     def train_mode(self):
         """
         Set the neural model to training mode
