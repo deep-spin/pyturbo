@@ -449,7 +449,7 @@ class DependencyNeuralScorer(object):
             for target in tagging_predictions:
                 if target not in dependency_targets:
                     target_prediction = tagging_predictions[target]
-                    instance_output[target] = target_prediction[i][:length]
+                    instance_output[target] = target_prediction[i][:length - 1]
 
             if parse:
                 if self.parsing_loss == Objective.GLOBAL_MARGIN:
