@@ -134,6 +134,16 @@ def decode_matrix_tree(scores):
         log_partition_function is a float
         marginals is a matrix (head, modifier) with root included as head only
     """
+    # treat single word sentences as a special case
+    # (if the score of the root is low enough, we run into a singular matrix
+    # and the general-case code breaks)
+    if len(scores) == 2:
+        # there is only one valid arc in the tree
+        log_z = scores[0][0]
+        marginals = np.array([[1.], [0.]], dtype=scores.dtype)
+
+        return log_z, marginals
+
     # Numerical stability trick: We use an extension of the log-sum-exp and
     # exp-normalize tricks to our log-det-exp setting. [I haven't never seen
     # this trick elsewhere.]
@@ -160,6 +170,8 @@ def decode_matrix_tree(scores):
     # if c is too high, we may have underflows resulting in a matrix full of
     # zeroes and without an inverse. Add a small term to avoid that and keep
     # the relative ordering
+    # (this line may cause underflows in the multiplication, but it is harmless
+    # as long as the resulting exp_scores are non-zero)
     exp_scores = np.exp(scores_minus) + 1e-40 * scores_plus
 
     # split root from real words
