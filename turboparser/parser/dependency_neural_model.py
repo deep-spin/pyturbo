@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from torch.nn.utils import rnn as rnn_utils
 from torch.distributions.gumbel import Gumbel
 import numpy as np
-from transformers import BertModel
+from transformers import BertModel, BertConfig
 from joeynmt.embeddings import Embeddings as Seq2seqEmbeddings
 from joeynmt.encoders import RecurrentEncoder
 from joeynmt.decoders import RecurrentDecoder
@@ -12,7 +12,7 @@ from joeynmt.search import greedy
 
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
-    ParsingObjective, bert_model_name
+    ParsingObjective
 from ..classifier.lstm import CharLSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 
@@ -298,7 +298,7 @@ class DependencyNeuralModel(nn.Module):
                  predict_lemma,
                  predict_tree,
                  tag_mlp_size,
-                 bert_model=bert_model_name):
+                 pretrained_name_or_config):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
@@ -307,6 +307,8 @@ class DependencyNeuralModel(nn.Module):
             (kept fixed), or None
         :param word_dropout: probability of replacing a word with the unknown
             token
+        :param pretrained_name_or_config: either a string (with the pretrained
+            BERT model to be used) or a BertConfig instance when loading
         """
         super(DependencyNeuralModel, self).__init__()
         self.char_embedding_size = char_embedding_size
@@ -328,7 +330,6 @@ class DependencyNeuralModel(nn.Module):
         self.predict_tags = predict_upos or predict_xpos or \
             predict_morph or predict_lemma
         self.model_type = model_type
-        self.bert_model = bert_model
 
         self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
         self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
@@ -411,8 +412,12 @@ class DependencyNeuralModel(nn.Module):
                 fixed_word_embeddings.shape[1], transform_size, bias=False)
             total_encoded_dim += transform_size
 
-        self.encoder = BertModel.from_pretrained(
-            bert_model, output_hidden_states=True)
+        if isinstance(pretrained_name_or_config, BertConfig):
+            self.encoder = BertModel(pretrained_name_or_config)
+        else:
+            self.encoder = BertModel.from_pretrained(
+                pretrained_name_or_config, output_hidden_states=True)
+
         self.dropout_replacement = nn.Parameter(
             torch.randn(total_encoded_dim) / np.sqrt(total_encoded_dim))
         self.dropout = nn.Dropout(dropout)
@@ -575,7 +580,7 @@ class DependencyNeuralModel(nn.Module):
     def save(self, file):
         torch.save(self.state_dict(), file)
 
-    def create_metadata(self):
+    def create_metadata(self) -> dict:
         """
         Return a dictionary with metadata needed to reconstruct a serialized
         model.
@@ -584,9 +589,10 @@ class DependencyNeuralModel(nn.Module):
             vocab, dim = 0, 0
         else:
             vocab, dim = self.fixed_word_embeddings.weight.shape
-        data = {'fixed_embedding_vocabulary': vocab,
-                'fixed_embedding_size': dim,
-                'bert_model': self.bert_model}
+        bert_config = self.encoder.config
+        data = bert_config.to_dict()
+        data['fixed_embedding_vocabulary'] = vocab
+        data['fixed_embedding_size'] = dim
 
         return data
 
@@ -618,6 +624,8 @@ class DependencyNeuralModel(nn.Module):
         else:
             dummy_embeddings = None
 
+        config = BertConfig.from_dict(metadata)
+
         model = DependencyNeuralModel(
             model_type, token_dictionary, dummy_embeddings,
             lemma_embedding_size,
@@ -633,7 +641,7 @@ class DependencyNeuralModel(nn.Module):
             word_dropout=word_dropout,
             predict_upos=predict_upos, predict_xpos=predict_xpos,
             predict_morph=predict_morph, predict_lemma=predict_lemma,
-            predict_tree=predict_tree)
+            predict_tree=predict_tree, pretrained_name_or_config=config)
 
         if model.on_gpu:
             state_dict = torch.load(torch_file)

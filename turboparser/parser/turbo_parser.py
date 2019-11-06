@@ -11,7 +11,7 @@ from .dependency_parts import DependencyParts
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
-from .constants import SPECIAL_SYMBOLS, EOS, EMPTY, bert_model_name
+from .constants import SPECIAL_SYMBOLS, EOS, EMPTY
 
 from collections import defaultdict
 import pickle
@@ -63,7 +63,8 @@ class TurboParser(object):
                 predict_xpos=options.xpos,
                 predict_morph=options.morph,
                 predict_lemma=options.lemma,
-                predict_tree=options.parse)
+                predict_tree=options.parse,
+                pretrained_name_or_config=options.bert_model)
 
             self.neural_scorer.initialize(
                 model, self.options.parsing_loss,
@@ -510,7 +511,7 @@ class TurboParser(object):
         self.pruner_mistakes = 0
         num_relations = self.token_dictionary.get_num_deprels()
         labeled = not self.options.unlabeled
-        tokenizer = BertTokenizer.from_pretrained(bert_model_name)
+        tokenizer = BertTokenizer.from_pretrained(self.options.bert_model)
 
         if self.options.parse and self.has_pruner:
             prune_masks = self.run_pruner(instances)
