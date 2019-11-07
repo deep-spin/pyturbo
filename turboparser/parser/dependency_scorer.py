@@ -333,6 +333,10 @@ class DependencyNeuralScorer(object):
 
         except RuntimeError:
             # out of memory error; split the batch in two
+
+            # WARNING: this currently does not work because GPU memory is not
+            # freed upon RuntimeErrors
+
             batch_size = len(instance_data)
             if batch_size == 1:
                 length = len(instance_data.instances[0])
