@@ -144,7 +144,8 @@ class DependencyOptionParser(OptionParser):
                             help='''Size of the linear transformation for 
                             char-based and pretrained representations''')
         parser.add_argument('--rnn_size', type=int, default=400,
-                            help='Size of hidden RNN layers')
+                            help='Size of hidden RNN layers '
+                                 '(0 to not to use RNN)')
         parser.add_argument('--arc_mlp_size', type=int, default=400,
                             help='Size of dependency arc MLP layers')
         parser.add_argument('--label_mlp_size', type=int, default=400,

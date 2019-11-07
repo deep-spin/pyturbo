@@ -286,6 +286,7 @@ class DependencyNeuralModel(nn.Module):
                  char_embedding_size,
                  char_hidden_size,
                  transform_size,
+                 rnn_size,
                  tag_embedding_size,
                  arc_mlp_size,
                  label_mlp_size,
@@ -330,6 +331,7 @@ class DependencyNeuralModel(nn.Module):
         self.predict_tags = predict_upos or predict_xpos or \
             predict_morph or predict_lemma
         self.model_type = model_type
+        self.rnn_size = rnn_size
 
         self.unknown_fixed_word = token_dictionary.get_embedding_id(UNKNOWN)
         self.unknown_trainable_word = token_dictionary.get_form_id(UNKNOWN)
@@ -423,75 +425,91 @@ class DependencyNeuralModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.total_encoded_dim = total_encoded_dim
 
-        # POS tags
+        # POS and morphology tags
+        if self.predict_tags:
+            if self.rnn_size > 0:
+                self.tagger_rnn = nn.LSTM(
+                    total_encoded_dim, self.rnn_size, batch_first=True,
+                    bidirectional=True)
+                hidden_dim = 2 * self.rnn_size
+            else:
+                self.tagger_rnn = None
+                hidden_dim = total_encoded_dim
+
         if predict_upos:
             num_tags = token_dictionary.get_num_upos_tags()
-            self.upos_scorer = self._create_scorer(total_encoded_dim, num_tags,
+            self.upos_scorer = self._create_scorer(hidden_dim, num_tags,
                                                    bias=True)
         if predict_xpos:
             num_tags = token_dictionary.get_num_xpos_tags()
-            self.xpos_scorer = self._create_scorer(total_encoded_dim, num_tags,
+            self.xpos_scorer = self._create_scorer(hidden_dim, num_tags,
                                                    bias=True)
         if predict_morph:
             num_tags = token_dictionary.get_num_morph_singletons()
-            self.morph_scorer = self._create_scorer(total_encoded_dim, num_tags,
+            self.morph_scorer = self._create_scorer(hidden_dim, num_tags,
                                                     bias=True)
         if predict_lemma:
             self.lemmatizer = Lemmatizer(
                 num_chars, char_embedding_size, char_hidden_size, dropout,
-                total_encoded_dim, token_dictionary)
+                hidden_dim, token_dictionary)
 
         if self.predict_tree:
+            if self.rnn_size > 0:
+                self.parser_rnn = nn.LSTM(
+                    total_encoded_dim, self.rnn_size, batch_first=True,
+                    bidirectional=True)
+                hidden_dim = 2 * self.rnn_size
+            else:
+                self.parser_rnn = None
+                hidden_dim = total_encoded_dim
+
             # first order layers
             num_labels = token_dictionary.get_num_deprels()
             self.arc_scorer = DeepBiaffineScorer(
-                total_encoded_dim, total_encoded_dim, arc_mlp_size, 1,
-                dropout=dropout)
+                hidden_dim, hidden_dim, arc_mlp_size, 1, dropout=dropout)
             self.label_scorer = DeepBiaffineScorer(
-                total_encoded_dim, total_encoded_dim, label_mlp_size,
+                hidden_dim, hidden_dim, label_mlp_size,
                 num_labels, dropout=dropout)
             self.linearization_scorer = DeepBiaffineScorer(
-                total_encoded_dim, total_encoded_dim, arc_mlp_size, 1,
-                dropout=dropout)
+                hidden_dim, hidden_dim, arc_mlp_size, 1, dropout=dropout)
             self.distance_scorer = DeepBiaffineScorer(
-                total_encoded_dim, total_encoded_dim, arc_mlp_size, 1,
-                dropout=dropout)
+                hidden_dim, hidden_dim, arc_mlp_size, 1, dropout=dropout)
 
             # Higher order layers
             if model_type.grandparents:
                 self.gp_grandparent_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.gp_head_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.gp_modifier_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.gp_coeff = self._create_parameter_tensor([3], 1.)
                 self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings:
                 self.sib_head_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.sib_modifier_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.sib_sibling_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.sib_coeff = self._create_parameter_tensor([3], 1.)
                 self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings or model_type.grandsiblings \
                     or model_type.trisiblings or model_type.arbitrary_siblings:
                 self.null_sibling_tensor = self._create_parameter_tensor(
-                    total_encoded_dim)
+                    hidden_dim)
 
             if model_type.grandsiblings:
                 self.gsib_head_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.gsib_modifier_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.gsib_sibling_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.gsib_grandparent_mlp = self._create_mlp(
-                    hidden_size=self.ho_mlp_size)
+                    hidden_dim, self.ho_mlp_size)
                 self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
 
         # Clear out the gradients before the next batch.
@@ -605,6 +623,7 @@ class DependencyNeuralModel(nn.Module):
         tag_embedding_size = options.tag_embedding_size
         char_hidden_size = options.char_hidden_size
         transform_size = options.transform_size
+        rnn_size = options.rnn_size
         arc_mlp_size = options.arc_mlp_size
         tag_mlp_size = options.tag_mlp_size
         label_mlp_size = options.label_mlp_size
@@ -633,6 +652,7 @@ class DependencyNeuralModel(nn.Module):
             tag_embedding_size=tag_embedding_size,
             char_hidden_size=char_hidden_size,
             transform_size=transform_size,
+            rnn_size=rnn_size,
             arc_mlp_size=arc_mlp_size,
             tag_mlp_size=tag_mlp_size,
             label_mlp_size=label_mlp_size,
@@ -1154,17 +1174,25 @@ class DependencyNeuralModel(nn.Module):
             instances, max_length, char_indices, token_lengths)
 
         if self.predict_tags or self.predict_lemma:
-            # ignore root
-            tagger_embeddings = embeddings[:, 1:]
+            if self.tagger_rnn is None:
+                # ignore root
+                hidden_states = embeddings[:, 1:]
+            else:
+                packed_embeddings = rnn_utils.pack_padded_sequence(
+                    embeddings, lengths, batch_first=True, enforce_sorted=False)
+                hidden_states, _ = self.tagger_rnn(packed_embeddings)
+                hidden_states, _ = rnn_utils.pad_packed_sequence(
+                    hidden_states, batch_first=True)
+                hidden_states = hidden_states[:, 1:]
 
             if self.predict_upos:
-                self.scores[Target.UPOS] = self.upos_scorer(tagger_embeddings)
+                self.scores[Target.UPOS] = self.upos_scorer(hidden_states)
 
             if self.predict_xpos:
-                self.scores[Target.XPOS] = self.xpos_scorer(tagger_embeddings)
+                self.scores[Target.XPOS] = self.xpos_scorer(hidden_states)
 
             if self.predict_morph:
-                self.scores[Target.MORPH] = self.morph_scorer(tagger_embeddings)
+                self.scores[Target.MORPH] = self.morph_scorer(hidden_states)
 
             # if self.predict_lemma:
             #     if self.training:
@@ -1182,13 +1210,22 @@ class DependencyNeuralModel(nn.Module):
             #     self.scores[Target.LEMMA] = logits
 
         if self.predict_tree:
+            if self.parser_rnn is None:
+                hidden_states = embeddings
+            else:
+                packed_embeddings = rnn_utils.pack_padded_sequence(
+                    embeddings, lengths, batch_first=True, enforce_sorted=False)
+                hidden_states, _ = self.tagger_rnn(packed_embeddings)
+                hidden_states, _ = rnn_utils.pad_packed_sequence(
+                    hidden_states, batch_first=True)
+
             self._compute_arc_scores(
-                embeddings, lengths, normalization)
+                hidden_states, lengths, normalization)
 
             # now go through each batch item
             for i in range(batch_size):
                 length = lengths[i].item()
-                states = embeddings[i, :length]
+                states = hidden_states[i, :length]
                 sent_parts = parts[i]
 
                 if self.model_type.consecutive_siblings:

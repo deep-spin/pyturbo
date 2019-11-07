@@ -53,6 +53,7 @@ class TurboParser(object):
                 transform_size=self.options.transform_size,
                 char_embedding_size=self.options.char_embedding_size,
                 tag_embedding_size=self.options.tag_embedding_size,
+                rnn_size=self.options.rnn_size,
                 arc_mlp_size=self.options.arc_mlp_size,
                 label_mlp_size=self.options.label_mlp_size,
                 ho_mlp_size=self.options.ho_mlp_size,
