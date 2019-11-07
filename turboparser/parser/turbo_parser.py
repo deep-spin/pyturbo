@@ -541,10 +541,7 @@ class TurboParser(object):
         Reset some variables used to keep track of training performance.
         """
         self.num_train_instances = 0
-        self.neural_scorer.time_scoring = 0
-        self.time_gradient = 0
-        self.neural_scorer.time_decoding = 0
-        self.train_losses = defaultdict(float)
+        self.neural_scorer.reset_metrics()
         self.accumulated_hits = {}
         for target in self.additional_targets:
             self.accumulated_hits[target] = 0
@@ -555,7 +552,7 @@ class TurboParser(object):
         self.reassigned_roots = 0
 
     def train(self):
-        '''Train with a general online algorithm.'''
+        """Train the parser and/or tagger and/or lemmatizer"""
         train_instances, valid_instances = self.read_train_instances()
         logger.info('Preprocessing training data')
         train_data = self.preprocess_instances(train_instances)
@@ -575,12 +572,13 @@ class TurboParser(object):
 
         for global_step in range(1, self.options.max_steps + 1):
             batch = train_data.get_next_batch()
-            self.train_batch(batch)
+            self.neural_scorer.train_batch(batch, self.options.num_jobs)
+            self.num_train_instances += len(batch)
 
             if global_step % self.options.log_interval == 0:
                 msg = 'Step %d' % global_step
                 logger.info(msg)
-                self.train_report(self.num_train_instances)
+                self.neural_scorer.train_report(self.num_train_instances)
                 self.reset_performance_metrics()
 
             if global_step % self.options.eval_interval == 0:
@@ -641,19 +639,6 @@ class TurboParser(object):
 
         logger.info('\n')
 
-    def train_report(self, num_instances):
-        """
-        Log a short report of the training loss.
-        """
-        msgs = ['Train losses:'] + make_loss_msgs(self.train_losses,
-                                                  num_instances)
-        logger.info('\t'.join(msgs))
-
-        time_msg = 'Time to score: %.2f\tDecode: %.2f\tGradient step: %.2f'
-        time_msg %= (self.neural_scorer.time_scoring,
-                     self.neural_scorer.time_decoding,
-                     self.time_gradient)
-        logger.info(time_msg)
 
     def run_batch(self, instance_data):
         """
@@ -681,34 +666,6 @@ class TurboParser(object):
                 predictions[i][Target.LEMMA] = lemmas
 
         return predictions
-
-    def train_batch(self, instance_data):
-        '''
-        Run one batch of a learning algorithm. If it is an online one, just
-        run through each instance.
-
-        :param instance_data: InstanceData object containing the instances of
-            the batch
-        '''
-        self.neural_scorer.train_mode()
-
-        predictions = self.neural_scorer.predict(
-            instance_data, num_jobs=self.options.num_jobs, training=True)
-
-        # run the gradient step for the whole batch
-        start_time = time.time()
-        losses = self.neural_scorer.compute_loss(instance_data, predictions)
-
-        self.neural_scorer.make_gradient_step(losses)
-
-        batch_size = len(instance_data)
-        self.num_train_instances += batch_size
-        for target in losses:
-            # store non-normalized losses
-            self.train_losses[target] += batch_size * losses[target].item()
-
-        end_time = time.time()
-        self.time_gradient += end_time - start_time
 
     def label_instance(self, instance, output):
         """
@@ -760,25 +717,6 @@ def load_pruner(model_path):
     pruner.set_as_pruner()
 
     return pruner
-
-
-def make_loss_msgs(losses, dataset_size):
-    """
-    Return a list of strings in the shape
-
-    NAME: LOSS_VALUE
-
-    :param losses: dictionary mapping targets to loss values
-    :param dataset_size: value used to normalize (divide) each loss value
-    :return: list of strings
-    """
-    msgs = []
-    for target in losses:
-        target_name = target2string[target]
-        normalized_loss = losses[target] / dataset_size
-        msg = '%s: %.4f' % (target_name, normalized_loss)
-        msgs.append(msg)
-    return msgs
 
 
 def cut_sequences_at_eos(predictions, eos_index, empty_index):

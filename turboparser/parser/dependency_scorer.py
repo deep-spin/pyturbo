@@ -2,12 +2,12 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
-import torch.optim as optim
 import time
+from collections import defaultdict
 from contextlib import suppress
 from transformers import AdamW, WarmupLinearSchedule
 
-from .constants import Target, dependency_targets
+from .constants import Target, dependency_targets, target2string
 from .constants import ParsingObjective as Objective
 from . import decoding
 from ..classifier.utils import get_logger
@@ -61,9 +61,8 @@ class DependencyNeuralScorer(object):
     def __init__(self):
         self.part_scores = None
         self.model = None
-        self.time_decoding = 0.
-        self.time_scoring = 0.
-        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
+        self.reset_metrics()
+        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction='sum')
 
     def compute_loss_global_probability(
             self, instance_data: InstanceData, predictions: list,
@@ -104,15 +103,15 @@ class DependencyNeuralScorer(object):
         losses = entropy + head_term + label_term
 
         check_negative_loss(losses)
-        losses = {Target.DEPENDENCY_PARTS: losses.mean()}
+        losses = {Target.DEPENDENCY_PARTS: losses.sum()}
 
         return losses
 
     def compute_loss_global_margin(self, instance_data: InstanceData,
                                    predicted_parts: list) -> dict:
         """
-        Compute the loss for either a hinge loss based or cross-entropy based
-        parser model that considers the whole tree structure.
+        Compute the loss for a hinge loss based parser model that considers
+        the whole tree structure.
         """
         # this is a list of lists of scores for each part
         score_list = [self.model.scores[type_]
@@ -135,19 +134,10 @@ class DependencyNeuralScorer(object):
 
         # diff is (batch_size, num_parts)
         diff = predicted_parts - gold_parts
-        scores_times_diff = torch.sum(part_scores * diff, 1)
-
-        # if self.parsing_loss == Objective.GLOBAL_MARGIN:
-        losses = scores_times_diff
-        # elif self.parsing_loss == Objective.GLOBAL_PROBABILITY:
-        #     entropy = torch.tensor(self.entropies, dtype=torch.float,
-        #                            device=part_scores.device)
-        #     losses = entropy + scores_times_diff
-        # else:
-        #     raise ValueError('Unknown parsing objective %s' % self.parsing_loss)
+        losses = torch.sum(part_scores * diff, 1)
 
         check_negative_loss(losses)
-        losses = {Target.DEPENDENCY_PARTS: losses.mean()}
+        losses = {Target.DEPENDENCY_PARTS: losses.sum()}
 
         return losses
 
@@ -215,7 +205,7 @@ class DependencyNeuralScorer(object):
             # cross_entropy expects (batch, n_classes, ...)
             logits = logits.transpose(1, 2)
             losses[target] = F.cross_entropy(logits, padded_gold,
-                                             ignore_index=-1)
+                                             ignore_index=-1, reduction='sum')
 
         if Target.LEMMA in gold_labels[0]:
             gold = self.model.lemmatizer.cached_gold_chars
@@ -225,7 +215,8 @@ class DependencyNeuralScorer(object):
             gold = gold.view(-1)
             logits = logits.view(batch_size * num_words, num_chars, vocab_size)
             logits = logits[token_inds].view(-1, vocab_size)
-            losses[Target.LEMMA] = F.cross_entropy(logits, gold, ignore_index=0)
+            losses[Target.LEMMA] = F.cross_entropy(
+                logits, gold, ignore_index=0, reduction='sum')
 
         return losses
 
@@ -306,11 +297,82 @@ class DependencyNeuralScorer(object):
         # distance loss
         distance_kld = torch.gather(distance_kld, 2, heads3d)
         distance_kld[padding_inds] = 0
-        kld_sum = distance_kld.mean()
+        kld_sum = distance_kld.sum()
 
         losses = {Target.DISTANCE: -kld_sum, Target.SIGN: sign_loss}
 
         return losses
+
+    def reset_metrics(self):
+        """Reset time counters"""
+        self.time_scoring = 0.
+        self.time_decoding = 0.
+        self.time_gradient = 0.
+        self.train_losses = defaultdict(float)
+
+    def _predict_and_backward(self, instance_data: InstanceData,
+                              full_batch_size: int = 1, num_jobs: int = 1):
+        """Internal helper function to run forward and then backprop the loss"""
+        try:
+            predictions = self.predict(
+                instance_data, num_jobs=num_jobs, training=True)
+
+            start_time = time.time()
+            losses = self.compute_loss(instance_data, predictions)
+
+            # divide by the original batch size, even if this is a split
+            loss = sum(losses.values()) / full_batch_size
+
+            # backpropagate the loss and accumulate, no weight adjustment yet
+            loss.backward()
+            self.time_gradient += time.time() - start_time
+
+            for target in losses:
+                # store non-normalized losses
+                self.train_losses[target] += losses[target].item()
+
+        except RuntimeError:
+            # out of memory error; split the batch in two
+            batch_size = len(instance_data)
+            if batch_size == 1:
+                length = len(instance_data.instances[0])
+                msg = 'Cannot fit into memory instance of length %d' % length
+                raise RuntimeError(msg)
+
+            index = batch_size // 2
+            self._predict_and_backward(
+                instance_data[:index], num_jobs, full_batch_size)
+            self._predict_and_backward(
+                instance_data[index:], num_jobs, full_batch_size)
+
+    def train_batch(self, instance_data: InstanceData, num_jobs: int = 1):
+        """
+        Train the model for one batch. In case the batch size is too big to fit
+        memory, automatically split it and accumulate gradients.
+        """
+        self.model.train()
+        batch_size = len(instance_data)
+        self._predict_and_backward(instance_data, batch_size, num_jobs)
+
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
+        self.optimizer.step()
+        if self.schedule is not None:
+            self.schedule.step()
+
+        # Clear out the gradients before the next batch.
+        self.model.zero_grad()
+
+    def train_report(self, num_instances):
+        """
+        Log a short report of the training loss.
+        """
+        msgs = ['Train losses:'] + make_loss_msgs(
+            self.train_losses, num_instances)
+        logger.info('\t'.join(msgs))
+
+        time_msg = 'Time to score: %.2f\tDecode: %.2f\tGradient step: %.2f'
+        time_msg %= (self.time_scoring, self.time_decoding, self.time_gradient)
+        logger.info(time_msg)
 
     def predict(self, instance_data: InstanceData, decode_tree: bool = True,
                 single_root: bool = True, training: bool = False,
@@ -594,3 +656,22 @@ def check_negative_loss(losses):
             if value < -1e-6:
                 logger.warning('Ignoring negative loss: %.6f' % value)
         losses[inds_subzero] = 0
+
+
+def make_loss_msgs(losses, dataset_size):
+    """
+    Return a list of strings in the shape
+
+    NAME: LOSS_VALUE
+
+    :param losses: dictionary mapping targets to loss values
+    :param dataset_size: value used to normalize (divide) each loss value
+    :return: list of strings
+    """
+    msgs = []
+    for target in losses:
+        target_name = target2string[target]
+        normalized_loss = losses[target] / dataset_size
+        msg = '%s: %.4f' % (target_name, normalized_loss)
+        msgs.append(msg)
+    return msgs
