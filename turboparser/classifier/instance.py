@@ -57,14 +57,15 @@ class InstanceData(object):
         accumulated_size = 0
 
         for i, inst in enumerate(self.instances):
-            if len(inst) + accumulated_size > words_per_batch:
+            length = len(inst.bert_ids)
+            if length + accumulated_size > words_per_batch:
                 # this won't fit the last batch; finish it and start a new one
                 batch = self[last_index:i]
                 self.batches.append(batch)
                 last_index = i
                 accumulated_size = 0
 
-            accumulated_size += len(inst)
+            accumulated_size += length
 
         last_batch = self[last_index:]
         self.batches.append(last_batch)
