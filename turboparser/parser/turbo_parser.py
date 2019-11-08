@@ -193,6 +193,7 @@ class TurboParser(object):
             options.lemma = loaded_options.lemma
             options.parse = loaded_options.parse
             options.parsing_loss = loaded_options.parsing_loss
+            options.bert_model = loaded_options.bert_model
 
             # threshold for the basic pruner, if used
             options.pruner_posterior_threshold = \
@@ -639,7 +640,6 @@ class TurboParser(object):
             logger.info('Saved model')
 
         logger.info('\n')
-
 
     def run_batch(self, instance_data):
         """
