@@ -564,7 +564,16 @@ class DependencyNeuralScorer(object):
     def unfreeze_encoder(self, learning_rate, training_steps):
         """
         Unfreeze the encoder weights and set the given learning rate to them.
+
+        :param learning_rate: peak learning rate for the encoder. It will be
+            adjusted with a warmup schedule (and the rest of the model's
+            parameters with it). If 0, no scheduling is done.
+        :param training_steps: maximum number of training steps. Used to
+            compute the warmup schedule.
         """
+        if learning_rate == 0:
+            return
+
         self.optimizer.param_groups[0]['lr'] = learning_rate
 
         warmup = 0.1 * training_steps

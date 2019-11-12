@@ -167,6 +167,8 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--bert_model',
                             help='Name of the BERT model to use',
                             default='bert-base-multilingual-cased')
+        parser.add_argument('--bert_learning_rate', default=0.00005, type=float,
+                            help='Learning rate for BERT (will undergo warmup)')
 
     def parse_args(self):
         options = super(DependencyOptionParser, self).parse_args()

@@ -597,7 +597,7 @@ class TurboParser(object):
 
                 # unfreeze encoder weights after first dev set run
                 if frozen_encoder:
-                    encoder_lr = self.options.learning_rate / 20
+                    encoder_lr = self.options.bert_learning_rate
                     self.neural_scorer.unfreeze_encoder(encoder_lr,
                                                         self.options.max_steps)
                     frozen_encoder = False
