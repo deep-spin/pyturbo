@@ -13,7 +13,7 @@ from joeynmt.search import greedy
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
     ParsingObjective
-from ..classifier.lstm import CharLSTM
+from ..classifier.lstm import CharLSTM, HighwayLSTM, LSTM
 from ..classifier.biaffine import DeepBiaffineScorer
 
 
@@ -287,6 +287,7 @@ class DependencyNeuralModel(nn.Module):
                  char_hidden_size,
                  transform_size,
                  rnn_size,
+                 shared_rnn_layers,
                  tag_embedding_size,
                  arc_mlp_size,
                  label_mlp_size,
@@ -425,91 +426,98 @@ class DependencyNeuralModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.total_encoded_dim = total_encoded_dim
 
+        if shared_rnn_layers > 0 and rnn_size > 0:
+            self.shared_rnn = HighwayLSTM(
+                total_encoded_dim, rnn_size, shared_rnn_layers,
+                self.dropout_rate)
+            hidden_dim = 2 * self.rnn_size
+        else:
+            self.shared_rnn = None
+            hidden_dim = total_encoded_dim
+
         # POS and morphology tags
         if self.predict_tags:
             if self.rnn_size > 0:
-                self.tagger_rnn = nn.LSTM(
-                    total_encoded_dim, self.rnn_size, batch_first=True,
-                    bidirectional=True)
-                hidden_dim = 2 * self.rnn_size
+                self.tagger_rnn = LSTM(
+                    hidden_dim, self.rnn_size, bidirectional=True)
+                tagger_dim = 2 * self.rnn_size
             else:
                 self.tagger_rnn = None
-                hidden_dim = total_encoded_dim
+                tagger_dim = total_encoded_dim
 
-        if predict_upos:
-            num_tags = token_dictionary.get_num_upos_tags()
-            self.upos_scorer = self._create_scorer(hidden_dim, num_tags,
-                                                   bias=True)
-        if predict_xpos:
-            num_tags = token_dictionary.get_num_xpos_tags()
-            self.xpos_scorer = self._create_scorer(hidden_dim, num_tags,
-                                                   bias=True)
-        if predict_morph:
-            num_tags = token_dictionary.get_num_morph_singletons()
-            self.morph_scorer = self._create_scorer(hidden_dim, num_tags,
-                                                    bias=True)
-        if predict_lemma:
-            self.lemmatizer = Lemmatizer(
-                num_chars, char_embedding_size, char_hidden_size, dropout,
-                hidden_dim, token_dictionary)
+            if predict_upos:
+                num_tags = token_dictionary.get_num_upos_tags()
+                self.upos_scorer = self._create_scorer(tagger_dim, num_tags,
+                                                       bias=True)
+            if predict_xpos:
+                num_tags = token_dictionary.get_num_xpos_tags()
+                self.xpos_scorer = self._create_scorer(tagger_dim, num_tags,
+                                                       bias=True)
+            if predict_morph:
+                num_tags = token_dictionary.get_num_morph_singletons()
+                self.morph_scorer = self._create_scorer(tagger_dim, num_tags,
+                                                        bias=True)
+            if predict_lemma:
+                self.lemmatizer = Lemmatizer(
+                    num_chars, char_embedding_size, char_hidden_size, dropout,
+                    tagger_dim, token_dictionary)
 
         if self.predict_tree:
             if self.rnn_size > 0:
-                self.parser_rnn = nn.LSTM(
-                    total_encoded_dim, self.rnn_size, batch_first=True,
-                    bidirectional=True)
-                hidden_dim = 2 * self.rnn_size
+                self.parser_rnn = LSTM(
+                    hidden_dim, self.rnn_size, bidirectional=True)
+                parser_dim = 2 * self.rnn_size
             else:
                 self.parser_rnn = None
-                hidden_dim = total_encoded_dim
+                parser_dim = hidden_dim
 
             # first order layers
             num_labels = token_dictionary.get_num_deprels()
             self.arc_scorer = DeepBiaffineScorer(
-                hidden_dim, hidden_dim, arc_mlp_size, 1, dropout=dropout)
+                parser_dim, parser_dim, arc_mlp_size, 1, dropout=dropout)
             self.label_scorer = DeepBiaffineScorer(
-                hidden_dim, hidden_dim, label_mlp_size,
+                parser_dim, parser_dim, label_mlp_size,
                 num_labels, dropout=dropout)
             self.linearization_scorer = DeepBiaffineScorer(
-                hidden_dim, hidden_dim, arc_mlp_size, 1, dropout=dropout)
+                parser_dim, parser_dim, arc_mlp_size, 1, dropout=dropout)
             self.distance_scorer = DeepBiaffineScorer(
-                hidden_dim, hidden_dim, arc_mlp_size, 1, dropout=dropout)
+                parser_dim, parser_dim, arc_mlp_size, 1, dropout=dropout)
 
             # Higher order layers
             if model_type.grandparents:
                 self.gp_grandparent_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.gp_head_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.gp_modifier_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.gp_coeff = self._create_parameter_tensor([3], 1.)
                 self.grandparent_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings:
                 self.sib_head_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.sib_modifier_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.sib_sibling_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.sib_coeff = self._create_parameter_tensor([3], 1.)
                 self.sibling_scorer = self._create_scorer(self.ho_mlp_size)
 
             if model_type.consecutive_siblings or model_type.grandsiblings \
                     or model_type.trisiblings or model_type.arbitrary_siblings:
                 self.null_sibling_tensor = self._create_parameter_tensor(
-                    hidden_dim)
+                    parser_dim)
 
             if model_type.grandsiblings:
                 self.gsib_head_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.gsib_modifier_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.gsib_sibling_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.gsib_grandparent_mlp = self._create_mlp(
-                    hidden_dim, self.ho_mlp_size)
+                    parser_dim, self.ho_mlp_size)
                 self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
 
         # Clear out the gradients before the next batch.
@@ -1172,27 +1180,36 @@ class DependencyNeuralModel(nn.Module):
 
         embeddings = self.get_word_representations(
             instances, max_length, char_indices, token_lengths)
+        if self.shared_rnn is not None or self.rnn_size > 0:
+            packed_embeddings = rnn_utils.pack_padded_sequence(
+                    embeddings, lengths, batch_first=True, enforce_sorted=False)
+
+            if self.shared_rnn:
+                hidden_states, _ = self.shared_rnn(packed_embeddings)
+            else:
+                hidden_states = packed_embeddings
+        else:
+            # no RNNs used anywhere, just keep the embeddings
+            hidden_states = embeddings
 
         if self.predict_tags or self.predict_lemma:
             if self.tagger_rnn is None:
                 # ignore root
-                hidden_states = embeddings[:, 1:]
+                tagger_states = hidden_states[:, 1:]
             else:
-                packed_embeddings = rnn_utils.pack_padded_sequence(
-                    embeddings, lengths, batch_first=True, enforce_sorted=False)
-                hidden_states, _ = self.tagger_rnn(packed_embeddings)
-                hidden_states, _ = rnn_utils.pad_packed_sequence(
-                    hidden_states, batch_first=True)
-                hidden_states = hidden_states[:, 1:]
+                packed_tagged_states, _ = self.tagger_rnn(hidden_states)
+                tagger_states, _ = rnn_utils.pad_packed_sequence(
+                    packed_tagged_states, batch_first=True)
+                tagger_states = tagger_states[:, 1:]
 
             if self.predict_upos:
-                self.scores[Target.UPOS] = self.upos_scorer(hidden_states)
+                self.scores[Target.UPOS] = self.upos_scorer(tagger_states)
 
             if self.predict_xpos:
-                self.scores[Target.XPOS] = self.xpos_scorer(hidden_states)
+                self.scores[Target.XPOS] = self.xpos_scorer(tagger_states)
 
             if self.predict_morph:
-                self.scores[Target.MORPH] = self.morph_scorer(hidden_states)
+                self.scores[Target.MORPH] = self.morph_scorer(tagger_states)
 
             # if self.predict_lemma:
             #     if self.training:
@@ -1211,21 +1228,19 @@ class DependencyNeuralModel(nn.Module):
 
         if self.predict_tree:
             if self.parser_rnn is None:
-                hidden_states = embeddings
+                parser_states = hidden_states
             else:
-                packed_embeddings = rnn_utils.pack_padded_sequence(
-                    embeddings, lengths, batch_first=True, enforce_sorted=False)
-                hidden_states, _ = self.tagger_rnn(packed_embeddings)
-                hidden_states, _ = rnn_utils.pad_packed_sequence(
-                    hidden_states, batch_first=True)
+                packed_parser_states, _ = self.parser_rnn(hidden_states)
+                parser_states, _ = rnn_utils.pad_packed_sequence(
+                    packed_parser_states, batch_first=True)
 
             self._compute_arc_scores(
-                hidden_states, lengths, normalization)
+                parser_states, lengths, normalization)
 
             # now go through each batch item
             for i in range(batch_size):
                 length = lengths[i].item()
-                states = hidden_states[i, :length]
+                states = parser_states[i, :length]
                 sent_parts = parts[i]
 
                 if self.model_type.consecutive_siblings:

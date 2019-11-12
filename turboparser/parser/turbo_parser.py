@@ -57,6 +57,7 @@ class TurboParser(object):
                 arc_mlp_size=self.options.arc_mlp_size,
                 label_mlp_size=self.options.label_mlp_size,
                 ho_mlp_size=self.options.ho_mlp_size,
+                shared_rnn_layers=self.options.rnn_layers,
                 dropout=self.options.dropout,
                 word_dropout=options.word_dropout,
                 tag_mlp_size=options.tag_mlp_size,
