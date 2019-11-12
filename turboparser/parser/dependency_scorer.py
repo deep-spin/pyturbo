@@ -311,11 +311,10 @@ class DependencyNeuralScorer(object):
         self.train_losses = defaultdict(float)
 
     def _predict_and_backward(self, instance_data: InstanceData,
-                              full_batch_size: int = 1, num_jobs: int = 1):
+                              full_batch_size: int = 1):
         """Internal helper function to run forward and then backprop the loss"""
         try:
-            predictions = self.predict(
-                instance_data, num_jobs=num_jobs, training=True)
+            predictions = self.predict(instance_data, training=True)
 
             start_time = time.time()
             losses = self.compute_loss(instance_data, predictions)
@@ -345,18 +344,18 @@ class DependencyNeuralScorer(object):
 
             index = batch_size // 2
             self._predict_and_backward(
-                instance_data[:index], num_jobs, full_batch_size)
+                instance_data[:index], full_batch_size)
             self._predict_and_backward(
-                instance_data[index:], num_jobs, full_batch_size)
+                instance_data[index:], full_batch_size)
 
-    def train_batch(self, instance_data: InstanceData, num_jobs: int = 1):
+    def train_batch(self, instance_data: InstanceData):
         """
         Train the model for one batch. In case the batch size is too big to fit
         memory, automatically split it and accumulate gradients.
         """
         self.model.train()
         batch_size = len(instance_data)
-        self._predict_and_backward(instance_data, batch_size, num_jobs)
+        self._predict_and_backward(instance_data, batch_size)
 
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
         self.optimizer.step()
@@ -379,8 +378,7 @@ class DependencyNeuralScorer(object):
         logger.info(time_msg)
 
     def predict(self, instance_data: InstanceData, decode_tree: bool = True,
-                single_root: bool = True, training: bool = False,
-                num_jobs: int = 1):
+                single_root: bool = True, training: bool = False):
         """
         Predict the outputs for the given data, running decoding when necessary.
 
@@ -393,8 +391,6 @@ class DependencyNeuralScorer(object):
             full decoding.
         :param single_root: whether to enforce a single sentence root. Only used
             if parsing and decode_tree is True
-        :param num_jobs: in case of higher order dependency decoding, number of
-            parallel jobs to launch
         :return: If training is True:
             if there is no parser model: None
             if the parsing objective is local: None
@@ -493,8 +489,10 @@ class DependencyNeuralScorer(object):
                 part_scores = [{target: part_scores[target][i]
                                 for target in part_scores}
                                for i in range(num_instances)]
-                predicted = decoding.batch_decode(
-                    instance_data, part_scores, num_jobs)
+                predicted = [decoding.decode(instance_data.instances[i],
+                                             instance_data.parts[i],
+                                             part_scores[i])
+                             for i in range(num_instances)]
                 end_decoding = time.time()
                 self.time_decoding += end_decoding - start_decoding
 

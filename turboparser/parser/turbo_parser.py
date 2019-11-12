@@ -117,12 +117,6 @@ class TurboParser(object):
         self.has_pruner = bool(self.options.pruner_path)
 
         if self.options.model_type.first_order:
-            if self.options.num_jobs > 1:
-                msg = 'Number of parallel jobs > 1 only worth it with higher ' \
-                      'order models; setting it to 1'
-                logger.warning(msg)
-                self.options.num_jobs = 1
-
             if self.has_pruner:
                 msg = 'Pruner set for arc-factored model. This is probably ' \
                       'not necessary and inefficient'
@@ -575,7 +569,7 @@ class TurboParser(object):
 
         for global_step in range(1, self.options.max_steps + 1):
             batch = train_data.get_next_batch()
-            self.neural_scorer.train_batch(batch, self.options.num_jobs)
+            self.neural_scorer.train_batch(batch)
             self.num_train_instances += len(batch)
 
             if global_step % self.options.log_interval == 0:
@@ -654,8 +648,7 @@ class TurboParser(object):
         """
         self.neural_scorer.eval_mode()
         predictions = self.neural_scorer.predict(
-            instance_data, single_root=self.options.single_root,
-            num_jobs=self.options.num_jobs)
+            instance_data, single_root=self.options.single_root)
 
         if self.options.lemma:
             # if this model includes a lemmatizer, cut sequences at EOS
