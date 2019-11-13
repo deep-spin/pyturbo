@@ -479,7 +479,7 @@ class DependencyNeuralScorer(object):
                     predicted.append((head_marginals, label_marginals))
                     best_labels.append(label_marginals.argmax(-1))
                     self.entropies.append(entropy)
-
+                    
                 end_decoding = time.time()
                 self.time_decoding += end_decoding - start_decoding
 
