@@ -1180,16 +1180,18 @@ class DependencyNeuralModel(nn.Module):
 
         embeddings = self.get_word_representations(
             instances, max_length, char_indices, token_lengths)
-        if self.shared_rnn is not None or self.rnn_size > 0:
-            packed_embeddings = rnn_utils.pack_padded_sequence(
-                    embeddings, lengths, batch_first=True, enforce_sorted=False)
 
-            if self.shared_rnn:
-                hidden_states, _ = self.shared_rnn(packed_embeddings)
-            else:
-                hidden_states = packed_embeddings
+        if self.shared_rnn is not None:
+            packed_embeddings = rnn_utils.pack_padded_sequence(
+                embeddings, lengths, batch_first=True, enforce_sorted=False)
+
+            # get hidden states for all words, ignore final cell
+            packed_states, _ = self.shared_rnn(packed_embeddings)
+
+            # ignore lengths -- we already know it!
+            hidden_states, _ = rnn_utils.pad_packed_sequence(
+                packed_states, batch_first=True)
         else:
-            # no RNNs used anywhere, just keep the embeddings
             hidden_states = embeddings
 
         if self.predict_tags or self.predict_lemma:
@@ -1197,9 +1199,12 @@ class DependencyNeuralModel(nn.Module):
                 # ignore root
                 tagger_states = hidden_states[:, 1:]
             else:
-                packed_tagged_states, _ = self.tagger_rnn(hidden_states)
+                dropped = self.dropout(hidden_states)
+                packed_states = rnn_utils.pack_padded_sequence(
+                    dropped, lengths, batch_first=True, enforce_sorted=False)
+                tagger_packed_states, _ = self.tagger_rnn(packed_states)
                 tagger_states, _ = rnn_utils.pad_packed_sequence(
-                    packed_tagged_states, batch_first=True)
+                    tagger_packed_states, batch_first=True)
                 tagger_states = tagger_states[:, 1:]
 
             if self.predict_upos:
@@ -1230,9 +1235,13 @@ class DependencyNeuralModel(nn.Module):
             if self.parser_rnn is None:
                 parser_states = hidden_states
             else:
-                packed_parser_states, _ = self.parser_rnn(hidden_states)
+                dropped = self.dropout(hidden_states)
+                packed_states = rnn_utils.pack_padded_sequence(
+                    dropped, lengths, batch_first=True, enforce_sorted=False)
+
+                parser_packed_states, _ = self.parser_rnn(packed_states)
                 parser_states, _ = rnn_utils.pad_packed_sequence(
-                    packed_parser_states, batch_first=True)
+                    parser_packed_states, batch_first=True)
 
             self._compute_arc_scores(
                 parser_states, lengths, normalization)

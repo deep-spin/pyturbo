@@ -131,6 +131,7 @@ class HighwayLSTM(nn.Module):
         self.lstms = nn.ModuleList()
         self.gates = nn.ModuleList()
         self.highways = nn.ModuleList()
+        # inplace=True to apply dropout to packed sequences
         self.dropout = nn.Dropout(dropout, inplace=True)
         num_directions = 2 if bidirectional else 1
         actual_hidden_size = num_directions * hidden_size
@@ -151,20 +152,11 @@ class HighwayLSTM(nn.Module):
 
             input_size = actual_hidden_size
 
-    def _packed_dropout(self, states):
-        """Apply dropout to packed states"""
-        # shared_states is a packed tuple; (data, lengths)
-        states_data = states.data
-        states_lengths = states.batch_sizes
-        states_data = self.dropout(states_data)
-        states = nn.utils.rnn.PackedSequence(states_data, states_lengths)
-        return states
-
-    def forward(self, x):
+    def forward(self, x: PackedSequence):
         h_output = []
         c_output = []
         for lstm, gate, highway in zip(self.lstms, self.gates, self.highways):
-            x = self._packed_dropout(x)
+            self.dropout(x.data)
             packed_hidden, (ht, ct) = lstm(x)
             h_output.append(ht)
             c_output.append(ct)
@@ -177,7 +169,8 @@ class HighwayLSTM(nn.Module):
             t = torch.tanh(highway(padded_x))
             hidden = g * padded_hidden + (1 - g) * t
 
-            x = pack_padded_sequence(hidden, lengths, batch_first=True)
+            x = pack_padded_sequence(hidden, lengths, batch_first=True,
+                                     enforce_sorted=False)
 
         h_output = torch.cat(h_output, 0)
         c_output = torch.cat(c_output, 0)
