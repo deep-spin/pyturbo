@@ -632,6 +632,7 @@ class DependencyNeuralModel(nn.Module):
         char_hidden_size = options.char_hidden_size
         transform_size = options.transform_size
         rnn_size = options.rnn_size
+        shared_layers = options.rnn_layers
         arc_mlp_size = options.arc_mlp_size
         tag_mlp_size = options.tag_mlp_size
         label_mlp_size = options.label_mlp_size
@@ -661,6 +662,7 @@ class DependencyNeuralModel(nn.Module):
             char_hidden_size=char_hidden_size,
             transform_size=transform_size,
             rnn_size=rnn_size,
+            shared_rnn_layers=shared_layers,
             arc_mlp_size=arc_mlp_size,
             tag_mlp_size=tag_mlp_size,
             label_mlp_size=label_mlp_size,
