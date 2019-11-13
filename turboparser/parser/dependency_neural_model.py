@@ -397,10 +397,10 @@ class DependencyNeuralModel(nn.Module):
                 num_chars, char_embedding_size, char_hidden_size,
                 dropout=dropout, bidirectional=False)
 
-            num_directions = 1
-            self.char_projection = nn.Linear(
-                num_directions * char_hidden_size, transform_size, bias=False)
-            total_encoded_dim += transform_size
+            # num_directions = 1
+            # self.char_projection = nn.Linear(
+            #     num_directions * char_hidden_size, transform_size, bias=False)
+            total_encoded_dim += char_hidden_size
         else:
             self.char_rnn = None
 
@@ -411,9 +411,9 @@ class DependencyNeuralModel(nn.Module):
                                                  dtype=torch.float)
             self.fixed_word_embeddings = nn.Embedding.from_pretrained(
                 fixed_word_embeddings, freeze=True)
-            self.fixed_embedding_projection = nn.Linear(
-                fixed_word_embeddings.shape[1], transform_size, bias=False)
-            total_encoded_dim += transform_size
+            # self.fixed_embedding_projection = nn.Linear(
+            #     fixed_word_embeddings.shape[1], transform_size, bias=False)
+            total_encoded_dim += fixed_word_embeddings.shape[1]
 
         if isinstance(pretrained_name_or_config, BertConfig):
             self.encoder = BertModel(pretrained_name_or_config)
@@ -962,8 +962,8 @@ class DependencyNeuralModel(nn.Module):
         if self.fixed_word_embeddings is not None:
             word_embeddings = self._get_embeddings(
                 instances, max_length, 'fixedword')
-            projection = self.fixed_embedding_projection(word_embeddings)
-            all_embeddings.append(projection)
+            # projection = self.fixed_embedding_projection(word_embeddings)
+            all_embeddings.append(word_embeddings)
 
         if self.lemma_embeddings is not None:
             lemma_embeddings = self._get_embeddings(instances, max_length,
@@ -985,8 +985,8 @@ class DependencyNeuralModel(nn.Module):
 
         if self.char_rnn is not None:
             char_embeddings = self.char_rnn(char_indices, token_lengths)
-            projection = self.char_projection(self.dropout(char_embeddings))
-            all_embeddings.append(projection)
+            # projection = self.char_projection(self.dropout(char_embeddings))
+            all_embeddings.append(char_embeddings)
 
         # each embedding tensor is (batch, num_tokens, embedding_size)
         embeddings = torch.cat(all_embeddings, dim=2)
