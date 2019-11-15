@@ -100,6 +100,8 @@ class DependencyInstanceNumeric(DependencyInstance):
 
             # Morphological tags.
             morph_singleton = instance.morph_singletons[i]
+            if morph_singleton == '_':
+                morph_singleton = EMPTY
             self.morph_singletons[i] = token_dictionary.\
                 get_morph_singleton_id(morph_singleton)
 
