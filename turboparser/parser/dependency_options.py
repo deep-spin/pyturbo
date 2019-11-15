@@ -138,7 +138,7 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--char_hidden_size', default=200, type=int,
                             help='''Size of the hidden char RNN (each 
                             direction)''')
-        parser.add_argument('--tag_embedding_size', type=int, default=50,
+        parser.add_argument('--tag_embedding_size', type=int, default=0,
                             help='Size of tag embeddings')
         parser.add_argument('--transform_size', type=int, default=125,
                             help='''Size of the linear transformation for 
@@ -155,15 +155,13 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--tag_mlp_size', type=int, default=100,
                             help='Size of MLP layer for tagging')
         parser.add_argument('--rnn_layers', type=int, default=2,
-                            help='Number of RNN layers')
+                            help='Number of shared RNN layers for all tasks')
         parser.add_argument('--mlp_layers', type=int, default=1,
                             help='Number of MLP layers')
         parser.add_argument('--dropout', type=float, default=0.5,
                             help='Dropout rate')
         parser.add_argument('--word_dropout', type=float, default=0.33,
                             help='Word dropout rate (replace by unknown)')
-        parser.add_argument('--num_jobs', type=int, default=1,
-                            help='Number of parallel jobs for global decoding')
         parser.add_argument('--bert_model',
                             help='Name of the BERT model to use',
                             default='bert-base-multilingual-cased')
