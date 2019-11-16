@@ -378,7 +378,7 @@ class DependencyNeuralScorer(object):
                 # because we use search algorithms over the output space
                 if target != Target.LEMMA or self.model.training:
                     tagging_predictions[target] = target_scores.argmax(-1).\
-                        numpy()
+                        cpu().numpy()
                 else:
                     tagging_predictions[target] = target_scores
 
