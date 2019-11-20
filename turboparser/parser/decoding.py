@@ -163,6 +163,8 @@ def decode_matrix_tree(scores):
     #     = ∇ [ c*n + log(det(exp(A - c))) ]
     #     = exp(A - c)⁻ᵀ
 
+    # double precision is important to avoid some overflows
+    scores = scores.astype(np.float64)
     c = scores.max()
     scores_plus = scores - scores.min()
     scores_minus = scores - c
