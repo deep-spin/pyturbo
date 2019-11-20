@@ -1033,7 +1033,9 @@ class DependencyNeuralModel(nn.Module):
 
         if self.char_rnn is not None:
             char_embeddings = self.char_rnn(char_indices, token_lengths)
-            # projection = self.char_projection(self.dropout(char_embeddings))
+            if self.transform_size > 0:
+                dropped = self.dropout(char_embeddings)
+                char_embeddings = self.char_projection(dropped)
             all_embeddings.append(char_embeddings)
 
         # each embedding tensor is (batch, num_tokens, embedding_size)
