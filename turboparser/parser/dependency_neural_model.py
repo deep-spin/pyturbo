@@ -300,7 +300,7 @@ class DependencyNeuralModel(nn.Module):
                  predict_morph=True,
                  predict_lemma=False,
                  predict_tree=True,
-                 tag_mlp_size=125,
+                 tag_mlp_size=0,
                  pretrained_name_or_config=None):
         """
         :param model_type: a ModelType object
@@ -464,17 +464,31 @@ class DependencyNeuralModel(nn.Module):
                 self.tagger_rnn = None
                 tagger_dim = total_encoded_dim
 
+            scorer_dim = tag_mlp_size if tag_mlp_size > 0 else tagger_dim
+
             if predict_upos:
+                if tag_mlp_size > 0:
+                    self.upos_mlp = self._create_mlp(
+                        tagger_dim, tag_mlp_size, num_layers=1,
+                        output_activation=nn.ReLU())
                 num_tags = token_dictionary.get_num_upos_tags()
-                self.upos_scorer = self._create_scorer(tagger_dim, num_tags,
+                self.upos_scorer = self._create_scorer(scorer_dim, num_tags,
                                                        bias=True)
             if predict_xpos:
+                if tag_mlp_size > 0:
+                    self.xpos_mlp = self._create_mlp(
+                        tagger_dim, tag_mlp_size, num_layers=1,
+                        output_activation=nn.ReLU())
                 num_tags = token_dictionary.get_num_xpos_tags()
-                self.xpos_scorer = self._create_scorer(tagger_dim, num_tags,
+                self.xpos_scorer = self._create_scorer(scorer_dim, num_tags,
                                                        bias=True)
             if predict_morph:
+                if tag_mlp_size > 0:
+                    self.morph_mlp = self._create_mlp(
+                        tagger_dim, tag_mlp_size, num_layers=1,
+                        output_activation=nn.ReLU())
                 num_tags = token_dictionary.get_num_morph_singletons()
-                self.morph_scorer = self._create_scorer(tagger_dim, num_tags,
+                self.morph_scorer = self._create_scorer(scorer_dim, num_tags,
                                                         bias=True)
             if predict_lemma:
                 self.lemmatizer = Lemmatizer(
@@ -1222,7 +1236,7 @@ class DependencyNeuralModel(nn.Module):
             # get hidden states for all words, ignore final cell
             packed_states, _ = self.shared_rnn(packed_embeddings)
 
-            # ignore lengths -- we already know it!
+            # ignore lengths -- we already know them!
             hidden_states, _ = rnn_utils.pad_packed_sequence(
                 packed_states, batch_first=True)
         else:
@@ -1242,13 +1256,25 @@ class DependencyNeuralModel(nn.Module):
                 tagger_states = tagger_states[:, 1:]
 
             if self.predict_upos:
-                self.scores[Target.UPOS] = self.upos_scorer(tagger_states)
+                if self.tag_mlp_size > 0:
+                    scorer_states = self.upos_mlp(tagger_states)
+                else:
+                    scorer_states = tagger_states
+                self.scores[Target.UPOS] = self.upos_scorer(scorer_states)
 
             if self.predict_xpos:
-                self.scores[Target.XPOS] = self.xpos_scorer(tagger_states)
+                if self.tag_mlp_size > 0:
+                    scorer_states = self.xpos_mlp(tagger_states)
+                else:
+                    scorer_states = tagger_states
+                self.scores[Target.XPOS] = self.xpos_scorer(scorer_states)
 
             if self.predict_morph:
-                self.scores[Target.MORPH] = self.morph_scorer(tagger_states)
+                if self.tag_mlp_size > 0:
+                    scorer_states = self.morph_mlp(tagger_states)
+                else:
+                    scorer_states = tagger_states
+                self.scores[Target.MORPH] = self.morph_scorer(scorer_states)
 
             # if self.predict_lemma:
             #     if self.training:
