@@ -38,7 +38,7 @@ class InstanceData(object):
     def __len__(self):
         return len(self.instances)
 
-    def prepare_batches(self, words_per_batch, sort=False):
+    def prepare_batches(self, words_per_batch: int, sort=False):
         """
         Split the data into a sequence of batches such that each one has at most
         `words_per_batch` words.
@@ -55,9 +55,10 @@ class InstanceData(object):
         self.batches = []
         last_index = 0
         accumulated_size = 0
+        use_bert = hasattr(self.instances[0], 'bert_ids')
 
         for i, inst in enumerate(self.instances):
-            length = len(inst.bert_ids)
+            length = len(inst.bert_ids) if use_bert else len(inst)
             if length + accumulated_size > words_per_batch:
                 # this won't fit the last batch; finish it and start a new one
                 batch = self[last_index:i]

@@ -585,7 +585,7 @@ class DependencyNeuralScorer(object):
 
         self.set_model(model)
         self.parsing_loss = parsing_loss
-        bert_params = model.encoder.parameters()
+        bert_params = model.encoder.parameters() if model.encoder else []
         model_params = [p for name, p in model.named_parameters()
                         if not name.startswith('encoder.')]
         params = [{'params': bert_params, 'lr': 0},

@@ -508,7 +508,11 @@ class TurboParser(object):
         self.pruner_mistakes = 0
         num_relations = self.token_dictionary.get_num_deprels()
         labeled = not self.options.unlabeled
-        tokenizer = BertTokenizer.from_pretrained(self.options.bert_model)
+        if self.options.bert_model is None:
+            bert_tokenizer = None
+        else:
+            bert_tokenizer = BertTokenizer.from_pretrained(
+                self.options.bert_model)
 
         if self.options.parse and self.has_pruner:
             prune_masks = self.run_pruner(instances)
@@ -519,7 +523,7 @@ class TurboParser(object):
             mask = None if prune_masks is None else prune_masks[i]
             numeric_instance = DependencyInstanceNumeric(
                 instance, self.token_dictionary, self.options.case_sensitive,
-                tokenizer)
+                bert_tokenizer)
             parts = DependencyParts(numeric_instance, self.options.model_type,
                                     mask, labeled, num_relations)
             gold_labels = self.get_gold_labels(numeric_instance)

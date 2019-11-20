@@ -309,8 +309,9 @@ class DependencyNeuralModel(nn.Module):
             (kept fixed), or None
         :param word_dropout: probability of replacing a word with the unknown
             token
-        :param pretrained_name_or_config: either a string (with the pretrained
-            BERT model to be used) or a BertConfig instance when loading
+        :param pretrained_name_or_config: None, a string (with the pretrained
+            BERT model to be used) or a BertConfig instance when loading a pre
+            trained parser. If None, no BERT will be used.
         """
         super(DependencyNeuralModel, self).__init__()
         self.char_embedding_size = char_embedding_size
@@ -345,7 +346,7 @@ class DependencyNeuralModel(nn.Module):
             alphabet = morph_alphabets[feature_name]
             self.unknown_morphs[i] = alphabet.lookup(UNKNOWN)
 
-        total_encoded_dim = encoder_dim
+        total_encoded_dim = 0
 
         if lemma_embedding_size:
             num_lemmas = token_dictionary.get_num_lemmas()
@@ -415,11 +416,15 @@ class DependencyNeuralModel(nn.Module):
             #     fixed_word_embeddings.shape[1], transform_size, bias=False)
             total_encoded_dim += fixed_word_embeddings.shape[1]
 
-        if isinstance(pretrained_name_or_config, BertConfig):
+        if pretrained_name_or_config is None:
+            self.encoder = None
+        elif isinstance(pretrained_name_or_config, BertConfig):
             self.encoder = BertModel(pretrained_name_or_config)
+            total_encoded_dim += encoder_dim
         else:
             self.encoder = BertModel.from_pretrained(
                 pretrained_name_or_config, output_hidden_states=True)
+            total_encoded_dim += encoder_dim
 
         self.dropout_replacement = nn.Parameter(
             torch.randn(total_encoded_dim) / np.sqrt(total_encoded_dim))
@@ -615,8 +620,12 @@ class DependencyNeuralModel(nn.Module):
             vocab, dim = 0, 0
         else:
             vocab, dim = self.fixed_word_embeddings.weight.shape
-        bert_config = self.encoder.config
-        data = bert_config.to_dict()
+        if self.encoder is None:
+            data = {}
+        else:
+            bert_config = self.encoder.config
+            data = bert_config.to_dict()
+
         data['fixed_embedding_vocabulary'] = vocab
         data['fixed_embedding_size'] = dim
 
@@ -652,7 +661,10 @@ class DependencyNeuralModel(nn.Module):
         else:
             dummy_embeddings = None
 
-        config = BertConfig.from_dict(metadata)
+        if options.bert_model is None:
+            config = None
+        else:
+            config = BertConfig.from_dict(metadata)
 
         model = DependencyNeuralModel(
             model_type, token_dictionary, dummy_embeddings,
@@ -958,8 +970,10 @@ class DependencyNeuralModel(nn.Module):
         """
         all_embeddings = []
 
-        bert_embeddings = self._get_bert_representations(instances, max_length)
-        all_embeddings.append(bert_embeddings)
+        if self.encoder is not None:
+            bert_embeddings = self._get_bert_representations(instances,
+                                                             max_length)
+            all_embeddings.append(bert_embeddings)
 
         if self.fixed_word_embeddings is not None:
             word_embeddings = self._get_embeddings(

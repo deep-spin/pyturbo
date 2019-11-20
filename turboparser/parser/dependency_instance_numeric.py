@@ -34,21 +34,22 @@ class DependencyInstanceNumeric(DependencyInstance):
         self.relations = self.heads.copy()
         self.multiwords = instance.multiwords
 
-        # skip root
-        bert_tokens = []
-        bert_token_starts = []
-        for form in instance.forms[1:]:
-            # store the position of the first word piece of each token
-            bert_token_starts.append(len(bert_tokens))
-            bert_tokens.extend(bert_tokenizer.tokenize(form))
+        if bert_tokenizer is not None:
+            # skip root
+            bert_tokens = []
+            bert_token_starts = []
+            for form in instance.forms[1:]:
+                # store the position of the first word piece of each token
+                bert_token_starts.append(len(bert_tokens))
+                bert_tokens.extend(bert_tokenizer.tokenize(form))
 
-        self.bert_token_starts = np.array(bert_token_starts)
+            self.bert_token_starts = np.array(bert_token_starts)
 
-        cls_id = bert_tokenizer.cls_token_id
-        sep_id = bert_tokenizer.sep_token_id
-        token_ids = bert_tokenizer.convert_tokens_to_ids(bert_tokens)
-        bert_ids = [cls_id] + token_ids + [sep_id]
-        self.bert_ids = np.array(bert_ids)
+            cls_id = bert_tokenizer.cls_token_id
+            sep_id = bert_tokenizer.sep_token_id
+            token_ids = bert_tokenizer.convert_tokens_to_ids(bert_tokens)
+            bert_ids = [cls_id] + token_ids + [sep_id]
+            self.bert_ids = np.array(bert_ids)
 
         for i in range(length):
             # Form and lower-case form.

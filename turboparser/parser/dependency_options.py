@@ -163,8 +163,8 @@ class DependencyOptionParser(OptionParser):
         parser.add_argument('--word_dropout', type=float, default=0.33,
                             help='Word dropout rate (replace by unknown)')
         parser.add_argument('--bert_model',
-                            help='Name of the BERT model to use',
-                            default='bert-base-multilingual-cased')
+                            help='Name of the BERT model to use (blank not to '
+                                 'use BERT)')
         parser.add_argument('--bert_learning_rate', default=0.00005, type=float,
                             help='Learning rate for BERT (will undergo warmup)')
 

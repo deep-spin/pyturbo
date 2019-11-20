@@ -221,12 +221,11 @@ class DependencyParts(object):
             self.gold_parts = np.array(self.gold_parts, dtype=np.float32)
             assert self.num_parts == len(self.gold_parts)
 
-    def _make_gold_arcs(self, instance):
+    def _make_gold_arcs(self, instance: DependencyInstanceNumeric):
         """
         If the instance has gold heads, create a list with the gold arcs and
         gold relations.
 
-        :type instance: DependencyInstanceNumeric
         :return: a list of 0s and 1s
         """
         heads = instance.get_all_heads()
