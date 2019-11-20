@@ -282,25 +282,26 @@ class DependencyNeuralModel(nn.Module):
                  model_type,
                  token_dictionary,
                  fixed_word_embeddings,
-                 lemma_embedding_size,
-                 char_embedding_size,
-                 char_hidden_size,
-                 transform_size,
-                 rnn_size,
-                 shared_rnn_layers,
-                 tag_embedding_size,
-                 arc_mlp_size,
-                 label_mlp_size,
-                 ho_mlp_size,
-                 dropout,
-                 word_dropout,
-                 predict_upos,
-                 predict_xpos,
-                 predict_morph,
-                 predict_lemma,
-                 predict_tree,
-                 tag_mlp_size,
-                 pretrained_name_or_config):
+                 trainable_word_embedding_size=75,
+                 lemma_embedding_size=0,
+                 char_embedding_size=250,
+                 char_hidden_size=400,
+                 transform_size=125,
+                 rnn_size=400,
+                 shared_rnn_layers=2,
+                 tag_embedding_size=0,
+                 arc_mlp_size=400,
+                 label_mlp_size=400,
+                 ho_mlp_size=200,
+                 dropout=0.5,
+                 word_dropout=0.33,
+                 predict_upos=True,
+                 predict_xpos=True,
+                 predict_morph=True,
+                 predict_lemma=False,
+                 predict_tree=True,
+                 tag_mlp_size=125,
+                 pretrained_name_or_config=None):
         """
         :param model_type: a ModelType object
         :param token_dictionary: TokenDictionary object
@@ -347,6 +348,14 @@ class DependencyNeuralModel(nn.Module):
             self.unknown_morphs[i] = alphabet.lookup(UNKNOWN)
 
         total_encoded_dim = 0
+
+        if trainable_word_embedding_size:
+            num_words = token_dictionary.get_num_forms()
+            self.trainable_word_embeddings = nn.Embedding(
+                num_words, trainable_word_embedding_size)
+            total_encoded_dim += trainable_word_embedding_size
+        else:
+            self.trainable_word_embeddings = None
 
         if lemma_embedding_size:
             num_lemmas = token_dictionary.get_num_lemmas()
@@ -398,10 +407,12 @@ class DependencyNeuralModel(nn.Module):
                 num_chars, char_embedding_size, char_hidden_size,
                 dropout=dropout, bidirectional=False)
 
-            # num_directions = 1
-            # self.char_projection = nn.Linear(
-            #     num_directions * char_hidden_size, transform_size, bias=False)
-            total_encoded_dim += char_hidden_size
+            if self.transform_size > 0:
+                self.char_projection = nn.Linear(
+                    char_hidden_size, transform_size, bias=False)
+                total_encoded_dim += transform_size
+            else:
+                total_encoded_dim += char_hidden_size
         else:
             self.char_rnn = None
 
@@ -412,9 +423,12 @@ class DependencyNeuralModel(nn.Module):
                                                  dtype=torch.float)
             self.fixed_word_embeddings = nn.Embedding.from_pretrained(
                 fixed_word_embeddings, freeze=True)
-            # self.fixed_embedding_projection = nn.Linear(
-            #     fixed_word_embeddings.shape[1], transform_size, bias=False)
-            total_encoded_dim += fixed_word_embeddings.shape[1]
+            if self.transform_size > 0:
+                self.fixed_embedding_projection = nn.Linear(
+                    fixed_word_embeddings.shape[1], transform_size, bias=False)
+                total_encoded_dim += transform_size
+            else:
+                total_encoded_dim += fixed_word_embeddings.shape[1]
 
         if pretrained_name_or_config is None:
             self.encoder = None
@@ -528,14 +542,9 @@ class DependencyNeuralModel(nn.Module):
         # Clear out the gradients before the next batch.
         self.zero_grad()
 
-    def _packed_dropout(self, states):
-        """Apply dropout to packed states"""
-        # shared_states is a packed tuple; (data, lengths)
-        states_data = states.data
-        states_lengths = states.batch_sizes
-        states_data = self.dropout(states_data)
-        states = nn.utils.rnn.PackedSequence(states_data, states_lengths)
-        return states
+    def extra_repr(self) -> str:
+        dim = self.dropout_replacement.shape[0]
+        return '(dropout_replacement): Tensor(%d)' % dim
 
     def _create_parameter_tensor(self, shape, value=None):
         """
@@ -637,6 +646,7 @@ class DependencyNeuralModel(nn.Module):
         fixed_embedding_size = metadata['fixed_embedding_size']
         lemma_embedding_size = options.lemma_embedding_size
         char_embedding_size = options.char_embedding_size
+        trainable_embedding_size = options.embedding_size
         tag_embedding_size = options.tag_embedding_size
         char_hidden_size = options.char_hidden_size
         transform_size = options.transform_size
@@ -668,6 +678,7 @@ class DependencyNeuralModel(nn.Module):
 
         model = DependencyNeuralModel(
             model_type, token_dictionary, dummy_embeddings,
+            trainable_embedding_size,
             lemma_embedding_size,
             char_embedding_size,
             tag_embedding_size=tag_embedding_size,
@@ -970,6 +981,11 @@ class DependencyNeuralModel(nn.Module):
         """
         all_embeddings = []
 
+        if self.trainable_word_embeddings is not None:
+            trainable_embeddings = self._get_embeddings(instances, max_length,
+                                                        'trainableword')
+            all_embeddings.append(trainable_embeddings)
+
         if self.encoder is not None:
             bert_embeddings = self._get_bert_representations(instances,
                                                              max_length)
@@ -978,7 +994,9 @@ class DependencyNeuralModel(nn.Module):
         if self.fixed_word_embeddings is not None:
             word_embeddings = self._get_embeddings(
                 instances, max_length, 'fixedword')
-            # projection = self.fixed_embedding_projection(word_embeddings)
+            if self.transform_size > 0:
+                word_embeddings = self.fixed_embedding_projection(
+                    word_embeddings)
             all_embeddings.append(word_embeddings)
 
         if self.lemma_embeddings is not None:

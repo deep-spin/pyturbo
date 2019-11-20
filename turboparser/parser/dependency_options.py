@@ -133,6 +133,8 @@ class DependencyOptionParser(OptionParser):
                             of dimensions; each other line must have a word
                             followed by the values of its vector. These are
                             kept frozen.""")
+        parser.add_argument('--embedding_size', help="""Dimension of trainable
+                            embeddings.""", default=0, type=int)
         parser.add_argument('--char_embedding_size', type=int, default=100,
                             help='Size of char embeddings')
         parser.add_argument('--char_hidden_size', default=200, type=int,
