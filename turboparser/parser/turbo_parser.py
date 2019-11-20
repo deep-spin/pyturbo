@@ -444,8 +444,8 @@ class TurboParser(object):
         self.validation_accuracies = accuracies
 
     def run(self):
-        self.reassigned_roots = 0
         tic = time.time()
+        self.neural_scorer.reset_metrics()
 
         instances = read_instances(self.options.test_path)
         logger.info('Number of instances: %d' % len(instances))
@@ -459,7 +459,9 @@ class TurboParser(object):
 
         self.write_predictions(instances, predictions)
         toc = time.time()
-        logger.info('Time: %f' % (toc - tic))
+        logger.debug('Scoring time: %f' % self.neural_scorer.time_scoring)
+        logger.debug('Decoding time: %f' % self.neural_scorer.time_decoding)
+        logger.info('Total running time: %f' % (toc - tic))
 
     def write_predictions(self, instances, predictions):
         """
@@ -502,6 +504,7 @@ class TurboParser(object):
             It contains formatted instances.
             In neural models, features is a list of None.
         """
+        start = time.time()
         all_parts = []
         all_gold_labels = []
         formatted_instances = []
@@ -535,6 +538,8 @@ class TurboParser(object):
         data = InstanceData(formatted_instances, all_parts, all_gold_labels)
         if report:
             self._report_make_parts(data)
+        preprocess_time = time.time() - start
+        logger.debug('Time to preprocess: %f' % preprocess_time)
         return data
 
     def reset_performance_metrics(self):
@@ -550,7 +555,6 @@ class TurboParser(object):
         self.accumulated_uas = 0.
         self.accumulated_las = 0.
         self.total_tokens = 0
-        self.reassigned_roots = 0
 
     def train(self):
         """Train the parser and/or tagger and/or lemmatizer"""
@@ -640,11 +644,10 @@ class TurboParser(object):
 
         logger.info('\n')
 
-    def run_batch(self, instance_data):
+    def run_batch(self, instance_data: InstanceData):
         """
         Predict the output for the given instances.
 
-        :type instance_data: InstanceData
         :return: a list of arrays with the predicted outputs if return_loss is
             False. If it's True, a tuple with predictions and losses.
             Each prediction is a dictionary mapping a target name to the
