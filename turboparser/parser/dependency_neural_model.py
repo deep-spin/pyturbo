@@ -19,6 +19,7 @@ from ..classifier.biaffine import DeepBiaffineScorer
 
 gumbel = Gumbel(0, 1)
 encoder_dim = 768
+max_encoder_length = 48
 
 
 def create_padding_mask(lengths):
@@ -945,14 +946,14 @@ class DependencyNeuralModel(nn.Module):
         batch_size = len(instances)
         # word piece lengths
         wp_lengths = torch.tensor([len(inst.bert_ids) for inst in instances],
-                                   dtype=torch.long)
+                                  dtype=torch.long)
         if self.on_gpu:
             wp_lengths = wp_lengths.cuda()
         max_length = wp_lengths.max()
         indices = torch.zeros([batch_size, max_length], dtype=torch.long,
                               device=wp_lengths.device)
 
-        # this contains the indices of the first word piece of real tokens
+        # this contains the indices of the first word piece of real tokens.
         # positions past the sequence size will have 0's and will be ignored
         # afterwards anyway (treated as padding)
         real_indices = torch.zeros([batch_size, max_num_tokens],
@@ -970,12 +971,47 @@ class DependencyNeuralModel(nn.Module):
         ones = torch.ones_like(indices)
         mask = ones.cumsum(1) <= wp_lengths.unsqueeze(1)
 
-        # hidden is a tuple of embeddings and hidden layers
-        _, _, hidden = self.encoder(indices, mask)
+        if max_length > max_encoder_length:
+            # if there are more tokens than the encoder can handle, break them
+            # in smaller sequences.
+            quarter_max = max_encoder_length // 4
+            partial_encoded = []
 
-        # TODO: use a better aggregation scheme
-        last_states = torch.stack(hidden[-4:])
-        encoded = last_states.mean(0)
+            # possibly not all samples in the batch have the same length, but
+            # even more likely one single huge sentence has the batch for itself
+            ind_splits = torch.split(indices, quarter_max, 1)
+            mask_splits = torch.split(mask, quarter_max, 1)
+
+            for i in range(0, len(ind_splits) - 2, 2):
+                # run the inputs through the encoder with at least a quarter of
+                # context before and after
+                partial_inds = torch.cat(ind_splits[i:i + 4], 1)
+                partial_mask = torch.cat(mask_splits[i:i + 4], 1)
+
+                # partial_hidden is a tuple of embeddings and hidden layers
+                _, _, partial_hidden = self.encoder(partial_inds, partial_mask)
+
+                last_states = torch.stack(partial_hidden[-4:])
+                if i == 0:
+                    # include the first quarter
+                    last_states = last_states[:3 * quarter_max]
+                elif i + 4 == len(ind_splits):
+                    # include the last quarter
+                    last_states = last_states[-quarter_max:]
+                else:
+                    # only take the middle two quarters
+                    last_states = last_states[quarter_max:-quarter_max]
+
+                partial_encoded.append(last_states.mean(0))
+
+            encoded = torch.cat(partial_encoded, 1)
+        else:
+            # hidden is a tuple of embeddings and hidden layers
+            _, _, hidden = self.encoder(indices, mask)
+
+            # TODO: use a better aggregation scheme
+            last_states = torch.stack(hidden[-4:])
+            encoded = last_states.mean(0)
 
         # get the first wordpiece for tokens that were split, and CLS for root
         r = torch.arange(batch_size, device=encoded.device).unsqueeze(1)
