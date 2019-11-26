@@ -19,7 +19,7 @@ from ..classifier.biaffine import DeepBiaffineScorer
 
 gumbel = Gumbel(0, 1)
 encoder_dim = 768
-max_encoder_length = 48
+max_encoder_length = 512
 
 
 def create_padding_mask(lengths):
@@ -994,13 +994,13 @@ class DependencyNeuralModel(nn.Module):
                 last_states = torch.stack(partial_hidden[-4:])
                 if i == 0:
                     # include the first quarter
-                    last_states = last_states[:3 * quarter_max]
-                elif i + 4 == len(ind_splits):
+                    last_states = last_states[:, :, :3 * quarter_max]
+                elif i + 4 >= len(ind_splits):
                     # include the last quarter
-                    last_states = last_states[-quarter_max:]
+                    last_states = last_states[:, :, quarter_max:]
                 else:
                     # only take the middle two quarters
-                    last_states = last_states[quarter_max:-quarter_max]
+                    last_states = last_states[:, :, quarter_max:-quarter_max]
 
                 partial_encoded.append(last_states.mean(0))
 
