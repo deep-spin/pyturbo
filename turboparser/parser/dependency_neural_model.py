@@ -552,6 +552,7 @@ class DependencyNeuralModel(nn.Module):
                     parser_dim, self.ho_mlp_size)
                 self.gsib_grandparent_mlp = self._create_mlp(
                     parser_dim, self.ho_mlp_size)
+                self.gsib_coeff = self._create_parameter_tensor([3], 1.)
                 self.grandsibling_scorer = self._create_scorer(self.ho_mlp_size)
 
         # Clear out the gradients before the next batch.
@@ -932,7 +933,13 @@ class DependencyNeuralModel(nn.Module):
         modifiers = modifier_tensors[modifier_indices]
         siblings = sibling_tensors[sibling_indices]
         grandparents = grandparent_tensors[grandparent_indices]
-        gsib_states = torch.tanh(heads + modifiers + siblings + grandparents)
+
+        c = self.gsib_coeff
+        states_hsg = c[0] * torch.tanh(heads + siblings + grandparents)
+        states_msg = c[1] * torch.tanh(modifiers + siblings + grandparents)
+        states_hmsg = c[2] * torch.tanh(
+            heads + modifiers + siblings + grandparents)
+        gsib_states = states_hsg + states_msg + states_hmsg
         gsib_scores = self.grandsibling_scorer(gsib_states)
 
         self.scores[Target.GRANDSIBLINGS].append(gsib_scores.view(-1))
