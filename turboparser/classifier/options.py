@@ -23,9 +23,11 @@ class OptionParser(object):
         mode.add_argument('--test', action='store_true',
                           help='Test/running mode')
         parser.add_argument('--training_path', type=str, default=None,
-                            help='Path to the training data.')
+                            help='Path to the training data; possibly more '
+                                 'than one file.', nargs='+')
         parser.add_argument('--valid_path', type=str,
-                            help='Path to validation data.')
+                            help='Path to validation data; possibly more '
+                                 'than one file.', nargs='+')
         parser.add_argument('--test_path', type=str, default=None,
                             help='Path to the test data.')
         parser.add_argument('--model_path', type=str, default=None,

@@ -36,48 +36,6 @@ class TurboParser(object):
         self._set_options()
         self.neural_scorer = DependencyNeuralScorer()
 
-        if self.options.train:
-            pretrain_words, pretrain_embeddings = self._load_embeddings()
-            self.token_dictionary.initialize(
-                self.options.training_path, self.options.case_sensitive,
-                pretrain_words, char_cutoff=options.char_cutoff,
-                morph_cutoff=options.morph_tag_cutoff,
-                form_cutoff=options.form_cutoff,
-                lemma_cutoff=options.lemma_cutoff)
-
-            model = DependencyNeuralModel(
-                self.options.model_type,
-                self.token_dictionary, pretrain_embeddings,
-                lemma_embedding_size=self.options.lemma_embedding_size,
-                char_hidden_size=self.options.char_hidden_size,
-                transform_size=self.options.transform_size,
-                trainable_word_embedding_size=self.options.embedding_size,
-                char_embedding_size=self.options.char_embedding_size,
-                tag_embedding_size=self.options.tag_embedding_size,
-                rnn_size=self.options.rnn_size,
-                arc_mlp_size=self.options.arc_mlp_size,
-                label_mlp_size=self.options.label_mlp_size,
-                ho_mlp_size=self.options.ho_mlp_size,
-                shared_rnn_layers=self.options.rnn_layers,
-                dropout=self.options.dropout,
-                word_dropout=options.word_dropout,
-                tag_mlp_size=options.tag_mlp_size,
-                predict_upos=options.upos,
-                predict_xpos=options.xpos,
-                predict_morph=options.morph,
-                predict_lemma=options.lemma,
-                predict_tree=options.parse,
-                pretrained_name_or_config=options.bert_model)
-
-            self.neural_scorer.initialize(
-                model, self.options.parsing_loss,
-                self.options.learning_rate, options.decay, options.beta1,
-                options.beta2, options.l2)
-
-            if self.options.verbose:
-                logger.debug('Model summary:')
-                logger.debug(str(model))
-
     def set_as_pruner(self):
         """Set this model to be used as a pruner"""
         self.options.train = False
@@ -480,13 +438,18 @@ class TurboParser(object):
         self.writer.close()
 
     def read_train_instances(self):
-        '''Create batch of training and validation instances.'''
+        '''Read training and validation instances.'''
         import time
         tic = time.time()
         logger.info('Creating instances...')
 
-        train_instances = read_instances(self.options.training_path)
-        valid_instances = read_instances(self.options.valid_path)
+        train_instances = []
+        valid_instances = []
+        for path in self.options.training_path:
+            train_instances.extend(read_instances(path))
+        for path in self.options.valid_path:
+            valid_instances.extend(read_instances(path))
+
         logger.info('Number of train instances: %d' % len(train_instances))
         logger.info('Number of validation instances: %d'
                      % len(valid_instances))
@@ -560,6 +523,47 @@ class TurboParser(object):
     def train(self):
         """Train the parser and/or tagger and/or lemmatizer"""
         train_instances, valid_instances = self.read_train_instances()
+        pretrain_words, pretrain_embeddings = self._load_embeddings()
+        self.token_dictionary.initialize(
+            train_instances, self.options.case_sensitive,
+            pretrain_words, char_cutoff=self.options.char_cutoff,
+            morph_cutoff=self.options.morph_tag_cutoff,
+            form_cutoff=self.options.form_cutoff,
+            lemma_cutoff=self.options.lemma_cutoff)
+
+        model = DependencyNeuralModel(
+            self.options.model_type,
+            self.token_dictionary, pretrain_embeddings,
+            lemma_embedding_size=self.options.lemma_embedding_size,
+            char_hidden_size=self.options.char_hidden_size,
+            transform_size=self.options.transform_size,
+            trainable_word_embedding_size=self.options.embedding_size,
+            char_embedding_size=self.options.char_embedding_size,
+            tag_embedding_size=self.options.tag_embedding_size,
+            rnn_size=self.options.rnn_size,
+            arc_mlp_size=self.options.arc_mlp_size,
+            label_mlp_size=self.options.label_mlp_size,
+            ho_mlp_size=self.options.ho_mlp_size,
+            shared_rnn_layers=self.options.rnn_layers,
+            dropout=self.options.dropout,
+            word_dropout=self.options.word_dropout,
+            tag_mlp_size=self.options.tag_mlp_size,
+            predict_upos=self.options.upos,
+            predict_xpos=self.options.xpos,
+            predict_morph=self.options.morph,
+            predict_lemma=self.options.lemma,
+            predict_tree=self.options.parse,
+            pretrained_name_or_config=self.options.bert_model)
+
+        self.neural_scorer.initialize(
+            model, self.options.parsing_loss,
+            self.options.learning_rate, self.options.decay, self.options.beta1,
+            self.options.beta2, self.options.l2)
+
+        if self.options.verbose:
+            logger.debug('Model summary:')
+            logger.debug(str(model))
+
         logger.info('Preprocessing training data')
         train_data = self.preprocess_instances(train_instances)
         logger.info('\nPreprocessing validation data')

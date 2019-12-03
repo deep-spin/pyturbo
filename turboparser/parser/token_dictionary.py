@@ -167,16 +167,23 @@ class TokenDictionary(Dictionary):
             return id_
         return self.deprel_alphabet.lookup(UNKNOWN)
 
-    def initialize(self, input_path, case_sensitive, word_list=None,
-                   char_cutoff=1, form_cutoff=7, lemma_cutoff=7,
-                   morph_cutoff=1):
+    def initialize(self, instances: list, case_sensitive,
+                   word_list: list = None, char_cutoff=1, form_cutoff=7,
+                   lemma_cutoff=7, morph_cutoff=1):
         """
         Initializes the dictionary with indices for word forms and tags.
 
         If a word dictionary with words having pretrained embeddings is given,
         new words found in the training data are added in the beginning of it
 
-        :param input_path: path to an input CoNLL file
+        :param instances: list of instances before formatting
+        :param case_sensitive: whether to generate case sensitive word forms.
+            Character representations are always case sensitive.
+        :param char_cutoff: cutoff frequency for characters in the data
+        :param form_cutoff: cutoff frequency for word forms in the data
+        :param lemma_cutoff: cutoff frequency for lemmas in the data
+        :param morph_cutoff: cutoff frequency for morphological features in the
+            data
         :param word_list: optional list with words in pre-trained embeddings
         """
         logger.info('Creating token dictionary...')
@@ -201,51 +208,49 @@ class TokenDictionary(Dictionary):
 
         # Go through the corpus and build the dictionaries,
         # counting the frequencies.
-        reader = ConllReader()
-        with reader.open(input_path) as r:
-            for instance in r:
-                # start from 1 to skip root
-                for i in range(1, len(instance)):
-                    # Add form to alphabet.
-                    form = instance.get_form(i)
-                    if not case_sensitive:
-                        form_counts[form.lower()] += 1
-                    else:
-                        form_counts[form] += 1
+        for instance in instances:
+            # start from 1 to skip root
+            for i in range(1, len(instance)):
+                # Add form to alphabet.
+                form = instance.get_form(i)
+                if not case_sensitive:
+                    form_counts[form.lower()] += 1
+                else:
+                    form_counts[form] += 1
 
-                    for char in form:
-                        char_counts[char] += 1
+                for char in form:
+                    char_counts[char] += 1
 
-                    # Add lemma to alphabet.
-                    lemma = instance.get_lemma(i)
-                    lemma_counts[lemma] += 1
+                # Add lemma to alphabet.
+                lemma = instance.get_lemma(i)
+                lemma_counts[lemma] += 1
 
-                    # Dependency relation
-                    deprel = instance.get_relation(i)
-                    deprel_counts[deprel] += 1
+                # Dependency relation
+                deprel = instance.get_relation(i)
+                deprel_counts[deprel] += 1
 
-                    # POS tags
-                    tag = instance.get_upos(i)
-                    if tag != '_':
-                        # tag _ is represented by EMPTY and added anyway
-                        upos_counts[tag] += 1
+                # POS tags
+                tag = instance.get_upos(i)
+                if tag != '_':
+                    # tag _ is represented by EMPTY and added anyway
+                    upos_counts[tag] += 1
 
-                    tag = instance.get_xpos(i)
-                    if tag != '_':
-                        xpos_counts[tag] += 1
+                tag = instance.get_xpos(i)
+                if tag != '_':
+                    xpos_counts[tag] += 1
 
-                    # Morph features
-                    morph_singleton = instance.get_morph_singleton(i)
-                    if morph_singleton != '_':
-                        self.morph_singleton_alphabet.insert(morph_singleton)
+                # Morph features
+                morph_singleton = instance.get_morph_singleton(i)
+                if morph_singleton != '_':
+                    self.morph_singleton_alphabet.insert(morph_singleton)
 
-                        # Add each key/value UFeats pair
-                        morph_tags = instance.get_morph_tags(i)
-                        for feature in morph_tags:
-                            if feature not in morph_counts:
-                                morph_counts[feature] = Counter()
-                            value = morph_tags[feature]
-                            morph_counts[feature][value] += 1
+                    # Add each key/value UFeats pair
+                    morph_tags = instance.get_morph_tags(i)
+                    for feature in morph_tags:
+                        if feature not in morph_counts:
+                            morph_counts[feature] = Counter()
+                        value = morph_tags[feature]
+                        morph_counts[feature][value] += 1
 
         # sort morph features to ensure deterministic behavior
         morph_features = sorted(morph_counts)
@@ -300,14 +305,6 @@ class TokenDictionary(Dictionary):
             for word in word_list:
                 self.pretrain_alphabet.insert(word)
 
-        # # update the embedding vocabulary with new words found in training data
-        # dataset_words = self.form_alphabet.keys()
-        # embedding_words = self.embedding_alphabet.keys()
-
-        # # get a deterministic ordering
-        # new_words = sorted(dataset_words - embedding_words)
-        # for new_word in new_words:
-        #     self.embedding_alphabet.insert(new_word)
         self.pretrain_alphabet.stop_growth()
 
         logger.debug('Number of characters: %d' % len(self.character_alphabet))

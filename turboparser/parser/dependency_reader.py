@@ -91,7 +91,7 @@ class AuxiliaryConllReader(AuxiliaryReader):
         return instance
 
 
-def read_instances(path):
+def read_instances(path: str) -> list:
     """
     Read instances from the given path and change them to the format
     used internally.
