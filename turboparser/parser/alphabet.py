@@ -45,6 +45,7 @@ class Alphabet(dict):
 
     def get_label_name(self, label_id):
         '''Get label name from id.'''
-        if label_id == EMPTY:
-            return '_'
-        return self.names[label_id]
+        name = self.names[label_id]
+        if name == EMPTY:
+            name = '_'
+        return name
