@@ -123,7 +123,7 @@ class TurboParser(object):
             self.neural_scorer.model.save(f)
 
     @classmethod
-    def load(cls, options=None, path=None):
+    def load(cls, options=None, path=None, pruner_path=None):
         """Load the full configuration and model."""
         if path is None:
             path = options.model_path
@@ -138,6 +138,7 @@ class TurboParser(object):
 
         if options is None:
             options = loaded_options
+            options.pruner_path = pruner_path
         else:
             options.model_type = loaded_options.model_type
             options.unlabeled = loaded_options.unlabeled
