@@ -179,19 +179,26 @@ def compute_scores(gold_instances, pred_instances, sent_length_bins,
     return data
 
 
-def plot(results_per_run, metric, xlabel, ylabel, xticks, output):
+def plot(results_per_run, metric, xlabel, ylabel, xticks, output,
+         legend_position='lower left'):
     fig, ax = pl.subplots()
     fig.set_size_inches((9.6, 4.8))
 
     r = np.arange(len(xticks))
-    for name in results_per_run:
+
+    line_styles = ['--', '-', '-.', '--', '-', '-.']
+    marker_styles = ['o', 'v', '^', 'x', 'D', 'h']
+
+    for i, name in enumerate(results_per_run):
         data = results_per_run[name]
         results = data[metric]
-        ax.plot(r, results, label=name, linestyle='--', marker='o')
+        line = line_styles[i]
+        marker = marker_styles[i]
+        ax.plot(r, results, label=name, linestyle=line, marker=marker)
 
     pl.xlabel(xlabel)
     pl.ylabel(ylabel)
-    ax.legend(loc='upper right')
+    ax.legend(loc=legend_position)
     pl.xticks(r, xticks)
     pl.grid(True, 'both', linestyle='--')
     pl.savefig(output, dpi=200, bbox_inches='tight')
@@ -204,7 +211,7 @@ def barplot(results_per_run, metric, xlabel, ylabel, output, labels, bottom):
     fig, ax = pl.subplots()
     fig.set_size_inches((6, 10))
     y = np.arange(len(labels))
-    height = 0.4
+    height = 0.1
     half_height = height / 2
     num_bars = len(results_per_run)
     current_y = y - (num_bars - 1) * half_height
@@ -251,6 +258,7 @@ if __name__ == '__main__':
     bottom_rel_recall = 100
     bottom_rel_precision = 100
     for name, pred_file in zip(args.names, args.pred):
+        print('Reading file %s' % pred_file)
         pred_instances = read_instances(pred_file)
         results = compute_scores(gold_instances, pred_instances,
                                  sent_length_bins=sent_length_bins)
@@ -269,7 +277,7 @@ if __name__ == '__main__':
 
     output = args.output + '-depth.png'
     plot(results_per_run, 'depth_las', 'Distance to root', 'LAS', xticks,
-         output)
+         output, 'upper right')
 
     xticks = ['1-10', '11-20', '21-30', '31-40', '41-50', '51+']
     output = args.output + '-sent-length.png'
@@ -281,12 +289,12 @@ if __name__ == '__main__':
     barplot(results_per_run, 'pos_las', 'LAS', '', output,
             sorted(tag_names), bottom_pos)
 
-    output = args.output + '-rel-precision.png'
-    rel_names = list(results_per_run.values())[0]['rel_precision'].keys()
-    rel_names = sorted(rel_names)
-    barplot(results_per_run, 'rel_precision', 'Precision', '', output,
-            rel_names, bottom_rel_precision)
-
-    output = args.output + '-rel-recall.png'
-    barplot(results_per_run, 'rel_recall', 'Recall', '', output,
-            rel_names, bottom_rel_recall)
+    # output = args.output + '-rel-precision.png'
+    # rel_names = list(results_per_run.values())[0]['rel_precision'].keys()
+    # rel_names = sorted(rel_names)
+    # barplot(results_per_run, 'rel_precision', 'Precision', '', output,
+    #         rel_names, bottom_rel_precision)
+    #
+    # output = args.output + '-rel-recall.png'
+    # barplot(results_per_run, 'rel_recall', 'Recall', '', output,
+    #         rel_names, bottom_rel_recall)
