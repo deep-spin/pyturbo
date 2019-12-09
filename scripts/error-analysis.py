@@ -254,6 +254,9 @@ if __name__ == '__main__':
     results_per_run = {}
     sent_length_bins = 10 * np.arange(1, 6)
 
+    pl.rc('font', size=14)
+    pl.rc('axes', labelsize=16)
+
     bottom_pos = 100
     bottom_rel_recall = 100
     bottom_rel_precision = 100
@@ -273,7 +276,7 @@ if __name__ == '__main__':
     xticks = ['root'] + list(range(1, 10)) + ['10+']
     output = args.output + '-dist.png'
     plot(results_per_run, 'dist_las', 'Dependency length', 'LAS', xticks,
-         output)
+         output, 'upper right')
 
     output = args.output + '-depth.png'
     plot(results_per_run, 'depth_las', 'Distance to root', 'LAS', xticks,
