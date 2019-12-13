@@ -62,12 +62,13 @@ if __name__ == '__main__':
                     full_head_labeled_matches += 1
 
     n = len(gold_insts)
-    print('Full sentenece UAS: %.2f' % (100 * full_sent_unlabeled_matches / n))
-    print('Full sentenece LAS: %.2f' % (100 * full_sent_labeled_matches / n))
+    uas = 100 * full_sent_unlabeled_matches / n
+    las = 100 * full_sent_labeled_matches / n
+    print('Full sentence UAS/LAS: %.2f\t%.2f' % (uas, las))
 
-    acc = 100 * full_head_unlabeld_matches / total_heads
-    print('Full modifier set unlabaled match: %.2f' % acc)
-    acc = 100 * full_head_labeled_matches / total_heads
-    print('Full modifier set labeled match: %.2f' % acc)
+    acc_u = 100 * full_head_unlabeld_matches / total_heads
+    acc_l = 100 * full_head_labeled_matches / total_heads
+    print('Full modifier set unlabaled/labeled match: %.2f\t%.2f'
+          % (acc_u, acc_l))
 
     print('UAS: %.2f' % (100 * head_matches / total_tokens))

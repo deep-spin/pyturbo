@@ -32,9 +32,7 @@ def get_depths(heads):
 
 
 def compute_scores(gold_instances, pred_instances, sent_length_bins,
-                   max_dist=10, max_depth=10,
-                   compute_distance=False, compute_depth=False,
-                   compute_length=False, compute_pos=False):
+                   max_dist=10, max_depth=10):
     """
     Return a dictionary with arrays for the UAS and LAS per distance and depth.
     """
@@ -240,14 +238,6 @@ if __name__ == '__main__':
                                      'systems', nargs='+')
     parser.add_argument('output', help='Base name for output png files')
     parser.add_argument('--names', help='Names for the plots', nargs='+')
-    # parser.add_argument('--dist', help='Plot accuracy by h/m distance',
-    #                     action='store_true')
-    # parser.add_argument('--depth', help='Plot accuracy by m depth',
-    #                     action='store_true')
-    # parser.add_argument('--length', help='Plot accuracy by sentence length',
-    #                     action='store_true')
-    # parser.add_argument('--pos', help='Plot accuracy by m UPOS',
-    #                     action='store_true')
     args = parser.parse_args()
 
     gold_instances = read_instances(args.gold)
