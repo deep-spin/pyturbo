@@ -682,7 +682,6 @@ class FactorGraph(object):
         Include head automata for constraining consecutive siblings in the
         graph.
 
-        :type parts: DependencyParts
         :param variables: list of binary variables denoting arcs
         """
         # needed to map indices in parts to indices in variables
