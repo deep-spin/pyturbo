@@ -1,7 +1,6 @@
-from collections import defaultdict
-import ad3.factor_graph as fg
-from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
-    PFactorGrandparentHeadAutomaton
+import lpsmap.ad3.factor_graph as fg
+from lpsmap.ad3ext import factor_tree
+from lpsmap.ad3ext import factor_parsing
 import numpy as np
 import os
 from joblib import Parallel, delayed
@@ -243,7 +242,7 @@ def batch_decode(instance_data: InstanceData, scores: list, n_jobs=1):
     return decoded
 
 
-def decode(instance, parts, scores):
+def decode(instance: DependencyInstance, parts: DependencyParts, scores: dict):
     """
     Decode the scores to the dependency parts under the necessary
     contraints, yielding a valid dependency tree.
@@ -251,7 +250,6 @@ def decode(instance, parts, scores):
     :param instance: DependencyInstance
     :param parts: a DependencyParts object holding all the parts included
         in the scoring functions; usually arcs, siblings and grandparents
-    :type parts: DependencyParts
     :param scores: dictionary mapping target names (such as arcs, relations,
         grandparents etc) to arrays of scores. Arc scores may have padding;
         it is treated internally.
@@ -270,7 +268,6 @@ def decode(instance, parts, scores):
 
     value, posteriors, additional_posteriors, status = \
         graph.solve_lp_map_ad3()
-
     assert len(posteriors) == num_arcs
     assert len(additional_posteriors) == (len(parts) - num_arcs
                                           - parts.num_labeled_arcs)
@@ -425,7 +422,6 @@ class FactorGraph(object):
 
         self.graph = fg.PFactorGraph()
         variables = self.create_tree_factor(instance, parts, scores)
-
         self._index_parts_by_head(parts, instance, scores)
 
         if self.use_grandsiblings or \
@@ -514,7 +510,7 @@ class FactorGraph(object):
         arc_scores = scores[Target.HEADS] + label_scores
         self.best_labels = best_labels
 
-        tree_factor = PFactorTree()
+        tree_factor = factor_tree.PFactorTree()
         variables = []
 
         for i in range(len(self.arcs)):
@@ -597,7 +593,7 @@ class FactorGraph(object):
                 else:
                     gsib_tuples = None
 
-                factor = PFactorGrandparentHeadAutomaton()
+                factor = factor_parsing.PFactorGrandparentHeadAutomaton()
                 self.graph.declare_factor(factor, local_variables,
                                           owned_by_graph=True)
                 factor.initialize(incoming_arcs, outgoing_arcs, gp_tuples,
@@ -669,7 +665,7 @@ class FactorGraph(object):
 
             # important: first declare the factor in the graph,
             # then initialize
-            factor = PFactorHeadAutomaton()
+            factor = factor_parsing.PFactorHeadAutomaton()
             self.graph.declare_factor(factor, local_variables,
                                       owned_by_graph=True)
             factor.initialize(arcs, siblings, validate=False)
