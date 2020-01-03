@@ -267,7 +267,7 @@ def decode(instance: DependencyInstance, parts: DependencyParts, scores: dict):
     num_arcs = parts.num_arcs
 
     value, posteriors, additional_posteriors, status = \
-        graph.solve_lp_map_ad3()
+        graph.solve_qp_ad3()
     assert len(posteriors) == num_arcs
     assert len(additional_posteriors) == (len(parts) - num_arcs
                                           - parts.num_labeled_arcs)
