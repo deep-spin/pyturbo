@@ -1198,20 +1198,6 @@ class DependencyNeuralModel(nn.Module):
             head_scores1d = head_scores[mask]
             label_scores1d = label_scores[mask].view(-1)
 
-            if self.training:
-                # apply the margin on the scores of gold parts
-                gold_arc_parts = torch.tensor(
-                    inst_parts.gold_parts[:inst_parts.num_arcs],
-                    device=head_scores.device)
-
-                offset = inst_parts.offsets[Target.RELATIONS]
-                num_labeled = inst_parts.num_labeled_arcs
-                gold_label_parts = torch.tensor(
-                    inst_parts.gold_parts[offset:offset + num_labeled],
-                    device=head_scores.device)
-                head_scores1d = head_scores1d - gold_arc_parts
-                label_scores1d = label_scores1d - gold_label_parts
-
             new_head_scores.append(head_scores1d)
             new_label_scores.append(label_scores1d)
 

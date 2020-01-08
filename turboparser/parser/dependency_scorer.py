@@ -132,9 +132,20 @@ class DependencyNeuralScorer(object):
                                for parts in predicted_parts]
         predicted_parts = pad_sequence(predicted_part_list, batch_first=True)
 
+        num_words = torch.tensor([len(instance) - 1
+                                  for instance in instance_data.instances],
+                                 dtype=torch.float32)
+        predicted_arc_list = []
+        for i, instance_parts in enumerate(instance_data.parts):
+            n = instance_parts.num_arcs
+            predicted_arc_list.append(predicted_parts[i, :n])
+        mu = pad_sequence(predicted_arc_list, batch_first=True)
+
         # diff is (batch_size, num_parts)
-        diff = predicted_parts - gold_parts
-        losses = torch.sum(part_scores * diff, 1)
+        pred_diff = predicted_parts - gold_parts
+        mu_norm2 = torch.sum(mu ** 2, 1)
+        norm_diff = (num_words - mu_norm2) / 2
+        losses = torch.sum(part_scores * pred_diff, 1) + norm_diff
 
         check_negative_loss(losses)
         losses = {Target.DEPENDENCY_PARTS: losses.sum()}

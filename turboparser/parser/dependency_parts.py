@@ -103,6 +103,7 @@ class DependencyParts(object):
         self.arc_mask = mask
         self.labeled = labeled
         self.num_relations = num_relations
+        self.gold_parts = None
 
         # offsets indicate the position in which the scores of a given target
         # should start in the array with all part scores
