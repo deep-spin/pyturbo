@@ -134,7 +134,7 @@ class DependencyNeuralScorer(object):
 
         num_words = torch.tensor([len(instance) - 1
                                   for instance in instance_data.instances],
-                                 dtype=torch.float32)
+                                 dtype=torch.float32, device=part_scores.device)
         predicted_arc_list = []
         for i, instance_parts in enumerate(instance_data.parts):
             n = instance_parts.num_arcs
