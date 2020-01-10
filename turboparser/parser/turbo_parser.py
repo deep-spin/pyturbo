@@ -578,6 +578,7 @@ class TurboParser(object):
 
         self._reset_best_validation_metric()
         self.reset_performance_metrics()
+        use_bert = self.options.bert_model is not None
         frozen_encoder = True
         num_bad_evals = 0
 
@@ -605,7 +606,7 @@ class TurboParser(object):
                     break
 
                 # unfreeze encoder weights after first dev set run
-                if frozen_encoder:
+                if frozen_encoder and use_bert:
                     encoder_lr = self.options.bert_learning_rate
                     self.neural_scorer.unfreeze_encoder(encoder_lr,
                                                         self.options.max_steps)
