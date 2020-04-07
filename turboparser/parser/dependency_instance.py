@@ -20,8 +20,8 @@ class MultiwordSpan(object):
         self.form = form
 
 
-class DependencyInstance():
-    '''An dependency parsing instance.'''
+class DependencyInstance(object):
+    """A dependency parsing instance."""
     def __init__(self, forms, lemmas, upos, xpos, morph_tags, morph_singletons,
                  heads, relations, multiwords):
         self.forms = forms

@@ -10,8 +10,8 @@ from transformers import AdamW, WarmupLinearSchedule
 from .constants import Target, dependency_targets, target2string
 from .constants import ParsingObjective as Objective
 from . import decoding
-from ..classifier.utils import get_logger
-from ..classifier.instance import InstanceData
+from turboparser.commons.utils import get_logger
+from turboparser.commons.instance import InstanceData
 from .dependency_neural_model import DependencyNeuralModel
 
 

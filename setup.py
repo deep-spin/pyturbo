@@ -11,5 +11,6 @@ setup(
     author='André Martins and Erick Fonseca',
     author_email='erickrfonseca@gmail.com',
     license='LGPL',
-    packages=['turboparser', 'turboparser.classifier', 'turboparser.parser']
+    packages=['turboparser', 'turboparser.layers', 'turboparser.parser',
+              'turboparser.commons']
 )

@@ -3,7 +3,7 @@ import random
 import numpy as np
 
 from turboparser.parser import DependencyOptionParser, TurboParser
-from turboparser.classifier.utils import get_logger, configure_logger
+from turboparser.commons.utils import get_logger, configure_logger
 
 
 def main():

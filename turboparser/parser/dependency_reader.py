@@ -1,4 +1,4 @@
-from ..classifier.reader import AuxiliaryReader, Reader
+from turboparser.commons.reader import AuxiliaryReader, Reader
 from .dependency_instance import DependencyInstance, MultiwordSpan
 from .constants import ROOT
 

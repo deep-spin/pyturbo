@@ -1,14 +1,6 @@
 import argparse
 
 
-class Options(object):
-    """
-    Class for holding hyperparameters and setup options for structured
-    classifiers.
-    """
-    pass
-
-
 class OptionParser(object):
     '''Parser for the command line arguments used in structured classifiers.'''
     def __init__(self, prog=None, description=None):

@@ -71,8 +71,7 @@ class GrandSibling(DependencyPart):
 
 
 class DependencyParts(object):
-    def __init__(self, instance, model_type, mask=None, labeled=True,
-                 num_relations=None):
+    def __init__(self, instance, model_type, mask=None, num_relations=None):
         """
         A DependencyParts object stores all the parts into which a dependency
         tree is factored.
@@ -88,7 +87,6 @@ class DependencyParts(object):
         :param instance: a DependencyInstanceNumeric object
         :param model_type: a ModelType object, indicating which type of parts
             should be created (siblings, grandparents, etc)
-        :param labeled: whether LabeledArc parts should be used
         :param mask: either None (no prune) or a bool numpy matrix with shape
             (n, n) -- n is number of words with root. Cell (h, m) indicates
             if the arc from h to m is considered, if True, or pruned out, if
@@ -101,7 +99,6 @@ class DependencyParts(object):
 
         # the mask is to be interpreted as (head, modifier)
         self.arc_mask = mask
-        self.labeled = labeled
         self.num_relations = num_relations
 
         # offsets indicate the position in which the scores of a given target
@@ -160,7 +157,7 @@ class DependencyParts(object):
         exist. This can be necessary when the single root constraint forces the
         parser to reassign some head.
         """
-        if not self.labeled or (head, modifier) in self.best_labels:
+        if (head, modifier) in self.best_labels:
             return
 
         self.best_labels[(head, modifier)] = 0
@@ -186,14 +183,12 @@ class DependencyParts(object):
 
         # all non-masked arcs count as a part
         self.num_arcs = self.arc_mask.sum()
-        if self.labeled:
-            # labeled arcs are represented in the same order as arcs,
-            # with each arc (i, j) repeated k times, for each of k labels
-            self.num_labeled_arcs = self.num_arcs * self.num_relations
-            self.type_order.append(Target.RELATIONS)
-            self.offsets[Target.RELATIONS] = self.num_arcs
-        else:
-            self.num_labeled_arcs = 0
+
+        # labeled arcs are represented in the same order as arcs,
+        # with each arc (i, j) repeated k times, for each of k labels
+        self.num_labeled_arcs = self.num_arcs * self.num_relations
+        self.type_order.append(Target.RELATIONS)
+        self.offsets[Target.RELATIONS] = self.num_arcs
 
         offset = self.num_arcs + self.num_labeled_arcs
 
@@ -250,9 +245,6 @@ class DependencyParts(object):
                     gold_parts.append(1)
                 else:
                     gold_parts.append(0)
-
-                if not self.labeled:
-                    continue
 
                 for rel in range(self.num_relations):
                     if gold_head and relations[m] == rel:
@@ -469,15 +461,11 @@ class DependencyParts(object):
         """
         # TODO: avoid repeated code with dependency_decoder
         p = np.zeros(len(self), dtype=np.float)
-        if self.labeled:
-            # place the margin on LabeledArcs scores
-            # their offset in the gold vector is immediately after Arcs
-            offset = self.offsets[Target.RELATIONS]
-            num_parts = self.num_labeled_arcs
-        else:
-            # place the margin on Arc scores
-            offset = self.offsets[Target.HEADS]
-            num_parts = self.num_arcs
+
+        # place the margin on LabeledArcs scores
+        # their offset in the gold vector is immediately after Arcs
+        offset = self.offsets[Target.RELATIONS]
+        num_parts = self.num_labeled_arcs
 
         gold_values = self.gold_parts[offset:offset + num_parts]
         p[offset:offset + num_parts] = 0.5 - gold_values

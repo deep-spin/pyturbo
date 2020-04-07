@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 
-from ..classifier import utils
-from ..classifier.instance import InstanceData
+from turboparser.commons import utils
+from turboparser.commons.instance import InstanceData
 from .token_dictionary import TokenDictionary
 from .constants import Target, target2string, ParsingObjective as Objective
 from .dependency_reader import read_instances
 from .dependency_writer import DependencyWriter
 from . import decoding
 from .dependency_parts import DependencyParts
+from .dependency_instance import DependencyInstance
 from .dependency_neural_model import DependencyNeuralModel
 from .dependency_scorer import DependencyNeuralScorer
 from .dependency_instance_numeric import DependencyInstanceNumeric
@@ -18,13 +19,14 @@ import pickle
 import numpy as np
 import time
 from transformers import BertTokenizer
+from typing import List
 
 
 logger = utils.get_logger()
 
 
 class TurboParser(object):
-    '''Dependency parser.'''
+    """Dependency parser."""
     target_priority = [Target.RELATIONS, Target.HEADS, Target.LEMMA,
                        Target.XPOS, Target.UPOS, Target.MORPH]
 
@@ -109,7 +111,7 @@ class TurboParser(object):
         if self.options.lemma:
             self.additional_targets.append(Target.LEMMA)
 
-    def save(self, model_path=None):
+    def save(self, model_path: str = None):
         """Save the full configuration and model."""
         if not model_path:
             model_path = self.options.model_path
@@ -123,7 +125,7 @@ class TurboParser(object):
             self.neural_scorer.model.save(f)
 
     @classmethod
-    def load(cls, options=None, path=None, pruner_path=None):
+    def load(cls, options=None, path: str = None, pruner_path: str = None):
         """Load the full configuration and model."""
         if path is None:
             path = options.model_path
@@ -141,7 +143,6 @@ class TurboParser(object):
             options.pruner_path = pruner_path
         else:
             options.model_type = loaded_options.model_type
-            options.unlabeled = loaded_options.unlabeled
             options.morph = loaded_options.morph
             options.xpos = loaded_options.xpos
             options.upos = loaded_options.upos
@@ -176,7 +177,7 @@ class TurboParser(object):
         self._should_save = False
 
     #TODO: remove this function and access gold data directly in the instance
-    def get_gold_labels(self, instance):
+    def get_gold_labels(self, instance: DependencyInstanceNumeric):
         """
         Return a list of dictionary mapping the name of each target to a numpy
         vector with the gold values.
@@ -202,7 +203,7 @@ class TurboParser(object):
 
         return gold_dict
 
-    def run_pruner(self, instances):
+    def run_pruner(self, instances: List[DependencyInstance]):
         """
         Prune out some arcs with the pruner model.
 
@@ -268,7 +269,7 @@ class TurboParser(object):
         entropies = pruner.neural_scorer.entropies
         return masks, entropies
 
-    def _report_make_parts(self, data):
+    def _report_make_parts(self, data: InstanceData):
         """
         Log some statistics about the calls to make parts in a dataset.
 
@@ -318,7 +319,8 @@ class TurboParser(object):
             msg += '\n%d arcs incorrectly pruned' % self.pruner_mistakes
             logger.info(msg)
 
-    def compute_validation_metrics(self, valid_data, valid_pred):
+    def compute_validation_metrics(self, valid_data: InstanceData,
+                                   valid_pred: List[dict]):
         """
         Compute and store internally validation metrics. Also call the neural
         scorer to update learning rate.
@@ -327,7 +329,6 @@ class TurboParser(object):
         tagging accuracy.
 
         :param valid_data: InstanceData
-        :type valid_data: InstanceData
         :param valid_pred: list with predicted outputs (decoded) for each item
             in the data. Each item is a dictionary mapping target names to the
             prediction vectors.
@@ -423,7 +424,8 @@ class TurboParser(object):
         logger.debug('Decoding time: %f' % self.neural_scorer.time_decoding)
         logger.info('Total running time: %f' % (toc - tic))
 
-    def write_predictions(self, instances, predictions):
+    def write_predictions(self, instances: List[DependencyInstance],
+                          predictions: List[dict]):
         """
         Write predictions to a file.
 
@@ -458,7 +460,8 @@ class TurboParser(object):
         logger.info('Time: %f' % (toc - tic))
         return train_instances, valid_instances
 
-    def preprocess_instances(self, instances, report=True):
+    def preprocess_instances(self, instances: List[DependencyInstance],
+                             report: bool = True):
         """
         Create parts for all instances in the batch.
 
@@ -475,7 +478,6 @@ class TurboParser(object):
         formatted_instances = []
         self.pruner_mistakes = 0
         num_relations = self.token_dictionary.get_num_deprels()
-        labeled = not self.options.unlabeled
         if self.options.bert_model is None:
             bert_tokenizer = None
         else:
@@ -493,7 +495,7 @@ class TurboParser(object):
                 instance, self.token_dictionary, self.options.case_sensitive,
                 bert_tokenizer)
             parts = DependencyParts(numeric_instance, self.options.model_type,
-                                    mask, labeled, num_relations)
+                                    mask, num_relations)
             gold_labels = self.get_gold_labels(numeric_instance)
 
             formatted_instances.append(numeric_instance)
@@ -620,7 +622,7 @@ class TurboParser(object):
 
         logger.info(msg)
 
-    def run_on_validation(self, valid_data):
+    def run_on_validation(self, valid_data: InstanceData):
         """
         Run the model on validation data
         """
@@ -676,7 +678,7 @@ class TurboParser(object):
 
         return predictions
 
-    def label_instance(self, instance, output):
+    def label_instance(self, instance: DependencyInstance, output: dict):
         """
         :type instance: DependencyInstance
         :param output: dictionary mapping target names to predictions
@@ -714,7 +716,7 @@ class TurboParser(object):
                 instance.lemmas[m] = lemma
 
 
-def load_pruner(model_path):
+def load_pruner(model_path: str):
     """
     Load and return a pruner model.
 
@@ -728,11 +730,13 @@ def load_pruner(model_path):
     return pruner
 
 
-def cut_sequences_at_eos(predictions, eos_index, empty_index):
+def cut_sequences_at_eos(predictions: str, eos_index: int, empty_index: int):
     """
     Convert a tensor of lemmas to lists ending when EOS character is used.
 
     :param predictions: an array (num_tokens, max_num_chars)
+    :param eos_index: index representing end of sentence
+    :param empty_index: index representing an empty (padding) position
     :return: a list with num_tokens arrays. Each array contains the char ids.
     """
     lemmas = []

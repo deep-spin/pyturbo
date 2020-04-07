@@ -1,7 +1,5 @@
-from .alphabet import Alphabet
-from ..classifier.utils import get_logger
-from ..classifier.dictionary import Dictionary
-from .dependency_reader import ConllReader
+from turboparser.parser.alphabet import Alphabet
+from turboparser.commons.utils import get_logger
 from .constants import UNKNOWN, SPECIAL_SYMBOLS, EMPTY, EOS, BOS
 import pickle
 from collections import Counter, OrderedDict
@@ -10,10 +8,9 @@ from collections import Counter, OrderedDict
 logger = get_logger()
 
 
-class TokenDictionary(Dictionary):
+class TokenDictionary(object):
     '''A dictionary for storing token information.'''
     def __init__(self):
-        Dictionary.__init__(self)
         self.character_alphabet = Alphabet()
         self.pretrain_alphabet = Alphabet()
         self.form_alphabet = Alphabet()

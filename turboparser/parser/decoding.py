@@ -1,15 +1,14 @@
-from collections import defaultdict
 import ad3.factor_graph as fg
 from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
     PFactorGrandparentHeadAutomaton
 import numpy as np
 import os
 from joblib import Parallel, delayed
-from scipy.special import logsumexp, softmax
+from scipy.special import logsumexp
 
-from ..classifier.utils import get_logger
+from turboparser.commons.utils import get_logger
 from .dependency_instance import DependencyInstance
-from ..classifier.instance import InstanceData
+from turboparser.commons.instance import InstanceData
 from .dependency_parts import NextSibling, DependencyParts, GrandSibling
 from .constants import Target
 
@@ -482,18 +481,9 @@ class FactorGraph(object):
         :param scores: a dictionary mapping target names to scores produced by
             the network. The scores must be 1-d arrays.
         """
-        if parts.labeled:
-            # place the margin on LabeledArcs scores
-            key = Target.RELATIONS
-            num_parts = parts.num_labeled_arcs
-        else:
-            # place the margin on Arc scores
-            key = Target.HEADS
-            num_parts = parts.num_arcs
-
-        offset = parts.offsets[key]
-        gold_values = parts.gold_parts[offset:offset + num_parts]
-        scores[key] += 0.5 - gold_values
+        offset = parts.offsets[Target.RELATIONS]
+        gold_values = parts.gold_parts[offset:offset + parts.num_labeled_arcs]
+        scores[Target.RELATIONS] += 0.5 - gold_values
 
     def create_tree_factor(self, instance, parts, scores):
         """

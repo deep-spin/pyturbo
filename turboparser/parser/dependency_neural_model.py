@@ -13,8 +13,8 @@ from joeynmt.search import greedy
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
     ParsingObjective
-from ..classifier.lstm import CharLSTM, HighwayLSTM, LSTM
-from ..classifier.biaffine import DeepBiaffineScorer
+from ..layers.lstm import CharLSTM, HighwayLSTM, LSTM
+from ..layers.biaffine import DeepBiaffineScorer
 
 
 gumbel = Gumbel(0, 1)

@@ -1,13 +1,6 @@
 import random
 
 
-class Instance(object):
-    '''An abstract instance.'''
-    def __init__(self, input_, output=None):
-        self.input = input_
-        self.output = output
-
-
 class InstanceData(object):
     """
     Class for storing a list of instances, their corresponding parts and gold

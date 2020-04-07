@@ -1,10 +1,9 @@
-from ..classifier.writer import Writer
 
 num_fields = 10
 multiword_blanks = '\t'.join(['_'] * 8)
 
 
-class DependencyWriter(Writer):
+class DependencyWriter(object):
     def __init__(self):
         self.file = None
 

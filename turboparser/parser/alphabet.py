@@ -1,6 +1,6 @@
 '''This implements a dictionary of labels.'''
 
-from .constants import EMPTY
+from turboparser.parser.constants import EMPTY
 
 
 class Alphabet(dict):
