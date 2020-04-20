@@ -227,14 +227,14 @@ class Lemmatizer(nn.Module):
         mask = stacked_counts < lengths3d
 
         encoder_input = torch.cat([projected_context, embedded_chars], 1)
-        encoder_output, encoder_state = self.encoder(
+        encoder_output, encoder_state, _ = self.encoder(
             encoder_input, token_lengths1d, mask)
 
         if gold_chars is None:
             # allow for short words with longer lemmas
             unroll_steps = max(5, int(1.5 * max_token_length))
             predictions, _ = greedy(
-                mask, self.embeddings, self.bos_idx, unroll_steps,
+                mask, self.embeddings, self.bos_idx, self.eos_idx, unroll_steps,
                 self.decoder, encoder_output, encoder_state)
 
             # predictions is a numpy array
@@ -260,9 +260,10 @@ class Lemmatizer(nn.Module):
             # unroll for the number of gold steps.
             unroll_steps = gold_chars2d.shape[-1]
 
+            # the decoder returns outputs, states, att distribution and values
             outputs = self.decoder(
                 embedded_target, encoder_output, encoder_state,
-                mask, unroll_steps)
+                mask, unroll_steps)[0]
 
             # outputs is a tuple (logits, state, att_distribution, att_sum)
             logits = outputs[0]
@@ -1321,20 +1322,20 @@ class DependencyNeuralModel(nn.Module):
                     scorer_states = tagger_states
                 self.scores[Target.MORPH] = self.morph_scorer(scorer_states)
 
-            # if self.predict_lemma:
-            #     if self.training:
-            #         lemmas, lemma_lengths = get_padded_lemma_indices(
-            #             instances, max_length)
-            #         lemmas = lemmas.to(lengths.device)
-            #         lemma_lengths = lemma_lengths.to(lengths.device)
-            #     else:
-            #         lemmas, lemma_lengths = None, None
-            #
-            #     # skip root
-            #     logits = self.lemmatizer(
-            #         char_indices[:, 1:], tagger_batch_states,
-            #         token_lengths[:, 1:], lemmas, lemma_lengths)
-            #     self.scores[Target.LEMMA] = logits
+            if self.predict_lemma:
+                if self.training:
+                    lemmas, lemma_lengths = get_padded_lemma_indices(
+                        instances, max_length)
+                    lemmas = lemmas.to(lengths.device)
+                    lemma_lengths = lemma_lengths.to(lengths.device)
+                else:
+                    lemmas, lemma_lengths = None, None
+
+                # skip root
+                logits = self.lemmatizer(
+                    char_indices[:, 1:], tagger_states,
+                    token_lengths[:, 1:], lemmas, lemma_lengths)
+                self.scores[Target.LEMMA] = logits
 
         if self.predict_tree:
             if self.parser_rnn is None:

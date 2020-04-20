@@ -64,7 +64,7 @@ class DependencyOptionParser(OptionParser):
                             help='Distinguish upper/lower case of word forms.')
 
         # Parser options.
-        parser.add_argument('--model_type', type=str, default='standard',
+        parser.add_argument('--model_type', type=str, default='af',
                             help="""Model type. This a string formed by the one
                             or several of the following pieces:
                             af enables arc-factored parts (required),
@@ -80,10 +80,6 @@ class DependencyOptionParser(OptionParser):
                             basic is af,
                             standard is af+cs+gp,
                             full is af+cs+gp+as+hb+gs+ts.""")
-        parser.add_argument('--unlabeled', action='store_const',
-                            default=0, const=1,
-                            help="""Make the parser output just the backbone
-                            dependencies.""")
         parser.add_argument('--parsing_loss', default='global-margin',
                             choices=['local', 'global-margin', 'global-prob'],
                             help="""Type of parse loss function. 
@@ -110,7 +106,7 @@ class DependencyOptionParser(OptionParser):
                             help="""Path to a pretrained model to be used as
                             pruner. This is independent from the main model; it
                             should be called at inference time again.""")
-        parser.add_argument('--pruner_batch_size', default=0, type=int,
+        parser.add_argument('--pruner_batch_size', type=int,
                             help="""Batch size to be used in the pruner. If not 
                             given, the one used in the training of the pruner will
                             be used.""")
@@ -123,8 +119,7 @@ class DependencyOptionParser(OptionParser):
                             pruned out.""")
         parser.add_argument('--lemma_embedding_size', type=int, default=0,
                             help='Dimension of the lemma embeddings, if used')
-        parser.add_argument('--pruner_max_heads', type=int,
-                            default=10,
+        parser.add_argument('--pruner_max_heads', type=int, default=10,
                             help="""Maximum number of possible head words for a
                             given word, in basic pruning.""")
         parser.add_argument('--embeddings', help="""File with text embeddings,
@@ -152,7 +147,7 @@ class DependencyOptionParser(OptionParser):
                             help='Size of dependency arc MLP layers')
         parser.add_argument('--label_mlp_size', type=int, default=400,
                             help='Size of dependency label MLP layers')
-        parser.add_argument('--ho_mlp_size', type=int, default=100,
+        parser.add_argument('--ho_mlp_size', type=int, default=200,
                             help='Size of dependency higher-order MLP layers')
         parser.add_argument('--tag_mlp_size', type=int, default=0,
                             help='Size of MLP layer for tagging')

@@ -83,7 +83,7 @@ class TurboParser(object):
                 logger.warning(msg)
         else:
             if self.options.parsing_loss != Objective.GLOBAL_MARGIN:
-                msg = 'Only global margin objective implemented for ' \
+                msg = 'Global margin objective only implemented for ' \
                       'higher order models'
                 logger.error(msg)
                 exit(1)
