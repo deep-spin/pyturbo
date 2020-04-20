@@ -1,3 +1,5 @@
+from .constants import ROOT
+
 class MultiwordSpan(object):
     """
     Class for storing a multiword token, including its text form and text span.
@@ -33,6 +35,22 @@ class DependencyInstance(object):
         self.heads = heads
         self.relations = relations
         self.multiwords = multiwords
+
+    @classmethod
+    def from_tokens(cls, tokens):
+        """Create an instance from tokens only, without any annotation"""
+        tokens = [ROOT] + tokens
+        r = range(len(tokens))
+        empty_list = ['_' for _ in r]
+        empty_list[0] = ROOT
+        heads = [-1 for _ in r]
+        morph_tags = [{} for _ in r]
+
+        instance = DependencyInstance(
+            tokens, empty_list, empty_list, empty_list, morph_tags,
+            empty_list, heads, empty_list, [])
+
+        return instance
 
     def __len__(self):
         return len(self.forms)

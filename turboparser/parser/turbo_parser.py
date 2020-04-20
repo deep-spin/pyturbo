@@ -19,7 +19,7 @@ import pickle
 import numpy as np
 import time
 from transformers import BertTokenizer
-from typing import List
+from typing import List, Union
 
 
 logger = utils.get_logger()
@@ -34,7 +34,6 @@ class TurboParser(object):
         self.options = options
         self.token_dictionary = TokenDictionary()
         self.writer = DependencyWriter()
-        self.model = None
         self._set_options()
         self.neural_scorer = DependencyNeuralScorer()
 
@@ -675,6 +674,52 @@ class TurboParser(object):
                 lemma_prediction = predictions[i][Target.LEMMA]
                 lemmas = cut_sequences_at_eos(lemma_prediction, eos, empty)
                 predictions[i][Target.LEMMA] = lemmas
+
+        return predictions
+
+    def run_on_tokens(self, tokens: Union[List[List[str]], List[str]]) -> \
+            List[dict]:
+        """
+        Run the parser on the provided tokens
+
+        :param tokens: list of tokens (one sentence) or a list of lists of
+            tokens
+        :return: a list of prediction dictionaries
+        """
+        if isinstance(tokens[0], str):
+            # by default, this function operates on batches for efficiency
+            tokens = [tokens]
+
+        instances = []
+        for sentence_tokens in tokens:
+            instance = DependencyInstance.from_tokens(sentence_tokens)
+            instances.append(instance)
+
+        data = self.preprocess_instances(instances)
+        data.prepare_batches(3000, sort=False)
+        predictions = []
+
+        for batch in data.batches:
+            batch_predictions = self.run_batch(batch)
+            predictions.extend(batch_predictions)
+
+        target_alphabets = [
+            (Target.UPOS, self.token_dictionary.upos_alphabet),
+            (Target.XPOS, self.token_dictionary.xpos_alphabet),
+            (Target.MORPH, self.token_dictionary.morph_singleton_alphabet),
+            (Target.RELATIONS, self.token_dictionary.deprel_alphabet)]
+
+        for sentence_predictions in predictions:
+            # replace tag numbers by their names
+            for target, alphabet in target_alphabets:
+                if target in sentence_predictions:
+                    ids = sentence_predictions[target]
+                    labels = [alphabet.get_label_name(id_) for id_ in ids]
+                    sentence_predictions[target] = labels
+
+            if Target.DEPENDENCY_PARTS in sentence_predictions:
+                # dependency parts not useful most of the time downstream
+                del sentence_predictions[Target.DEPENDENCY_PARTS]
 
         return predictions
 

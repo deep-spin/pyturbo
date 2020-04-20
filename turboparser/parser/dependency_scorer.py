@@ -336,23 +336,6 @@ class DependencyNeuralScorer(object):
 
             raise
 
-            # # WARNING: this currently does not work because GPU memory is not
-            # # freed upon RuntimeErrors
-
-            # out of memory error; split the batch in two
-
-            # batch_size = len(instance_data)
-            # if batch_size == 1:
-            #     length = len(instance_data.instances[0])
-            #     msg = 'Cannot fit into memory instance of length %d' % length
-            #     raise RuntimeError(msg)
-
-            # index = batch_size // 2
-            # self._predict_and_backward(
-            #     instance_data[:index], full_batch_size)
-            # self._predict_and_backward(
-            #     instance_data[index:], full_batch_size)
-
     def train_batch(self, instance_data: InstanceData):
         """
         Train the model for one batch. In case the batch size is too big to fit
