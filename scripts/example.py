@@ -21,7 +21,6 @@ if __name__ == '__main__':
 
     dep_parser = TurboParser.load(path=args.model, pruner_path=args.pruner)
     lines = [line.strip().split() for line in sys.stdin.readlines()]
-    print(lines)
     predictions = dep_parser.run_on_tokens(lines)
 
     for prediction in predictions:
