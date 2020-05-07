@@ -5,10 +5,10 @@ from torch.nn.utils import rnn as rnn_utils
 from torch.distributions.gumbel import Gumbel
 import numpy as np
 from transformers import BertModel, BertConfig
-from joeynmt.embeddings import Embeddings as Seq2seqEmbeddings
-from joeynmt.encoders import RecurrentEncoder
-from joeynmt.decoders import RecurrentDecoder
-from joeynmt.search import greedy
+# from joeynmt.embeddings import Embeddings as Seq2seqEmbeddings
+# from joeynmt.encoders import RecurrentEncoder
+# from joeynmt.decoders import RecurrentDecoder
+# from joeynmt.search import greedy
 
 from .token_dictionary import TokenDictionary, UNKNOWN
 from .constants import Target, SPECIAL_SYMBOLS, PADDING, BOS, EOS, \
@@ -114,169 +114,169 @@ def create_char_indices(instances, max_sentence_length):
     return char_indices, token_lengths
 
 
-class Lemmatizer(nn.Module):
-    """
-    Lemmatizer that uses a recurrent encoder-decoder framework.
-    """
-    def __init__(self, vocab_size, embedding_size, hidden_size, dropout_rate,
-                 context_size, token_dictionary):
-        """
-        :param vocab_size: size of the char vocabulary
-        :param embedding_size: size of the char embeddings
-        :param hidden_size: hidden state of the encoder. Decoder is twice that.
-        :param dropout_rate: dropout
-        :param context_size: size of the context vector given as additional
-            input
-        :type token_dictionary: TokenDictionary
-        """
-        super(Lemmatizer, self).__init__()
-        self.padding_idx = token_dictionary.get_character_id(PADDING)
-        self.eos_idx = token_dictionary.get_character_id(EOS)
-        self.bos_idx = token_dictionary.get_character_id(BOS)
-
-        self.dropout = nn.Dropout(dropout_rate)
-        self.embeddings = Seq2seqEmbeddings(
-            embedding_size, vocab_size=vocab_size, padding_idx=self.padding_idx)
-        self.encoder = RecurrentEncoder(
-            hidden_size=hidden_size, emb_size=embedding_size,
-            num_layers=2, dropout=dropout_rate, bidirectional=True)
-        self.decoder = RecurrentDecoder(
-            emb_size=embedding_size, hidden_size=2 * hidden_size,
-            encoder=self.encoder, attention='luong', num_layers=2,
-            vocab_size=vocab_size, dropout=dropout_rate, input_feeding=True)
-        self.context_transform = nn.Linear(
-            context_size, embedding_size, bias=False)
-
-    def append_eos(self, chars, lengths):
-        """
-        Append an EOS token at the appropriate position after each sequence.
-
-        The returned tensor will have the max length increased by one.
-
-        :param chars: tensor (batch, max_length)
-        :param lengths: tensor (batch)
-        :return: tensor (batch, max_length + 1)
-        """
-        batch_size, max_length = chars.shape
-        padding_column = self.padding_idx * torch.ones_like(chars[:, 0])
-        extended = torch.cat([chars, padding_column.unsqueeze(1)], dim=1)
-
-        # trick to get the last non-padding position
-        extended[torch.arange(batch_size), lengths] = self.eos_idx
-
-        return extended
-
-    def prepend_bos(self, chars):
-        """
-        Prepend a BOS token at the beginning of the character sequences.
-
-        The returned tensor will have the max length increased by one.
-
-        :param chars: tensor (batch, max_length)
-        :return: tensor (batch, max_length + 1)
-        """
-        bos_column = self.bos_idx * torch.ones_like(chars[:, 0])
-        extended = torch.cat([bos_column.unsqueeze(1), chars], dim=1)
-
-        return extended
-
-    def forward(self, chars, context, token_lengths, gold_chars=None,
-                gold_lengths=None):
-        """
-        :param chars: tensor (batch, max_sentence_length, max_token_length)
-            with char ids
-        :param context: tensor (batch, max_sentence_length, max_token_length.
-            num_units) with contextual representation of each word
-        :param token_lengths: tensor (batch, max_sentence_length) with length
-            of each word
-        :param gold_chars: only used in training. tensor
-            (batch, max_sentence_length, max_lemma_length)
-        :param gold_lengths: only used in training; length of each gold lemma.
-            tensor (batch, max_sentence_length)
-        :return:
-            If training: tensor (batch, max_sentence_length, max_token_length,
-            vocab_size) with logits for each character.
-            At inference time: tensor (batch, max_sentence_length,
-            unroll_steps + 1) with character indices and possibly EOS.
-        """
-        batch_size, max_sentence_length, max_token_length = chars.shape
-        new_shape = [batch_size * max_sentence_length, max_token_length]
-        chars = chars.reshape(new_shape)
-        token_lengths1d = token_lengths.reshape(-1)
-
-        # run only on non-padding tokens
-        real_tokens = token_lengths1d > 0
-        num_real_tokens = real_tokens.sum().item()
-        token_lengths1d = token_lengths1d[real_tokens]
-
-        # project contexts into (num_real_tokens, 1, num_units)
-        projected_context = self.context_transform(self.dropout(context))
-        projected_context = projected_context.view(
-            batch_size * max_sentence_length, 1, -1)
-        projected_context = projected_context[real_tokens]
-
-        # (num_real_tokens, max_token_length, num_units)
-        chars = chars[real_tokens]
-
-        embedded_chars = self.embeddings(chars)
-
-        # create a binary mask
-        counts = torch.arange(max_token_length).view(1, 1, -1).to(chars.device)
-        stacked_counts = counts.repeat(num_real_tokens, 1, 1)
-        lengths3d = token_lengths1d.view(-1, 1, 1)
-        mask = stacked_counts < lengths3d
-
-        encoder_input = torch.cat([projected_context, embedded_chars], 1)
-        encoder_output, encoder_state, _ = self.encoder(
-            encoder_input, token_lengths1d, mask)
-
-        if gold_chars is None:
-            # allow for short words with longer lemmas
-            unroll_steps = max(5, int(1.5 * max_token_length))
-            predictions, _ = greedy(
-                mask, self.embeddings, self.bos_idx, self.eos_idx, unroll_steps,
-                self.decoder, encoder_output, encoder_state)
-
-            # predictions is a numpy array
-            output = predictions.reshape([num_real_tokens, -1])
-
-            real_tokens_np = real_tokens.cpu().numpy()
-            shape = [batch_size * max_sentence_length, unroll_steps]
-            padded_output = np.zeros(shape, np.int)
-            padded_output[real_tokens_np] = output
-            padded_output = padded_output.reshape(
-                [batch_size, max_sentence_length, unroll_steps])
-        else:
-            gold_chars2d = gold_chars.reshape(
-                batch_size * max_sentence_length, -1)
-            gold_chars2d = gold_chars2d[real_tokens]
-            gold_lengths1d = gold_lengths.view(-1)[real_tokens]
-            gold_chars2d_eos = self.append_eos(gold_chars2d, gold_lengths1d)
-            self.cached_gold_chars = gold_chars2d_eos
-            self.cached_real_token_inds = real_tokens
-            gold_chars2d = self.prepend_bos(gold_chars2d)
-            embedded_target = self.embeddings(gold_chars2d)
-
-            # unroll for the number of gold steps.
-            unroll_steps = gold_chars2d.shape[-1]
-
-            # the decoder returns outputs, states, att distribution and values
-            outputs = self.decoder(
-                embedded_target, encoder_output, encoder_state,
-                mask, unroll_steps)[0]
-
-            # outputs is a tuple (logits, state, att_distribution, att_sum)
-            logits = outputs[0]
-
-            # (batch, max_sentence_length, max_predicted_length, vocab_size)
-            padded_output = torch.zeros(
-                batch_size * max_sentence_length, unroll_steps,
-                logits.shape[-1], device=chars.device)
-            padded_output[real_tokens] = logits
-            padded_output = padded_output.reshape(
-                [batch_size, max_sentence_length, unroll_steps, -1])
-
-        return padded_output
+# class Lemmatizer(nn.Module):
+#     """
+#     Lemmatizer that uses a recurrent encoder-decoder framework.
+#     """
+#     def __init__(self, vocab_size, embedding_size, hidden_size, dropout_rate,
+#                  context_size, token_dictionary):
+#         """
+#         :param vocab_size: size of the char vocabulary
+#         :param embedding_size: size of the char embeddings
+#         :param hidden_size: hidden state of the encoder. Decoder is twice that.
+#         :param dropout_rate: dropout
+#         :param context_size: size of the context vector given as additional
+#             input
+#         :type token_dictionary: TokenDictionary
+#         """
+#         super(Lemmatizer, self).__init__()
+#         self.padding_idx = token_dictionary.get_character_id(PADDING)
+#         self.eos_idx = token_dictionary.get_character_id(EOS)
+#         self.bos_idx = token_dictionary.get_character_id(BOS)
+#
+#         self.dropout = nn.Dropout(dropout_rate)
+#         self.embeddings = Seq2seqEmbeddings(
+#             embedding_size, vocab_size=vocab_size, padding_idx=self.padding_idx)
+#         self.encoder = RecurrentEncoder(
+#             hidden_size=hidden_size, emb_size=embedding_size,
+#             num_layers=2, dropout=dropout_rate, bidirectional=True)
+#         self.decoder = RecurrentDecoder(
+#             emb_size=embedding_size, hidden_size=2 * hidden_size,
+#             encoder=self.encoder, attention='luong', num_layers=2,
+#             vocab_size=vocab_size, dropout=dropout_rate, input_feeding=True)
+#         self.context_transform = nn.Linear(
+#             context_size, embedding_size, bias=False)
+#
+#     def append_eos(self, chars, lengths):
+#         """
+#         Append an EOS token at the appropriate position after each sequence.
+#
+#         The returned tensor will have the max length increased by one.
+#
+#         :param chars: tensor (batch, max_length)
+#         :param lengths: tensor (batch)
+#         :return: tensor (batch, max_length + 1)
+#         """
+#         batch_size, max_length = chars.shape
+#         padding_column = self.padding_idx * torch.ones_like(chars[:, 0])
+#         extended = torch.cat([chars, padding_column.unsqueeze(1)], dim=1)
+#
+#         # trick to get the last non-padding position
+#         extended[torch.arange(batch_size), lengths] = self.eos_idx
+#
+#         return extended
+#
+#     def prepend_bos(self, chars):
+#         """
+#         Prepend a BOS token at the beginning of the character sequences.
+#
+#         The returned tensor will have the max length increased by one.
+#
+#         :param chars: tensor (batch, max_length)
+#         :return: tensor (batch, max_length + 1)
+#         """
+#         bos_column = self.bos_idx * torch.ones_like(chars[:, 0])
+#         extended = torch.cat([bos_column.unsqueeze(1), chars], dim=1)
+#
+#         return extended
+#
+#     def forward(self, chars, context, token_lengths, gold_chars=None,
+#                 gold_lengths=None):
+#         """
+#         :param chars: tensor (batch, max_sentence_length, max_token_length)
+#             with char ids
+#         :param context: tensor (batch, max_sentence_length, max_token_length.
+#             num_units) with contextual representation of each word
+#         :param token_lengths: tensor (batch, max_sentence_length) with length
+#             of each word
+#         :param gold_chars: only used in training. tensor
+#             (batch, max_sentence_length, max_lemma_length)
+#         :param gold_lengths: only used in training; length of each gold lemma.
+#             tensor (batch, max_sentence_length)
+#         :return:
+#             If training: tensor (batch, max_sentence_length, max_token_length,
+#             vocab_size) with logits for each character.
+#             At inference time: tensor (batch, max_sentence_length,
+#             unroll_steps + 1) with character indices and possibly EOS.
+#         """
+#         batch_size, max_sentence_length, max_token_length = chars.shape
+#         new_shape = [batch_size * max_sentence_length, max_token_length]
+#         chars = chars.reshape(new_shape)
+#         token_lengths1d = token_lengths.reshape(-1)
+#
+#         # run only on non-padding tokens
+#         real_tokens = token_lengths1d > 0
+#         num_real_tokens = real_tokens.sum().item()
+#         token_lengths1d = token_lengths1d[real_tokens]
+#
+#         # project contexts into (num_real_tokens, 1, num_units)
+#         projected_context = self.context_transform(self.dropout(context))
+#         projected_context = projected_context.view(
+#             batch_size * max_sentence_length, 1, -1)
+#         projected_context = projected_context[real_tokens]
+#
+#         # (num_real_tokens, max_token_length, num_units)
+#         chars = chars[real_tokens]
+#
+#         embedded_chars = self.embeddings(chars)
+#
+#         # create a binary mask
+#         counts = torch.arange(max_token_length).view(1, 1, -1).to(chars.device)
+#         stacked_counts = counts.repeat(num_real_tokens, 1, 1)
+#         lengths3d = token_lengths1d.view(-1, 1, 1)
+#         mask = stacked_counts < lengths3d
+#
+#         encoder_input = torch.cat([projected_context, embedded_chars], 1)
+#         encoder_output, encoder_state, _ = self.encoder(
+#             encoder_input, token_lengths1d, mask)
+#
+#         if gold_chars is None:
+#             # allow for short words with longer lemmas
+#             unroll_steps = max(5, int(1.5 * max_token_length))
+#             predictions, _ = greedy(
+#                 mask, self.embeddings, self.bos_idx, self.eos_idx, unroll_steps,
+#                 self.decoder, encoder_output, encoder_state)
+#
+#             # predictions is a numpy array
+#             output = predictions.reshape([num_real_tokens, -1])
+#
+#             real_tokens_np = real_tokens.cpu().numpy()
+#             shape = [batch_size * max_sentence_length, unroll_steps]
+#             padded_output = np.zeros(shape, np.int)
+#             padded_output[real_tokens_np] = output
+#             padded_output = padded_output.reshape(
+#                 [batch_size, max_sentence_length, unroll_steps])
+#         else:
+#             gold_chars2d = gold_chars.reshape(
+#                 batch_size * max_sentence_length, -1)
+#             gold_chars2d = gold_chars2d[real_tokens]
+#             gold_lengths1d = gold_lengths.view(-1)[real_tokens]
+#             gold_chars2d_eos = self.append_eos(gold_chars2d, gold_lengths1d)
+#             self.cached_gold_chars = gold_chars2d_eos
+#             self.cached_real_token_inds = real_tokens
+#             gold_chars2d = self.prepend_bos(gold_chars2d)
+#             embedded_target = self.embeddings(gold_chars2d)
+#
+#             # unroll for the number of gold steps.
+#             unroll_steps = gold_chars2d.shape[-1]
+#
+#             # the decoder returns outputs, states, att distribution and values
+#             outputs = self.decoder(
+#                 embedded_target, encoder_output, encoder_state,
+#                 mask, unroll_steps)[0]
+#
+#             # outputs is a tuple (logits, state, att_distribution, att_sum)
+#             logits = outputs[0]
+#
+#             # (batch, max_sentence_length, max_predicted_length, vocab_size)
+#             padded_output = torch.zeros(
+#                 batch_size * max_sentence_length, unroll_steps,
+#                 logits.shape[-1], device=chars.device)
+#             padded_output[real_tokens] = logits
+#             padded_output = padded_output.reshape(
+#                 [batch_size, max_sentence_length, unroll_steps, -1])
+#
+#         return padded_output
 
 
 class DependencyNeuralModel(nn.Module):
@@ -492,10 +492,10 @@ class DependencyNeuralModel(nn.Module):
                 num_tags = token_dictionary.get_num_morph_singletons()
                 self.morph_scorer = self._create_scorer(scorer_dim, num_tags,
                                                         bias=True)
-            if predict_lemma:
-                self.lemmatizer = Lemmatizer(
-                    num_chars, char_embedding_size, char_hidden_size, dropout,
-                    tagger_dim, token_dictionary)
+            # if predict_lemma:
+            #     self.lemmatizer = Lemmatizer(
+            #         num_chars, char_embedding_size, char_hidden_size, dropout,
+            #         tagger_dim, token_dictionary)
 
         if self.predict_tree:
             if self.rnn_size > 0:

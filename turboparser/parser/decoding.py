@@ -3,12 +3,10 @@ from ad3.extensions import PFactorTree, PFactorHeadAutomaton, \
     PFactorGrandparentHeadAutomaton
 import numpy as np
 import os
-from joblib import Parallel, delayed
-from scipy.special import logsumexp
 
 from turboparser.commons.utils import get_logger
 from .dependency_instance import DependencyInstance
-from turboparser.commons.instance import InstanceData
+from turboparser.commons.utils import logsumexp
 from .dependency_parts import NextSibling, DependencyParts, GrandSibling
 from .constants import Target
 
@@ -219,27 +217,6 @@ def decode_labels(parts, scores):
     best_label_scores = np.take_along_axis(relation_scores, inds, 1)
 
     return best_labels, best_label_scores.squeeze(1)
-
-
-def batch_decode(instance_data: InstanceData, scores: list, n_jobs=1):
-    """
-    Decode the scores of dependency parts in parallel.
-
-    This function uses multiprocessing instead of multithreading.
-
-    :param instance_data: InstanceData object
-    :param scores: list of dictionaries mapping target names to scores
-    :param n_jobs: number of jobs to run in parallel. 1 avoids parallelization
-    :return: list of arrays with the prediction probability of each part
-    """
-    num_sentences = len(instance_data)
-    p = Parallel(n_jobs=n_jobs)
-    decoded = p(delayed(decode)(instance_data.instances[i],
-                                instance_data.parts[i],
-                                scores[i])
-                for i in range(num_sentences))
-
-    return decoded
 
 
 def decode(instance, parts, scores):

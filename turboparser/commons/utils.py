@@ -46,6 +46,33 @@ def get_logger():
     return logging.getLogger('TurboParser')
 
 
+def logsumexp(a, axis=None):
+    """Compute the log of the sum of exponentials of input elements.
+
+
+    (Copied and simplified from scipy to avoid the dependency for just one
+    function)
+    """
+    a_max = np.amax(a, axis=axis, keepdims=True)
+
+    if a_max.ndim > 0:
+        a_max[~np.isfinite(a_max)] = 0
+    elif not np.isfinite(a_max):
+        a_max = 0
+
+    tmp = np.exp(a - a_max)
+
+    # suppress warnings about log of zero
+    with np.errstate(divide='ignore'):
+        s = np.sum(tmp, axis=axis)
+        out = np.log(s)
+
+    a_max = np.squeeze(a_max, axis=axis)
+    out += a_max
+
+    return out
+
+
 def read_embeddings(path, extra_symbols=None, max_words=1000000):
     '''
     Read a text file, or xzipped text file, with word embeddings.

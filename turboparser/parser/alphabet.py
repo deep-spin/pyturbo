@@ -1,6 +1,6 @@
 '''This implements a dictionary of labels.'''
 
-from turboparser.parser.constants import EMPTY
+from turboparser.parser.constants import EMPTY, UNKNOWN
 
 
 class Alphabet(dict):
@@ -46,6 +46,6 @@ class Alphabet(dict):
     def get_label_name(self, label_id):
         '''Get label name from id.'''
         name = self.names[label_id]
-        if name == EMPTY:
+        if name == EMPTY or name == UNKNOWN:
             name = '_'
         return name

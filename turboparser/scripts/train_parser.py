@@ -43,7 +43,7 @@ def test_parser(options):
     logger.info('Starting parser in inference mode')
     dependency_parser = TurboParser.load(options)
     log_options(dependency_parser)
-    dependency_parser.run()
+    dependency_parser.test()
 
 
 def log_options(parser):

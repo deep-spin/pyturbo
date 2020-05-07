@@ -5,7 +5,7 @@ from torch.nn.utils.rnn import pad_sequence
 import time
 from collections import defaultdict
 from contextlib import suppress
-from transformers import AdamW, WarmupLinearSchedule
+from transformers import AdamW, get_linear_schedule_with_warmup
 
 from .constants import Target, dependency_targets, target2string
 from .constants import ParsingObjective as Objective
@@ -563,7 +563,7 @@ class DependencyNeuralScorer(object):
         self.optimizer.param_groups[0]['lr'] = learning_rate
 
         warmup = 0.1 * training_steps
-        self.schedule = WarmupLinearSchedule(
+        self.schedule = get_linear_schedule_with_warmup(
             self.optimizer, warmup, training_steps)
 
     def initialize(self, model: DependencyNeuralModel,

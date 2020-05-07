@@ -19,7 +19,7 @@ import pickle
 import numpy as np
 import time
 from transformers import BertTokenizer
-from typing import List, Union
+from typing import List
 
 
 logger = utils.get_logger()
@@ -33,7 +33,6 @@ class TurboParser(object):
     def __init__(self, options):
         self.options = options
         self.token_dictionary = TokenDictionary()
-        self.writer = DependencyWriter()
         self._set_options()
         self.neural_scorer = DependencyNeuralScorer()
 
@@ -403,7 +402,7 @@ class TurboParser(object):
 
         self.validation_accuracies = accuracies
 
-    def run(self):
+    def test(self):
         tic = time.time()
         self.neural_scorer.reset_metrics()
 
@@ -424,20 +423,28 @@ class TurboParser(object):
         logger.info('Total running time: %f' % (toc - tic))
 
     def write_predictions(self, instances: List[DependencyInstance],
-                          predictions: List[dict]):
+                          predictions: List[dict],
+                          path: str = None):
         """
         Write predictions to a file.
 
         :param instances: the instances in the original format (i.e., not the
             "formatted" one, but retaining the original contents)
         :param predictions: list with predictions per instance
+        :param path: path to file to write (not needed during training or
+            testing with run-parser)
         """
-        self.writer.open(self.options.output_path)
+        if path is None:
+            path = self.options.output_path
+
+        writer = DependencyWriter()
+        writer.open(path)
+        
         for instance, inst_prediction in zip(instances, predictions):
             self.label_instance(instance, inst_prediction)
-            self.writer.write(instance)
+            writer.write(instance)
 
-        self.writer.close()
+        writer.close()
 
     def read_train_instances(self):
         '''Read training and validation instances.'''
@@ -460,7 +467,7 @@ class TurboParser(object):
         return train_instances, valid_instances
 
     def preprocess_instances(self, instances: List[DependencyInstance],
-                             report: bool = True):
+                             report: bool = True) -> InstanceData:
         """
         Create parts for all instances in the batch.
 
@@ -677,24 +684,16 @@ class TurboParser(object):
 
         return predictions
 
-    def run_on_tokens(self, tokens: Union[List[List[str]], List[str]]) -> \
-            List[dict]:
+    def parse(self, instances: List[DependencyInstance]) -> List[dict]:
         """
-        Run the parser on the provided tokens
+        Parse the given instances.
 
-        :param tokens: list of tokens (one sentence) or a list of lists of
-            tokens
+        The instances are updated in-place with their attributes for heads,
+        relations, xpos, upos and morph. A dictionary mapping the targets
+        to predicted values is also returned.
+
         :return: a list of prediction dictionaries
         """
-        if isinstance(tokens[0], str):
-            # by default, this function operates on batches for efficiency
-            tokens = [tokens]
-
-        instances = []
-        for sentence_tokens in tokens:
-            instance = DependencyInstance.from_tokens(sentence_tokens)
-            instances.append(instance)
-
         data = self.preprocess_instances(instances)
         data.prepare_batches(3000, sort=False)
         predictions = []
@@ -709,52 +708,56 @@ class TurboParser(object):
             (Target.MORPH, self.token_dictionary.morph_singleton_alphabet),
             (Target.RELATIONS, self.token_dictionary.deprel_alphabet)]
 
-        for sentence_predictions in predictions:
+        for instance, instance_predictions in zip(instances, predictions):
+            # update sentence attributes
+            self.label_instance(instance, instance_predictions)
+
             # replace tag numbers by their names
             for target, alphabet in target_alphabets:
-                if target in sentence_predictions:
-                    ids = sentence_predictions[target]
+                if target in instance_predictions:
+                    ids = instance_predictions[target]
                     labels = [alphabet.get_label_name(id_) for id_ in ids]
-                    sentence_predictions[target] = labels
+                    instance_predictions[target] = labels
 
-            if Target.DEPENDENCY_PARTS in sentence_predictions:
+            if Target.DEPENDENCY_PARTS in instance_predictions:
                 # dependency parts not useful most of the time downstream
-                del sentence_predictions[Target.DEPENDENCY_PARTS]
+                del instance_predictions[Target.DEPENDENCY_PARTS]
 
         return predictions
 
-    def label_instance(self, instance: DependencyInstance, output: dict):
+    def label_instance(self, instance: DependencyInstance, predictions: dict):
         """
-        :type instance: DependencyInstance
-        :param output: dictionary mapping target names to predictions
-        :return:
+        Label an instance in-place.
+
+        :param instance: instance to be labeled according to the predictions
+        :param predictions: dictionary mapping targets to predictions
         """
         for m in range(1, len(instance)):
             if self.options.parse:
-                instance.heads[m] = output[Target.HEADS][m - 1]
-                relation = output[Target.RELATIONS][m - 1]
+                instance.heads[m] = predictions[Target.HEADS][m - 1]
+                relation = predictions[Target.RELATIONS][m - 1]
                 relation_name = self.token_dictionary.deprel_alphabet.\
                     get_label_name(relation)
                 instance.relations[m] = relation_name
 
             if self.options.upos:
                 # -1 because there's no tag for the root
-                tag = output[Target.UPOS][m - 1]
+                tag = predictions[Target.UPOS][m - 1]
                 tag_name = self.token_dictionary. \
                     upos_alphabet.get_label_name(tag)
                 instance.upos[m] = tag_name
             if self.options.xpos:
-                tag = output[Target.XPOS][m - 1]
+                tag = predictions[Target.XPOS][m - 1]
                 tag_name = self.token_dictionary. \
                     xpos_alphabet.get_label_name(tag)
                 instance.xpos[m] = tag_name
             if self.options.morph:
-                tag = output[Target.MORPH][m - 1]
+                tag = predictions[Target.MORPH][m - 1]
                 tag_name = self.token_dictionary. \
                     morph_singleton_alphabet.get_label_name(tag)
                 instance.morph_singletons[m] = tag_name
             if self.options.lemma:
-                predictions = output[Target.LEMMA][m - 1]
+                predictions = predictions[Target.LEMMA][m - 1]
                 lemma = ''.join(self.token_dictionary.
                                 character_alphabet.get_label_name(c)
                                 for c in predictions)

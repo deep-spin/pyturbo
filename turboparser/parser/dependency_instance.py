@@ -1,5 +1,10 @@
 from .constants import ROOT
 
+
+num_conllu_fields = 10
+multiword_blanks = '\t'.join(['_'] * 8)
+
+
 class MultiwordSpan(object):
     """
     Class for storing a multiword token, including its text form and text span.
@@ -47,8 +52,8 @@ class DependencyInstance(object):
         morph_tags = [{} for _ in r]
 
         instance = DependencyInstance(
-            tokens, empty_list, empty_list, empty_list, morph_tags,
-            empty_list, heads, empty_list, [])
+            tokens, empty_list, empty_list.copy(), empty_list.copy(),
+            morph_tags, empty_list.copy(), heads, empty_list.copy(), [])
 
         return instance
 
@@ -109,3 +114,30 @@ class DependencyInstance(object):
 
     def get_all_lemmas(self):
         return self.lemmas
+
+    def to_conll(self) -> str:
+        """Return a string in CONLLU format"""
+        # keep track of multiword tokens
+        multiword = self.multiwords[0] if len(self.multiwords) else None
+        multiword_idx = 0
+        lines = []
+
+        for i in range(1, len(self)):
+            if multiword and i == multiword.first:
+                span = '%d-%d' % (multiword.first, multiword.last)
+                line = '%s\t%s\t%s\n' % (span, multiword.form, multiword_blanks)
+                lines.append(line)
+
+                multiword_idx += 1
+                if multiword_idx >= len(self.multiwords):
+                    multiword = None
+                else:
+                    multiword = self.multiwords[multiword_idx]
+
+            line = '\t'.join([str(i), self.forms[i], self.lemmas[i],
+                              self.upos[i], self.xpos[i],
+                              self.morph_singletons[i], str(self.heads[i]),
+                              self.relations[i], '_', '_'])
+            lines.append(line)
+
+        return '\n'.join(lines)
